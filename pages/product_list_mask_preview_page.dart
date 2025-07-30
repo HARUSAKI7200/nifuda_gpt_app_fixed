@@ -1,3 +1,4 @@
+// lib/pages/product_list_mask_preview_page.dart
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../utils/ocr_masker.dart';
@@ -46,6 +47,12 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
 
   @override
   Widget build(BuildContext context) {
+    // スナックバーのbottomマージン (custom_snackbar.dartで15px)
+    // + スナックバーの高さ目安 (約60px、実際のコンテンツやpaddingで変動)
+    // + スナックバーとボタンの間の隙間 (約10px)
+    // + MediaQuery.of(context).padding.bottom (デバイスのシステムナビゲーションバーなどのインセット)
+    final double buttonBottomPosition = 15.0 + 60.0 + 10.0 + MediaQuery.of(context).padding.bottom;
+
     return Scaffold(
       appBar: AppBar(
         title: Text('マスクプレビュー (${widget.imageIndex} / ${widget.totalImages})'),
@@ -76,8 +83,9 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
               ),
             ),
           ),
+          // ここを修正
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: EdgeInsets.only(left: 16.0, right: 16.0, bottom: buttonBottomPosition), // 下部のパディングを動的に設定
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
@@ -86,16 +94,16 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
                   label: const Text('この画像を破棄'),
                   onPressed: () => Navigator.pop(context, null),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red[600], 
+                    backgroundColor: Colors.red[600],
                     foregroundColor: Colors.white,
                   ),
                 ),
                 ElevatedButton.icon(
                   icon: const Icon(Icons.send_rounded),
                   label: const Text('この内容で送信'),
-                  onPressed: _maskedImageBytes == null ? null : () => Navigator.pop(context, _maskedImageBytes), 
+                  onPressed: _maskedImageBytes == null ? null : () => Navigator.pop(context, _maskedImageBytes),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green[700], 
+                    backgroundColor: Colors.green[700],
                     foregroundColor: Colors.white,
                   ),
                 ),
