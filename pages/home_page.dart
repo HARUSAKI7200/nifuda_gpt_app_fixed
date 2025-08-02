@@ -266,6 +266,40 @@ class _HomePageState extends State<HomePage> {
     }
     startMatchingAndShowResultsAction(context, _nifudaData, _productListKariData, _selectedCompany, _currentProjectFolderPath!); // パスを渡す
   }
+  
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  // ★ 機能追加：プロジェクト保存処理の呼び出し
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  Future<void> _handleSaveProject() async {
+    if (_isLoading) return;
+    if (_currentProjectFolderPath == null) {
+      showTopSnackBar(context, '保存するプロジェクトがありません。', isError: true);
+      return;
+    }
+    await saveProjectAction(
+      context,
+      _currentProjectFolderPath!,
+      _projectTitle,
+      _nifudaData,
+      _productListKariData,
+    );
+  }
+
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  // ★ 機能追加：プロジェクト読み込み処理の呼び出し
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  Future<void> _handleLoadProject() async {
+    if (_isLoading) return;
+    final loadedData = await loadProjectAction(context);
+    if (loadedData != null && mounted) {
+      setState(() {
+        _projectTitle = loadedData['projectTitle'] as String;
+        _currentProjectFolderPath = loadedData['currentProjectFolderPath'] as String;
+        _nifudaData = loadedData['nifudaData'] as List<List<String>>;
+        _productListKariData = loadedData['productListKariData'] as List<List<String>>;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -289,6 +323,33 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const Spacer(),
                   ],
+                ),
+                const SizedBox(height: 10),
+                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+                // ★ UI変更：保存・読み込みボタンを追加
+                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+                SizedBox(
+                  width: buttonColumnWidth,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _buildActionButton(
+                          label: '保存',
+                          onPressed: _handleSaveProject,
+                          icon: Icons.save,
+                          isEnabled: _currentProjectFolderPath != null,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _buildActionButton(
+                          label: '読み込み',
+                          onPressed: _handleLoadProject,
+                          icon: Icons.folder_open,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 10),
                 SizedBox(

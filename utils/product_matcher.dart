@@ -28,20 +28,30 @@ class ProductMatcher {
     final Set<String> matchedProductKeys = {};
 
     for (final nifudaItem in nifudaMapList) {
+      final nifudaSeiban = _normalize(nifudaItem['製番']);
       final nifudaItemNumber = _normalize(nifudaItem['項目番号']);
-      
-      // 項目番号が同じ製品リストのアイテムを検索
-      final potentialMatch = productMapList.firstWhere(
-        (p) => _normalize(p['ITEM OF SPARE']) == nifudaItemNumber,
-        orElse: () => <String, String>{},
-      );
+
+      // 1. まず「製番」が一致する製品のグループを探す
+      final productGroup = productMapList
+          .where((p) => _normalize(p['ORDER No.']) == nifudaSeiban)
+          .toList();
+
+      Map<String, String> potentialMatch = {};
+
+      if (productGroup.isNotEmpty) {
+        // 2. そのグループの中から「項目番号」が一致する製品を探す
+        potentialMatch = productGroup.firstWhere(
+          (p) => _normalize(p['ITEM OF SPARE']) == nifudaItemNumber,
+          orElse: () => {}, // 見つからなければ空のMapを返す
+        );
+      }
 
       if (potentialMatch.isEmpty) {
         // 対応する製品が見つからない荷札
         unmatched.add({
           ...nifudaItem,
           '照合ステータス': '製品未検出',
-          '詳細': '対応するITEM OF SPAAREが製品リストにありません',
+          '詳細': '製番と項目番号に一致する製品がリストにありません',
           '不一致項目リスト': [],
         });
         continue;
@@ -52,12 +62,29 @@ class ProductMatcher {
       final productQuantity = _tryParseInt(potentialMatch['注文数']);
       final List<String> mismatchFields = [];
       
-      // 比較ロジック
-      if (_normalize(nifudaItem['製番']) != _normalize(potentialMatch['ORDER No.'])) mismatchFields.add('製番/ORDER No.');
-      if (_normalize(nifudaItem['品名']) != _normalize(potentialMatch['品名記号'])) mismatchFields.add('品名/品名記号');
+      // 品名の比較ロジック
+      final nifudaHinmei = _normalize(nifudaItem['品名']);
+      final productHinmeiKigou = _normalize(potentialMatch['品名記号']);
+      final productKiji = _normalize(potentialMatch['記事']);
+
+      if (nifudaHinmei != productHinmeiKigou && nifudaHinmei != productKiji) {
+        mismatchFields.add('品名/品名記号/記事');
+      }
+      
       if (_normalize(nifudaItem['形式']) != _normalize(potentialMatch['形格'])) mismatchFields.add('形式/形格');
       if (nifudaQuantity != productQuantity) mismatchFields.add('個数/注文数');
-      if (_normalize(nifudaItem['手配コード']) != _normalize(potentialMatch['製品コード番号'])) mismatchFields.add('手配コード/製品コード番号');
+
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      // ★ 修正箇所：手配コードの比較ロジックを変更
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      final nifudaTehaiCode = _normalize(nifudaItem['手配コード']);
+      // 荷札に手配コードが存在する場合のみ、製品コード番号との比較を行う
+      if (nifudaTehaiCode.isNotEmpty) {
+        if (nifudaTehaiCode != _normalize(potentialMatch['製品コード番号'])) {
+          mismatchFields.add('手配コード/製品コード番号');
+        }
+      }
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
       final String productKey = _normalize(potentialMatch['ORDER No.']) + '-' + _normalize(potentialMatch['ITEM OF SPARE']);
       matchedProductKeys.add(productKey);
@@ -66,7 +93,7 @@ class ProductMatcher {
         // 完全一致
         matched.add({
           ...nifudaItem,
-          ...potentialMatch.map((k, v) => MapEntry('$k(製品)', v)), // 製品リスト側のデータを別名で追加
+          ...potentialMatch.map((k, v) => MapEntry('$k(製品)', v)),
           '照合ステータス': '一致',
           '詳細': '全ての項目が一致しました',
           '不一致項目リスト': [],
@@ -95,13 +122,14 @@ class ProductMatcher {
     return {
       'matched': matched,
       'unmatched': unmatched,
-      'missing': missingProducts, // missingはunmatchedに含めたが、個別にも返す
+      'missing': missingProducts,
     };
   }
 
   String _normalize(String? input) {
     if (input == null) return '';
-    return input.replaceAll(RegExp(r'[\s-]'), '').toUpperCase();
+    // 記事(REMARKS)には括弧が含まれることがあるため、括弧も除去する
+    return input.replaceAll(RegExp(r'[\s-()]'), '').toUpperCase();
   }
 
   int? _tryParseInt(String? input) {

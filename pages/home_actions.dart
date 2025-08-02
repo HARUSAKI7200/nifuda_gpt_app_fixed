@@ -1,9 +1,12 @@
 // lib/pages/home_actions.dart
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path/path.dart' as p; // pathパッケージをインポート
+import 'package:path/path.dart' as p;
+import 'package:image/image.dart' as img; // imageパッケージをインポート
 
 import '../utils/gpt_service.dart';
 import '../utils/ocr_masker.dart';
@@ -17,7 +20,7 @@ import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
 
-// --- ヘルパー関数 ---
+// --- (既存のヘルパー関数、プロジェクト保存・読込機能は変更なし) ---
 void _showLoadingDialog(BuildContext context, String message) {
   if (!context.mounted) return;
   showDialog(
@@ -65,7 +68,137 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
-// --- 機能3-5: 荷札複数撮影と一括抽出・確認 ---
+Future<void> saveProjectAction(
+  BuildContext context,
+  String projectFolderPath,
+  String projectTitle,
+  List<List<String>> nifudaData,
+  List<List<String>> productListData,
+) async {
+  if (!context.mounted) return;
+  _showLoadingDialog(context, 'プロジェクトを保存中...');
+
+  try {
+    final projectData = {
+      'projectTitle': projectTitle,
+      'nifudaData': nifudaData,
+      'productListKariData': productListData,
+    };
+
+    final jsonString = jsonEncode(projectData);
+    final filePath = p.join(projectFolderPath, 'project_data.json');
+    final file = File(filePath);
+    await file.writeAsString(jsonString);
+
+    if (context.mounted) {
+      _hideLoadingDialog(context);
+      showTopSnackBar(context, 'プロジェクト「$projectTitle」を保存しました。');
+    }
+  } catch (e) {
+    if (context.mounted) {
+      _hideLoadingDialog(context);
+      _showErrorDialog(context, '保存エラー', 'プロジェクトの保存に失敗しました: $e');
+    }
+  }
+}
+
+Future<Map<String, dynamic>?> loadProjectAction(BuildContext context) async {
+  try {
+    const String baseDcimPath = "/storage/emulated/0/DCIM";
+    final String inspectionRelatedPath = p.join(baseDcimPath, "検品関係");
+    final dir = Directory(inspectionRelatedPath);
+
+    if (!await dir.exists()) {
+      if (context.mounted) {
+        _showErrorDialog(context, 'フォルダなし', 'プロジェクトフォルダ「検品関係」が見つかりません。');
+      }
+      return null;
+    }
+
+    final projectDirs = (await dir.list().toList())
+        .where((entity) => entity is Directory)
+        .cast<Directory>()
+        .toList();
+
+    if (projectDirs.isEmpty) {
+      if (context.mounted) {
+        _showErrorDialog(context, 'プロジェクトなし', '保存されたプロジェクトがありません。');
+      }
+      return null;
+    }
+
+    if (!context.mounted) return null;
+
+    final Directory? selectedDir = await showDialog<Directory>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('プロジェクトを選択'),
+          content: SizedBox(
+            width: double.minPositive,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: projectDirs.length,
+              itemBuilder: (BuildContext context, int index) {
+                return ListTile(
+                  title: Text(p.basename(projectDirs[index].path)),
+                  onTap: () {
+                    Navigator.of(dialogContext).pop(projectDirs[index]);
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selectedDir == null) return null;
+
+    _showLoadingDialog(context, 'プロジェクトを読み込み中...');
+
+    final filePath = p.join(selectedDir.path, 'project_data.json');
+    final file = File(filePath);
+
+    if (!await file.exists()) {
+      if (context.mounted) {
+        _hideLoadingDialog(context);
+        _showErrorDialog(context, 'データなし', '選択されたプロジェクトに保存データがありません。');
+      }
+      return null;
+    }
+
+    final jsonString = await file.readAsString();
+    final data = jsonDecode(jsonString);
+
+    final nifudaData = (data['nifudaData'] as List<dynamic>)
+        .map((row) => (row as List<dynamic>).map((cell) => cell.toString()).toList())
+        .toList();
+    final productListKariData = (data['productListKariData'] as List<dynamic>)
+        .map((row) => (row as List<dynamic>).map((cell) => cell.toString()).toList())
+        .toList();
+
+    final loadedData = {
+      'projectTitle': data['projectTitle'] as String,
+      'currentProjectFolderPath': selectedDir.path,
+      'nifudaData': nifudaData,
+      'productListKariData': productListKariData,
+    };
+
+    if (context.mounted) {
+      _hideLoadingDialog(context);
+      showTopSnackBar(context, 'プロジェクト「${loadedData['projectTitle']}」を読み込みました。');
+    }
+    return loadedData;
+  } catch (e) {
+    if (context.mounted) {
+      _hideLoadingDialog(context);
+      _showErrorDialog(context, '読み込みエラー', 'プロジェクトの読み込みに失敗しました: $e');
+    }
+    return null;
+  }
+}
+
 Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext context, String projectFolderPath) async {
   final List<Map<String, dynamic>>? allGptResults =
       await Navigator.push<List<Map<String, dynamic>>>(
@@ -73,7 +206,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
     MaterialPageRoute(builder: (_) => CameraCapturePage(
         overlayText: '荷札を枠に合わせて撮影',
         isProductListOcr: false,
-        projectFolderPath: projectFolderPath, // パスを渡す
+        projectFolderPath: projectFolderPath,
     )),
   );
 
@@ -146,12 +279,11 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
   }
 }
 
-// --- 機能6: 荷札リスト表示とExcelエクスポート ---
 void showAndExportNifudaListAction(
   BuildContext context,
   List<List<String>> nifudaData,
   String projectTitle,
-  String projectFolderPath, // パスを追加
+  String projectFolderPath,
 ) {
   if (nifudaData.length <= 1) {
     _showErrorDialog(context, 'データなし', '表示する荷札データがありません。');
@@ -163,8 +295,8 @@ void showAndExportNifudaListAction(
       title: '荷札リスト',
       data: nifudaData,
       headers: nifudaData.first, 
-      projectFolderPath: projectFolderPath, // パスを渡す
-      subfolder: '荷札リスト', // サブフォルダ名を指定
+      projectFolderPath: projectFolderPath,
+      subfolder: '荷札リスト',
     ),
   );
 }
@@ -175,7 +307,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
-  String projectFolderPath, // パスを追加
+  String projectFolderPath,
 ) async {
   final picker = ImagePicker();
   final List<XFile> pickedFiles = await picker.pickMultiImage();
@@ -188,39 +320,67 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   List<Future<Map<String, dynamic>?>> gptResultFutures = [];
   String template = selectedCompany == 'T社' ? 't' : 'none';
   int successCount = 0;
+  const int targetWidth = 3507;
+  const int targetHeight = 2480;
 
-  for (int i = 0; i < pickedFiles.length; i++) {
-    final file = pickedFiles[i];
-    if (!context.mounted) return null;
+  if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
+  
+  try {
+    for (int i = 0; i < pickedFiles.length; i++) {
+      final file = pickedFiles[i];
+      if (!context.mounted) return null;
 
-    final Uint8List imageBytes = await file.readAsBytes();
-    
-    final Uint8List? maskedImageBytes = await Navigator.push<Uint8List>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ProductListMaskPreviewPage(
-          originalImageBytes: imageBytes,
-          maskTemplate: template,
-          imageIndex: i + 1,
-          totalImages: pickedFiles.length,
+      Uint8List imageBytes = await file.readAsBytes();
+      
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      // ★ 機能追加：画像リサイズ処理
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      final img.Image? originalImage = img.decodeImage(imageBytes);
+      if (originalImage != null) {
+        if (originalImage.width != targetWidth || originalImage.height != targetHeight) {
+          debugPrint('画像サイズを ${originalImage.width}x${originalImage.height} から ${targetWidth}x${targetHeight} にリサイズします。');
+          final resizedImage = img.copyResize(originalImage, width: targetWidth, height: targetHeight, interpolation: img.Interpolation.average);
+          // リサイズ後の画像をPNG形式でエンコード（JPEGより高品質）
+          imageBytes = Uint8List.fromList(img.encodePng(resizedImage));
+        } else {
+          debugPrint('画像は既に既定サイズ ${targetWidth}x${targetHeight} です。');
+        }
+      } else {
+        debugPrint('画像のデコードに失敗したため、リサイズをスキップします。');
+      }
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+      if (!context.mounted) return null;
+
+      final Uint8List? maskedImageBytes = await Navigator.push<Uint8List>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProductListMaskPreviewPage(
+            originalImageBytes: imageBytes, // リサイズ後のバイトデータを渡す
+            maskTemplate: template,
+            imageIndex: i + 1,
+            totalImages: pickedFiles.length,
+          ),
         ),
-      ),
-    );
+      );
 
-    if (maskedImageBytes != null) {
-      successCount++;
-      final gptFuture = sendImageToGPT(
-        maskedImageBytes,
-        isProductList: true,
-        company: selectedCompany,
-      ).then<Map<String, dynamic>?>((result) {
-        return result;
-      }).catchError((e) {
-        debugPrint('GPT送信エラー(ファイル: ${file.name}): $e');
-        return null;
-      });
-      gptResultFutures.add(gptFuture);
+      if (maskedImageBytes != null) {
+        successCount++;
+        final gptFuture = sendImageToGPT(
+          maskedImageBytes,
+          isProductList: true,
+          company: selectedCompany,
+        ).then<Map<String, dynamic>?>((result) {
+          return result;
+        }).catchError((e) {
+          debugPrint('GPT送信エラー(ファイル: ${file.name}): $e');
+          return null;
+        });
+        gptResultFutures.add(gptFuture);
+      }
     }
+  } finally {
+    if (context.mounted) _hideLoadingDialog(context);
   }
 
   if (gptResultFutures.isEmpty) {
@@ -236,7 +396,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
 
   List<Map<String, String>> allExtractedProductRows = [];
 
-  // ProductListOcrConfirmPageで期待されるフィールドリストをここで参照
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
 
   for(final gptResponse in allGptRawResults){
@@ -299,11 +458,10 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
 }
 
 
-// --- 機能10: 製品リスト表示とExcelエクスポート ---
 void showAndExportProductListAction(
   BuildContext context,
   List<List<String>> productListData,
-  String projectFolderPath, // パスを追加
+  String projectFolderPath,
 ) {
   if (productListData.length <= 1) {
     _showErrorDialog(context, 'データなし', '表示する製品リストデータがありません。');
@@ -315,19 +473,18 @@ void showAndExportProductListAction(
       title: '製品リスト',
       data: productListData,
       headers: productListData.first,
-      projectFolderPath: projectFolderPath, // パスを渡す
-      subfolder: '製番リスト', // サブフォルダ名を指定
+      projectFolderPath: projectFolderPath,
+      subfolder: '製番リスト',
     ),
   );
 }
 
-// --- 機能11: 照合開始 ---
 void startMatchingAndShowResultsAction(
   BuildContext context,
   List<List<String>> nifudaData,
   List<List<String>> productListData,
   String selectedCompany,
-  String projectFolderPath, // パスを追加
+  String projectFolderPath,
 ) {
   if (nifudaData.length <= 1 || productListData.length <= 1) {
     _showErrorDialog(context, 'データ不足', '照合するには荷札と製品リストの両方のデータが必要です。');
@@ -357,7 +514,7 @@ void startMatchingAndShowResultsAction(
     MaterialPageRoute(
       builder: (_) => MatchingResultPage(
         matchingResults: rawResults,
-        projectFolderPath: projectFolderPath, // パスを渡す
+        projectFolderPath: projectFolderPath,
       ),
     ),
   );
