@@ -338,8 +338,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   }
 
   int successCount = 0;
-  const int targetWidth = 3507;
-  const int targetHeight = 2480;
 
   if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
   
@@ -349,19 +347,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
       if (!context.mounted) return null;
 
       Uint8List imageBytes = await file.readAsBytes();
-      
-      final img.Image? originalImage = img.decodeImage(imageBytes);
-      if (originalImage != null) {
-        if (originalImage.width != targetWidth || originalImage.height != targetHeight) {
-          debugPrint('画像サイズを ${originalImage.width}x${originalImage.height} から ${targetWidth}x${targetHeight} にリサイズします。');
-          final resizedImage = img.copyResize(originalImage, width: targetWidth, height: targetHeight, interpolation: img.Interpolation.average);
-          imageBytes = Uint8List.fromList(img.encodePng(resizedImage));
-        } else {
-          debugPrint('画像は既に既定サイズ ${targetWidth}x${targetHeight} です。');
-        }
-      } else {
-        debugPrint('画像のデコードに失敗したため、リサイズをスキップします。');
-      }
 
       if (!context.mounted) return null;
 
