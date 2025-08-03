@@ -129,7 +129,7 @@ class ProductMatcher {
   String _normalize(String? input) {
     if (input == null) return '';
     // 記事(REMARKS)には括弧が含まれることがあるため、括弧も除去する
-    return input.replaceAll(RegExp(r'[\s-()]'), '').toUpperCase();
+    return input.replaceAll(RegExp(r'[\s()]'), '').toUpperCase();
   }
 
   int? _tryParseInt(String? input) {
