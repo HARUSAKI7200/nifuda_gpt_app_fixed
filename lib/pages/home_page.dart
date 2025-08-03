@@ -89,21 +89,21 @@ class _HomePageState extends State<HomePage> {
             _projectTitle = projectCode;
             _currentProjectFolderPath = projectFolderPath;
             _nifudaData = [['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード']];
-            _productListKariData = [['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']];
+            _productListKariData = [['ORDER No.', 'ITEM OF SPAARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']];
           });
-          showTopSnackBar(context, 'プロジェクト「$projectCode」が作成されました。');
+          showCustomSnackBar(context, 'プロジェクト「$projectCode」が作成されました。'); // 修正
         }
       } catch (e) {
         debugPrint('プロジェクトフォルダ作成エラー: $e');
         if (mounted) {
-          showTopSnackBar(context, 'プロジェクトフォルダの作成に失敗しました: $e', isError: true);
+          showCustomSnackBar(context, 'プロジェクトフォルダの作成に失敗しました: $e', isError: true); // 修正
         }
       } finally {
         _setLoading(false);
       }
     } else {
       if (mounted) {
-        showTopSnackBar(context, 'プロジェクト作成がキャンセルされました。');
+        showCustomSnackBar(context, 'プロジェクト作成がキャンセルされました。'); // 修正
       }
     }
   }
@@ -111,7 +111,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _handleCaptureNifuda() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showTopSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
       return;
     }
 
@@ -167,7 +167,7 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ));
             if (proceed != true) {
-               if(mounted) showTopSnackBar(context, '荷札確認処理が中断されました。');
+               if(mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。'); // 修正
                break; // 処理を中断
             }
           } else {
@@ -180,12 +180,12 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _nifudaData.addAll(confirmedNifudaRows);
         });
-        showTopSnackBar(context, '${confirmedNifudaRows.length}件の荷札データが追加されました。');
+        showCustomSnackBar(context, '${confirmedNifudaRows.length}件の荷札データが追加されました。'); // 修正
       } else if (mounted) {
-        showTopSnackBar(context, '有効な荷札データが1件も確定されませんでした。');
+        showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。'); // 修正
       }
     } else if (mounted) {
-      showTopSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
+      showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。'); // 修正
     }
     _setLoading(false);
   }
@@ -219,7 +219,7 @@ class _HomePageState extends State<HomePage> {
   void _handleShowNifudaList() {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showTopSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
       return;
     }
     showAndExportNifudaListAction(context, _nifudaData, _projectTitle, _currentProjectFolderPath!); // パスを渡す
@@ -228,7 +228,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _handlePickProductList() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showTopSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
       return;
     }
     _setLoading(true);
@@ -242,7 +242,7 @@ class _HomePageState extends State<HomePage> {
         }
         _productListKariData.addAll(confirmedRows);
       });
-      showTopSnackBar(context, '${confirmedRows.length}件の製品リストデータが追加されました。');
+      showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータが追加されました。'); // 修正
     }
     if (mounted && _isLoading) {
       _setLoading(false);
@@ -252,7 +252,7 @@ class _HomePageState extends State<HomePage> {
   void _handleShowProductList() {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showTopSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
       return;
     }
     showAndExportProductListAction(context, _productListKariData, _currentProjectFolderPath!); // パスを渡す
@@ -261,7 +261,7 @@ class _HomePageState extends State<HomePage> {
   void _handleStartMatching() {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showTopSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
       return;
     }
     startMatchingAndShowResultsAction(context, _nifudaData, _productListKariData, _selectedCompany, _currentProjectFolderPath!); // パスを渡す
@@ -273,7 +273,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _handleSaveProject() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showTopSnackBar(context, '保存するプロジェクトがありません。', isError: true);
+      showCustomSnackBar(context, '保存するプロジェクトがありません。', isError: true); // 修正
       return;
     }
     await saveProjectAction(

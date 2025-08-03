@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui; // ImageInfoを取得するために必要
 import 'package:flutter/material.dart';
 import '../utils/ocr_masker.dart';
-import '../widgets/custom_snackbar.dart';
+import '../widgets/custom_snackbar.dart'; // custom_snackbar.dartをインポート
 
 class ProductListMaskPreviewPage extends StatefulWidget {
   final Uint8List originalImageBytes;
@@ -58,7 +58,10 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       return bytes;
     } catch (e) {
       if (mounted) {
-        showTopSnackBar(context, 'マスク処理エラー: $e', isError: true);
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★ 修正点：showTopSnackBarをshowCustomSnackBarに変更し、showAtTop: trueを追加
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        showCustomSnackBar(context, 'マスク処理エラー: $e', isError: true, showAtTop: true);
       }
       rethrow;
     } finally {
@@ -161,7 +164,10 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       }
     } catch(e) {
       if (mounted) {
-        showTopSnackBar(context, '動的マスクの適用に失敗: $e', isError: true);
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★ 修正点：showTopSnackBarをshowCustomSnackBarに変更し、showAtTop: trueを追加
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        showCustomSnackBar(context, '動的マスクの適用に失敗: $e', isError: true, showAtTop: true);
       }
     } finally {
        if (mounted) setState(() => _isLoading = false);

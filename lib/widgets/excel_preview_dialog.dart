@@ -78,7 +78,7 @@ class ExcelPreviewDialog extends StatelessWidget {
                       subfolder: subfolder, // 渡されたサブフォルダを使用
                     );
                     if (context.mounted) {
-                      showTopSnackBar(context, 'Excelファイルを保存しました: $filePath');
+                      showCustomSnackBar(context, 'Excelファイルを保存しました: $filePath'); // 修正
                       Navigator.of(context).pop();
                     }
                   } catch (e) {

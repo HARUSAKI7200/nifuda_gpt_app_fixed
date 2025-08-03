@@ -154,7 +154,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       return;
     }
     if (_cameraPreviewAreaOnScreen.isEmpty || _overlayRectOnScreen.isEmpty) {
-         if(mounted) showTopSnackBar(layoutContext, 'レイアウト計算待機中。');
+         if(mounted) showCustomSnackBar(layoutContext, 'レイアウト計算待機中。', showAtTop: true); // 修正
         return;
     }
 
@@ -239,18 +239,18 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       final String fileName = 'nifuda_cropped_${DateTime.now().millisecondsSinceEpoch}.jpg';
       _saveCroppedImage(bytesForProcessing, fileName).then((savedPath) {
           if (savedPath != null && mounted) {
-              showTopSnackBar(layoutContext, '画像を保存しました: $savedPath');
+              showCustomSnackBar(layoutContext, '画像を保存しました: $savedPath', showAtTop: true); // 修正
           }
       }).catchError((e) {
           if (mounted) {
-              showTopSnackBar(layoutContext, '画像保存エラー: ${e.toString()}', isError: true);
+              showCustomSnackBar(layoutContext, '画像保存エラー: ${e.toString()}', isError: true, showAtTop: true); // 修正
           }
       });
       
     } catch (e, s) {
       debugPrint('撮影または処理エラー: $e');
       debugPrintStack(stackTrace: s);
-      if (mounted) showTopSnackBar(layoutContext, '撮影または処理に失敗: ${e.toString()}', isError: true);
+      if (mounted) showCustomSnackBar(layoutContext, '撮影または処理に失敗: ${e.toString()}', isError: true, showAtTop: true); // 修正
     } finally {
       if (mounted) setState(() => _isProcessingImage = false);
     }

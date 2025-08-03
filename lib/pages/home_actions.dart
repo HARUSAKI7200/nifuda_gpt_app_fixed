@@ -92,7 +92,7 @@ Future<void> saveProjectAction(
 
     if (context.mounted) {
       _hideLoadingDialog(context);
-      showTopSnackBar(context, 'プロジェクト「$projectTitle」を保存しました。');
+      showCustomSnackBar(context, 'プロジェクト「$projectTitle」を保存しました。'); // 修正
     }
   } catch (e) {
     if (context.mounted) {
@@ -187,7 +187,7 @@ Future<Map<String, dynamic>?> loadProjectAction(BuildContext context) async {
 
     if (context.mounted) {
       _hideLoadingDialog(context);
-      showTopSnackBar(context, 'プロジェクト「${loadedData['projectTitle']}」を読み込みました。');
+      showCustomSnackBar(context, 'プロジェクト「${loadedData['projectTitle']}」を読み込みました。'); // 修正
     }
     return loadedData;
   } catch (e) {
@@ -212,7 +212,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
 
   if (allGptResults == null || allGptResults.isEmpty) {
     if (context.mounted) {
-      showTopSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
+      showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。'); // 修正
     }
     return null;
   }
@@ -260,7 +260,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
                   ],
                 ));
         if (proceed != true) {
-           if(context.mounted) showTopSnackBar(context, '荷札確認処理が中断されました。');
+           if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。'); // 修正
            return allConfirmedNifudaRows.isNotEmpty ? allConfirmedNifudaRows : null;
         }
       } else {
@@ -273,7 +273,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
     return allConfirmedNifudaRows;
   } else {
     if (context.mounted) {
-        showTopSnackBar(context, '有効な荷札データが1件も確定されませんでした。');
+        showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。'); // 修正
     }
     return null;
   }
@@ -313,7 +313,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   final List<XFile> pickedFiles = await picker.pickMultiImage();
 
   if (pickedFiles.isEmpty) {
-    if (context.mounted) showTopSnackBar(context, '製品リスト画像の選択がキャンセルされました。');
+    if (context.mounted) showCustomSnackBar(context, '製品リスト画像の選択がキャンセルされました。'); // 修正
     return null;
   }
 
@@ -382,13 +382,13 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   }
 
   if (gptResultFutures.isEmpty) {
-    if(context.mounted) showTopSnackBar(context, '処理対象の画像がありませんでした。');
+    if(context.mounted) showCustomSnackBar(context, '処理対象の画像がありませんでした。'); // 修正
     return null;
   }
 
   if (!context.mounted) return null;
   setLoading(true);
-  showTopSnackBar(context, '$successCount / ${pickedFiles.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...');
+  showCustomSnackBar(context, '$successCount / ${pickedFiles.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...'); // 修正
 
   final List<Map<String, dynamic>?> allGptRawResults = await Future.wait(gptResultFutures);
 

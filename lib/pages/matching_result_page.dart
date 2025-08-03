@@ -123,7 +123,7 @@ class MatchingResultPage extends StatelessWidget {
         subfolder: '抽出結果', // サブフォルダ名を指定
       );
       if (context.mounted) {
-        showTopSnackBar(context, 'Excelを保存しました: $filePath');
+        showCustomSnackBar(context, 'Excelを保存しました: $filePath'); // 修正
       }
     } catch (e) {
       if (context.mounted) {
