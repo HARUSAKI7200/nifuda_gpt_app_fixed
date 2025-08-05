@@ -472,7 +472,7 @@ void showAndExportProductListAction(
       data: productListData,
       headers: productListData.first,
       projectFolderPath: projectFolderPath,
-      subfolder: '製番リスト',
+      subfolder: '製品リスト',
     ),
   );
 }
