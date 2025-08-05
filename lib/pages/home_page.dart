@@ -95,7 +95,7 @@ class _HomePageState extends State<HomePage> {
             _projectTitle = projectCode;
             _currentProjectFolderPath = projectFolderPath;
             _nifudaData = [['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード']];
-            _productListKariData = [['ORDER No.', 'ITEM OF SPAARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']];
+            _productListKariData = [['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']];
           });
           showCustomSnackBar(context, 'プロジェクト「$projectCode」が作成されました。'); // 修正
         }
