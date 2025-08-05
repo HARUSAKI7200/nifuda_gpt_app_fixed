@@ -21,6 +21,12 @@ class _HomePageState extends State<HomePage> {
   String _selectedCompany = 'T社'; // デフォルト選択
   final List<String> _companies = ['T社', 'マスク処理なし', '動的マスク処理']; // 会社リスト
 
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  // ★ 機能追加：照合パターンの選択状態を追加
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  String _selectedMatchingPattern = 'T社（製番・項目番号）'; // デフォルトの照合パターン
+  final List<String> _matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）']; // 選択可能な照合パターンリスト
+
   List<List<String>> _nifudaData = [
     ['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード'],
   ];
@@ -264,7 +270,10 @@ class _HomePageState extends State<HomePage> {
       showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
       return;
     }
-    startMatchingAndShowResultsAction(context, _nifudaData, _productListKariData, _selectedCompany, _currentProjectFolderPath!); // パスを渡す
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    // ★ 変更点：選択された照合パターンを渡す
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    startMatchingAndShowResultsAction(context, _nifudaData, _productListKariData, _selectedMatchingPattern, _currentProjectFolderPath!);
   }
   
   // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
@@ -365,12 +374,17 @@ class _HomePageState extends State<HomePage> {
                         const SizedBox(height: 10),
                         _buildActionButton(label: '荷札リスト (${_nifudaData.length > 1 ? _nifudaData.length - 1 : 0}件)', onPressed: _handleShowNifudaList, icon: Icons.list_alt_rounded, isEnabled: _nifudaData.length > 1 && _currentProjectFolderPath != null),
                         const SizedBox(height: 10),
-                        _buildCompanySelector(),
+                        _buildCompanySelector(), // マスク処理選択
                         const SizedBox(height: 10),
                         _buildActionButton(label: '製品リスト画像(JPEG)をOCRする', onPressed: _handlePickProductList, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null),
                         const SizedBox(height: 10),
                         _buildActionButton(label: '製品リスト (${_productListKariData.length > 1 ? _productListKariData.length - 1 : 0}件)', onPressed: _handleShowProductList, icon: Icons.inventory_2_outlined, isEnabled: _productListKariData.length > 1 && _currentProjectFolderPath != null),
                         const SizedBox(height: 20),
+                        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+                        // ★ UI変更：照合パターン選択ドロップダウンを追加
+                        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+                        _buildMatchingPatternSelector(),
+                        const SizedBox(height: 10),
                         _buildActionButton(label: '照合を開始する', onPressed: _handleStartMatching, icon: Icons.compare_arrows_rounded, isEnabled: _nifudaData.length > 1 && _productListKariData.length > 1 && _currentProjectFolderPath != null, isEmphasized: true),
                       ],
                     ),
@@ -463,7 +477,7 @@ class _HomePageState extends State<HomePage> {
             return DropdownMenuItem<String>(
               value: company, 
               child: Text(
-                company, 
+                'マスク処理: $company', // ラベルを分かりやすく変更
                 style: TextStyle(color: Colors.indigo[800], fontWeight: FontWeight.w600, fontSize: 14.5),
                 overflow: TextOverflow.ellipsis,
               )
@@ -471,6 +485,40 @@ class _HomePageState extends State<HomePage> {
           }).toList(),
           onChanged: _isLoading ? null : (String? newValue) => setState(() => _selectedCompany = newValue ?? _selectedCompany),
           icon: Icon(Icons.arrow_drop_down_rounded, color: Colors.indigo[700]),
+          isDense: true,
+          isExpanded: true,
+        ),
+      ),
+    );
+  }
+
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  // ★ UI変更：照合パターン選択ドロップダウンのWidgetを追加
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  Widget _buildMatchingPatternSelector() {
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+      decoration: BoxDecoration(
+        color: Colors.green[50],
+        borderRadius: BorderRadius.circular(8.0),
+        border: Border.all(color: Colors.green.shade200)
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _selectedMatchingPattern,
+          items: _matchingPatterns.map((String pattern) {
+            return DropdownMenuItem<String>(
+              value: pattern,
+              child: Text(
+                '照合パターン: $pattern', // ラベルを追加
+                style: TextStyle(color: Colors.green[800], fontWeight: FontWeight.w600, fontSize: 14.5),
+                overflow: TextOverflow.ellipsis,
+              )
+            );
+          }).toList(),
+          onChanged: _isLoading ? null : (String? newValue) => setState(() => _selectedMatchingPattern = newValue ?? _selectedMatchingPattern),
+          icon: Icon(Icons.arrow_drop_down_rounded, color: Colors.green[700]),
           isDense: true,
           isExpanded: true,
         ),

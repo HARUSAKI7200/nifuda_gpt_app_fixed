@@ -481,7 +481,7 @@ void startMatchingAndShowResultsAction(
   BuildContext context,
   List<List<String>> nifudaData,
   List<List<String>> productListData,
-  String selectedCompany,
+  String matchingPattern, // ★ 引数を `selectedCompany` から `matchingPattern` に変更
   String projectFolderPath,
 ) {
   if (nifudaData.length <= 1 || productListData.length <= 1) {
@@ -505,7 +505,10 @@ void startMatchingAndShowResultsAction(
   }
   
   final matchingLogic = ProductMatcher();
-  final Map<String, dynamic> rawResults = matchingLogic.match(nifudaMapList, productMapList, company: selectedCompany);
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  // ★ 変更点：引数 `matchingPattern` を渡す
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  final Map<String, dynamic> rawResults = matchingLogic.match(nifudaMapList, productMapList, pattern: matchingPattern);
 
   Navigator.push(
     context,
