@@ -82,7 +82,7 @@ Future<Map<String, dynamic>> sendImageToGPT(
   required String company,
 }) async {
   const apiKey = String.fromEnvironment('OPENAI_API_KEY');
-  const modelName = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-5-2025-08-07');
+  const modelName = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-5-mini');
 
   if (apiKey.isEmpty) {
     throw Exception('OpenAI APIキーが設定されていません。');
@@ -98,8 +98,7 @@ Future<Map<String, dynamic>> sendImageToGPT(
       {'role': 'system', 'content': prompt},
       {'role': 'user', 'content': [{'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,$base64Image'}}]}
     ],
-    'max_tokens': isProductList ? 4000 : 1000,
-    'temperature': 0.0,
+    'max_completion_tokens': isProductList ? 4000 : 1000,
     'response_format': {'type': 'json_object'},
   });
 
@@ -116,7 +115,7 @@ Future<Map<String, dynamic>> sendImageToGPT(
         final contentString = jsonResponse['choices'][0]['message']['content'];
         try {
           if (kDebugMode) {
-            print('GPT Raw Content String: $contentString'); // デバッグログを維持
+            print('GPT Raw Content String: $contentString');
           }
           return jsonDecode(contentString);
         } catch (e) {
