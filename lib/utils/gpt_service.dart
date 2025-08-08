@@ -82,7 +82,7 @@ Future<Map<String, dynamic>> sendImageToGPT(
   required String company,
 }) async {
   const apiKey = String.fromEnvironment('OPENAI_API_KEY');
-  const modelName = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-4.1-mini');
+  const modelName = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-5-2025-08-07');
 
   if (apiKey.isEmpty) {
     throw Exception('OpenAI APIキーが設定されていません。');
