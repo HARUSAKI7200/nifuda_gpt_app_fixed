@@ -92,7 +92,7 @@ Future<void> saveProjectAction(
 
     if (context.mounted) {
       _hideLoadingDialog(context);
-      showCustomSnackBar(context, 'プロジェクト「$projectTitle」を保存しました。'); // 修正
+      showCustomSnackBar(context, 'プロジェクト「$projectTitle」を保存しました。');
     }
   } catch (e) {
     if (context.mounted) {
@@ -187,7 +187,7 @@ Future<Map<String, dynamic>?> loadProjectAction(BuildContext context) async {
 
     if (context.mounted) {
       _hideLoadingDialog(context);
-      showCustomSnackBar(context, 'プロジェクト「${loadedData['projectTitle']}」を読み込みました。'); // 修正
+      showCustomSnackBar(context, 'プロジェクト「${loadedData['projectTitle']}」を読み込みました。');
     }
     return loadedData;
   } catch (e) {
@@ -212,7 +212,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
 
   if (allGptResults == null || allGptResults.isEmpty) {
     if (context.mounted) {
-      showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。'); // 修正
+      showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
     }
     return null;
   }
@@ -260,7 +260,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
                   ],
                 ));
         if (proceed != true) {
-           if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。'); // 修正
+           if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
            return allConfirmedNifudaRows.isNotEmpty ? allConfirmedNifudaRows : null;
         }
       } else {
@@ -273,7 +273,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
     return allConfirmedNifudaRows;
   } else {
     if (context.mounted) {
-        showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。'); // 修正
+        showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。');
     }
     return null;
   }
@@ -313,15 +313,12 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   final List<XFile> pickedFiles = await picker.pickMultiImage();
 
   if (pickedFiles.isEmpty) {
-    if (context.mounted) showCustomSnackBar(context, '製品リスト画像の選択がキャンセルされました。'); // 修正
+    if (context.mounted) showCustomSnackBar(context, '製品リスト画像の選択がキャンセルされました。');
     return null;
   }
 
   List<Future<Map<String, dynamic>?>> gptResultFutures = [];
   
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-  // ★ 変更点：選択肢に応じて`template`を決定
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
   String template;
   switch (selectedCompany) {
     case 'T社':
@@ -348,6 +345,10 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
 
       Uint8List imageBytes = await file.readAsBytes();
 
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      // ★ ユーザーの要望によりリサイズ処理を削除
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      
       if (!context.mounted) return null;
 
       final Uint8List? maskedImageBytes = await Navigator.push<Uint8List>(
@@ -355,7 +356,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         MaterialPageRoute(
           builder: (_) => ProductListMaskPreviewPage(
             originalImageBytes: imageBytes,
-            maskTemplate: template, // 決定したtemplateを渡す
+            maskTemplate: template,
             imageIndex: i + 1,
             totalImages: pickedFiles.length,
           ),
@@ -382,13 +383,13 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   }
 
   if (gptResultFutures.isEmpty) {
-    if(context.mounted) showCustomSnackBar(context, '処理対象の画像がありませんでした。'); // 修正
+    if(context.mounted) showCustomSnackBar(context, '処理対象の画像がありませんでした。');
     return null;
   }
 
   if (!context.mounted) return null;
   setLoading(true);
-  showCustomSnackBar(context, '$successCount / ${pickedFiles.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...'); // 修正
+  showCustomSnackBar(context, '$successCount / ${pickedFiles.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...');
 
   final List<Map<String, dynamic>?> allGptRawResults = await Future.wait(gptResultFutures);
 
@@ -481,7 +482,7 @@ void startMatchingAndShowResultsAction(
   BuildContext context,
   List<List<String>> nifudaData,
   List<List<String>> productListData,
-  String matchingPattern, // ★ 引数を `selectedCompany` から `matchingPattern` に変更
+  String matchingPattern,
   String projectFolderPath,
 ) {
   if (nifudaData.length <= 1 || productListData.length <= 1) {
@@ -505,9 +506,7 @@ void startMatchingAndShowResultsAction(
   }
   
   final matchingLogic = ProductMatcher();
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-  // ★ 変更点：引数 `matchingPattern` を渡す
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
   final Map<String, dynamic> rawResults = matchingLogic.match(nifudaMapList, productMapList, pattern: matchingPattern);
 
   Navigator.push(
