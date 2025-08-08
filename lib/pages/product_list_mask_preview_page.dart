@@ -8,6 +8,7 @@ import '../widgets/custom_snackbar.dart'; // custom_snackbar.dartをインポー
 
 class ProductListMaskPreviewPage extends StatefulWidget {
   final Uint8List originalImageBytes;
+  final Uint8List previewImageBytes; // ★ 追加：プレビュー用の軽量画像
   final String maskTemplate;
   final int imageIndex;
   final int totalImages;
@@ -15,6 +16,7 @@ class ProductListMaskPreviewPage extends StatefulWidget {
   const ProductListMaskPreviewPage({
     super.key,
     required this.originalImageBytes,
+    required this.previewImageBytes, // ★ 追加
     required this.maskTemplate,
     required this.imageIndex,
     required this.totalImages,
@@ -45,6 +47,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       _fixedMaskingFuture = _applyFixedMask();
     } else {
       // 動的マスクの場合、画像の実際のサイズを取得する
+      // ★ 重要な注意：サイズ計算には必ずオリジナル画像を使うこと！
       _getActualImageSize();
     }
   }
@@ -52,15 +55,13 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   Future<Uint8List> _applyFixedMask() async {
     setState(() => _isLoading = true);
     try {
+      // ★ 処理には必ずオリジナル画像を使う！
       final bytes = await applyMaskToImage(widget.originalImageBytes,
           template: widget.maskTemplate);
       if (mounted) setState(() => _fixedMaskedImageBytes = bytes);
       return bytes;
     } catch (e) {
       if (mounted) {
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 修正点：showTopSnackBarをshowCustomSnackBarに変更し、showAtTop: trueを追加
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         showCustomSnackBar(context, 'マスク処理エラー: $e', isError: true, showAtTop: true);
       }
       rethrow;
@@ -70,6 +71,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   }
 
   Future<void> _getActualImageSize() async {
+    // ★ サイズ計算には必ずオリジナル画像を使う！
     final image = Image.memory(widget.originalImageBytes);
     final completer = Completer<ui.Image>();
     image.image
@@ -153,6 +155,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
         );
       }).toList();
 
+      // ★ 処理には必ずオリジナル画像を使う！
       final maskedBytes = await applyMaskToImage(
         widget.originalImageBytes,
         template: 'dynamic',
@@ -164,9 +167,6 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       }
     } catch(e) {
       if (mounted) {
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 修正点：showTopSnackBarをshowCustomSnackBarに変更し、showAtTop: trueを追加
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         showCustomSnackBar(context, '動的マスクの適用に失敗: $e', isError: true, showAtTop: true);
       }
     } finally {
@@ -177,11 +177,6 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
 
   @override
   Widget build(BuildContext context) {
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    // ★ 変更点：手動での下部パディング計算を削除
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    // final double buttonBottomPosition = 15.0 + 60.0 + 10.0 + MediaQuery.of(context).padding.bottom;
-
     return Scaffold(
       appBar: AppBar(
         title: Text('マスクプレビュー (${widget.imageIndex} / ${widget.totalImages})'),
@@ -198,9 +193,6 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
           ),
         ] : null,
       ),
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-      // ★ 変更点：body全体をSafeAreaでラップ
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
       body: SafeArea(
         child: Column(
           children: [
@@ -266,6 +258,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
           return const Text('マスク処理に失敗しました', style: TextStyle(color: Colors.red));
         }
         if (snapshot.hasData) {
+          // 固定マスクはオリジナルから生成されたバイト列を使うのでこれでOK
           return InteractiveViewer(
             child: Image.memory(snapshot.data!),
           );
@@ -293,8 +286,10 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
             rects: _maskRects,
             currentDrawingRect: _currentDrawingRect,
           ),
-          // 背景に元画像を表示
-          child: Image.memory(widget.originalImageBytes),
+          // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+          // ★ 変更点：背景画像には軽量版のプレビュー画像を使う
+          // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+          child: Image.memory(widget.previewImageBytes),
         ),
       ),
     );
@@ -330,7 +325,6 @@ class MaskPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant MaskPainter oldDelegate) {
-    // 矩形リストか描画中矩形が変更されたら再描画
     return oldDelegate.rects != rects || oldDelegate.currentDrawingRect != currentDrawingRect;
   }
 }

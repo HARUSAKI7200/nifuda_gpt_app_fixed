@@ -6,7 +6,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
-import 'package:image/image.dart' as img; // imageパッケージをインポート
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http; // ★ httpパッケージをインポート
 
 import '../utils/gpt_service.dart';
 import '../utils/ocr_masker.dart';
@@ -20,7 +23,7 @@ import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
 
-// --- (既存のヘルパー関数、プロジェクト保存・読込機能は変更なし) ---
+// --- (既存のヘルパー関数は変更なし) ---
 void _showLoadingDialog(BuildContext context, String message) {
   if (!context.mounted) return;
   showDialog(
@@ -338,16 +341,45 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
 
   if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
   
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  // ★ 変更点：http.Clientを生成
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  final client = http.Client();
   try {
     for (int i = 0; i < pickedFiles.length; i++) {
       final file = pickedFiles[i];
       if (!context.mounted) return null;
 
-      Uint8List imageBytes = await file.readAsBytes();
+      Uint8List originalImageBytes = await file.readAsBytes();
+      Uint8List previewImageBytes = originalImageBytes;
 
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-      // ★ ユーザーの要望によりリサイズ処理を削除
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      final tempDir = await getTemporaryDirectory();
+      final cacheFileName = 'preview_${file.path.hashCode}.jpg';
+      final cacheFile = File(p.join(tempDir.path, cacheFileName));
+
+      if (await cacheFile.exists()) {
+        previewImageBytes = await cacheFile.readAsBytes();
+      } else {
+        try {
+          const int previewMaxDimension = 1500;
+          final img.Image? decoded = img.decodeImage(originalImageBytes);
+          
+          if (decoded != null && (decoded.width > previewMaxDimension || decoded.height > previewMaxDimension)) {
+              previewImageBytes = await FlutterImageCompress.compressWithList(
+                originalImageBytes,
+                minHeight: decoded.height > decoded.width ? previewMaxDimension : 0,
+                minWidth: decoded.width > decoded.height ? previewMaxDimension : 0,
+                quality: 85,
+              );
+              await cacheFile.writeAsBytes(previewImageBytes);
+          } else {
+            previewImageBytes = originalImageBytes;
+          }
+        } catch (e) {
+            debugPrint('Preview image generation failed: $e');
+            previewImageBytes = originalImageBytes;
+        }
+      }
       
       if (!context.mounted) return null;
 
@@ -355,7 +387,8 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         context,
         MaterialPageRoute(
           builder: (_) => ProductListMaskPreviewPage(
-            originalImageBytes: imageBytes,
+            originalImageBytes: originalImageBytes,
+            previewImageBytes: previewImageBytes,
             maskTemplate: template,
             imageIndex: i + 1,
             totalImages: pickedFiles.length,
@@ -365,10 +398,14 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
 
       if (maskedImageBytes != null) {
         successCount++;
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★ 変更点：生成したclientを渡して通信する
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         final gptFuture = sendImageToGPT(
           maskedImageBytes,
           isProductList: true,
           company: selectedCompany,
+          client: client, // ★ clientを渡す
         ).then<Map<String, dynamic>?>((result) {
           return result;
         }).catchError((e) {
@@ -380,6 +417,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
     }
   } finally {
     if (context.mounted) _hideLoadingDialog(context);
+    client.close(); // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ ★ 最後に必ずclientを閉じる
   }
 
   if (gptResultFutures.isEmpty) {

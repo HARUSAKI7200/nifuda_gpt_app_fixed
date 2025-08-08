@@ -3,6 +3,86 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+// ★ 変更点：http.Clientを引数で受け取れるようにする
+// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+Future<Map<String, dynamic>> sendImageToGPT(
+  Uint8List imageBytes, {
+  required bool isProductList,
+  required String company,
+  http.Client? client, // http.Clientを引数として追加
+}) async {
+  const apiKey = String.fromEnvironment('OPENAI_API_KEY');
+  const modelName = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-5-mini');
+
+  if (apiKey.isEmpty) {
+    throw Exception('OpenAI APIキーが設定されていません。');
+  }
+
+  final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+  final base64Image = base64Encode(imageBytes);
+  final prompt = isProductList ? _buildProductListPrompt(company) : _buildNifudaPrompt();
+
+  final body = jsonEncode({
+    'model': modelName,
+    'messages': [
+      {'role': 'system', 'content': prompt},
+      {
+        'role': 'user',
+        'content': [
+          {
+            'type': 'image_url',
+            'image_url': {'url': 'data:image/jpeg;base64,$base64Image'}
+          }
+        ]
+      }
+    ],
+    'max_completion_tokens': 8000, // 上限を4096に設定
+    'response_format': {'type': 'json_object'},
+  });
+
+  try {
+    // clientが提供されていればそれを使用し、なければ通常のhttp.postを使う
+    final postRequest = (client != null)
+        ? client.post(uri, headers: {'Authorization': 'Bearer $apiKey', 'Content-Type': 'application/json'}, body: body)
+        : http.post(uri, headers: {'Authorization': 'Bearer $apiKey', 'Content-Type': 'application/json'}, body: body);
+
+    final response = await postRequest.timeout(const Duration(seconds: 90));
+
+    if (response.statusCode == 200) {
+      if (kDebugMode) {
+        print('GPT Raw Response Body: ${utf8.decode(response.bodyBytes)}');
+      }
+
+      final jsonResponse = jsonDecode(utf8.decode(response.bodyBytes));
+      if (jsonResponse['choices'] != null && jsonResponse['choices'].isNotEmpty) {
+        final contentString = jsonResponse['choices'][0]['message']['content'];
+        if (contentString == null || contentString.isEmpty) {
+          final finishReason = jsonResponse['choices'][0]['finish_reason'];
+          throw Exception('GPTからの応答が空です。Finish Reason: $finishReason');
+        }
+        
+        try {
+          if (kDebugMode) {
+            print('GPT Parsed Content String: $contentString');
+          }
+          return jsonDecode(contentString);
+        } catch (e) {
+          throw Exception('GPTの応答JSON解析に失敗: $contentString');
+        }
+      } else {
+        throw Exception('GPTからの応答に有効なデータがありません。');
+      }
+    } else {
+      throw Exception('GPT APIエラー: ${response.statusCode}\n${utf8.decode(response.bodyBytes)}');
+    }
+  } catch (e) {
+    debugPrint('GPTへの画像送信エラー: $e');
+    rethrow;
+  }
+}
+
+// _buildNifudaPrompt と _buildProductListPrompt は変更なし
 String _buildNifudaPrompt() {
   return '''
 あなたは、かすれたり不鮮明な荷札の画像を完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
@@ -89,81 +169,4 @@ $fieldsForPrompt
   ]
 }
 ''';
-}
-
-Future<Map<String, dynamic>> sendImageToGPT(
-  Uint8List imageBytes, {
-  required bool isProductList,
-  required String company,
-}) async {
-  const apiKey = String.fromEnvironment('OPENAI_API_KEY');
-  const modelName = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-5-mini');
-
-  if (apiKey.isEmpty) {
-    throw Exception('OpenAI APIキーが設定されていません。');
-  }
-
-  final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
-  final base64Image = base64Encode(imageBytes);
-  final prompt = isProductList ? _buildProductListPrompt(company) : _buildNifudaPrompt();
-
-  final body = jsonEncode({
-    'model': modelName,
-    'messages': [
-      {'role': 'system', 'content': prompt},
-      {
-        'role': 'user',
-        'content': [
-          {
-            'type': 'image_url',
-            'image_url': {'url': 'data:image/jpeg;base64,$base64Image'}
-          }
-        ]
-      }
-    ],
-    // ★★★ 根本原因の修正: 応答が途中で切れないよう、トークン上限を十分に確保 ★★★
-    'max_completion_tokens': 10000,
-    // JSONモードを有効にする
-    'response_format': {'type': 'json_object'},
-  });
-
-  try {
-    final response = await http.post(
-      uri,
-      headers: {'Authorization': 'Bearer $apiKey', 'Content-Type': 'application/json'},
-      body: body,
-    ).timeout(const Duration(seconds: 90));
-
-    if (response.statusCode == 200) {
-      if (kDebugMode) {
-        print('GPT Raw Response Body: ${utf8.decode(response.bodyBytes)}');
-      }
-
-      final jsonResponse = jsonDecode(utf8.decode(response.bodyBytes));
-      if (jsonResponse['choices'] != null && jsonResponse['choices'].isNotEmpty) {
-        final contentString = jsonResponse['choices'][0]['message']['content'];
-        // contentが空文字列の場合、解析エラーを防ぐ
-        if (contentString == null || contentString.isEmpty) {
-          final finishReason = jsonResponse['choices'][0]['finish_reason'];
-          throw Exception('GPTからの応答が空です。Finish Reason: $finishReason');
-        }
-        
-        try {
-          if (kDebugMode) {
-            print('GPT Parsed Content String: $contentString');
-          }
-          return jsonDecode(contentString);
-        } catch (e) {
-          throw Exception('GPTの応答JSON解析に失敗: $contentString');
-        }
-      } else {
-        throw Exception('GPTからの応答に有効なデータがありません。');
-      }
-    } else {
-      throw Exception('GPT APIエラー: ${response.statusCode}\n${utf8.decode(response.bodyBytes)}');
-    }
-  } catch (e) {
-    debugPrint('GPTへの画像送信エラー: $e');
-    rethrow;
-  }
 }
