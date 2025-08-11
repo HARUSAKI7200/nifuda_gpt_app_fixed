@@ -1,7 +1,6 @@
 // lib/pages/product_list_mask_preview_page.dart
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import '../utils/ocr_masker.dart';
@@ -33,15 +32,45 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   Rect? _currentDrawingRect;
   final GlobalKey _imageKey = GlobalKey();
   Size? _imageRenderSize;
-  
-  // ★★★ 変更点：プレビューへのマスク適用処理を削除 ★★★
+  bool _isLoading = false;
+
   late img.Image _previewImage;
+  // ★ 追加：画面に表示するための画像バイト列を保持する変数
+  Uint8List? _displayImageBytes;
 
   @override
   void initState() {
     super.initState();
+    // 最初に表示するのは元のプレビュー画像
+    _displayImageBytes = widget.previewImageBytes;
     _previewImage = img.decodeImage(widget.previewImageBytes)!;
+
+    // ★ 修正点：T社テンプレートの場合、プレビュー画像にマスクを適用する処理を復活
+    if (widget.maskTemplate == 't') {
+      _applyFixedMaskToPreview();
+    }
   }
+
+  // ★ 修正点：プレビューに固定マスクを適用する処理
+  void _applyFixedMaskToPreview() {
+    setState(() => _isLoading = true);
+    try {
+      // ocr_masker.dart を使ってプレビュー画像にマスクを適用
+      final maskedPreviewImage = applyMaskToImage(
+        _previewImage, // デコード済みのプレビュー画像を渡す
+        template: widget.maskTemplate,
+      );
+      // 表示用のバイト列を更新
+      setState(() {
+        _displayImageBytes = Uint8List.fromList(img.encodeJpg(maskedPreviewImage));
+      });
+    } catch (e) {
+      if (mounted) showCustomSnackBar(context, 'プレビューへのマスク処理エラー: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
 
   void _onPanStart(DragStartDetails details) {
     if (widget.maskTemplate != 'dynamic') return;
@@ -120,7 +149,9 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Center(
-                  child: _buildEditor(),
+                  child: _isLoading 
+                      ? const CircularProgressIndicator()
+                      : _buildEditor(),
                 ),
               ),
             ),
@@ -155,12 +186,16 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   }
 
   Widget _buildEditor() {
+    // 動的マスクの場合は描画用のPainterを、固定マスクの場合は何も描画しないPainterを設定
     final painter = widget.maskTemplate == 'dynamic' 
       ? MaskPainter(rects: _maskRects, currentDrawingRect: _currentDrawingRect)
       : MaskPainter(rects: const [], currentDrawingRect: null);
 
-    // ★★★ 変更点：常にオリジナルのプレビュー画像を表示 ★★★
-    final imageWidget = Image.memory(widget.previewImageBytes);
+    // ★ 修正点：表示用のバイト列（_displayImageBytes）を使って画像を表示する
+    final imageWidget = _displayImageBytes != null
+        ? Image.memory(_displayImageBytes!)
+        : const Center(child: Text("画像がありません"));
+
 
     return GestureDetector(
       onPanStart: widget.maskTemplate == 'dynamic' ? _onPanStart : null,
@@ -199,7 +234,7 @@ class MaskPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.black
+      ..color = Colors.black // 確定したマスクは黒
       ..style = PaintingStyle.fill;
       
     for (final rect in rects) {
@@ -208,7 +243,7 @@ class MaskPainter extends CustomPainter {
     
     if (currentDrawingRect != null) {
       final drawingPaint = Paint()
-      ..color = Colors.blue.withOpacity(0.5)
+      ..color = Colors.blue.withOpacity(0.5) // 描画中は半透明の青
       ..style = PaintingStyle.fill;
       canvas.drawRect(currentDrawingRect!, drawingPaint);
     }

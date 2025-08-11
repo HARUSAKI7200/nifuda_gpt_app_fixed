@@ -23,6 +23,9 @@ import 'product_list_mask_preview_page.dart';
 import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
+// ★★★ 追加：新規作成した画像選択画面をインポート ★★★
+import 'directory_image_picker_page.dart';
+
 
 // (このファイル内では共通のヘルパー関数やクラスも定義します)
 
@@ -73,22 +76,36 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
-// ★★★★★ 変更点：Isolate関連のコードをすべて削除 ★★★★★
 
-// ★★★ Geminiを利用する製品リストOCR処理（バックグラウンド処理なし） ★★★
+// ★★★ Geminiを利用する製品リストOCR処理 ★★★
 Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
   String projectFolderPath,
 ) async {
-  final picker = ImagePicker();
-  final List<XFile> pickedFiles = await picker.pickMultiImage();
+  // ★★★ 変更点：ImagePickerからカスタム画像選択画面に変更 ★★★
+  const String targetDirectory = '/storage/emulated/0/DCIM/製品リスト原紙';
+  
+  if (!await Directory(targetDirectory).exists()) {
+    if(context.mounted) _showErrorDialog(context, 'フォルダ未検出', '指定されたフォルダが見つかりません:\n$targetDirectory');
+    return null;
+  }
 
-  if (pickedFiles.isEmpty) {
+  final List<String>? pickedFilePaths = await Navigator.push<List<String>>(
+    context,
+    MaterialPageRoute(
+      builder: (_) => DirectoryImagePickerPage(directoryPath: targetDirectory),
+    ),
+  );
+
+  if (pickedFilePaths == null || pickedFilePaths.isEmpty) {
     if (context.mounted) showCustomSnackBar(context, '製品リスト画像の選択がキャンセルされました。');
     return null;
   }
+  // 後続処理のためにXFileのリストに変換
+  final List<XFile> pickedFiles = pickedFilePaths.map((path) => XFile(path)).toList();
+  // ★★★ 変更点ここまで ★★★
 
   List<Uint8List> finalImagesToSend = [];
   
@@ -134,7 +151,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
       if (resultFromPreview != null) {
         if(context.mounted) _showLoadingDialog(context, '画像を処理中... (${i + 1}/${pickedFiles.length})');
         
-        // --- ★★★ 変更点：ここから画像処理をメインスレッドで実行 ---
         final imagePath = resultFromPreview['path'] as String;
         final maskRects = resultFromPreview['rects'] as List<Rect>;
         final maskTemplate = resultFromPreview['template'] as String;
@@ -166,7 +182,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
         )) as Uint8List;
 
         finalImagesToSend.add(webpBytes);
-        // --- ★★★ 変更点：ここまでが画像処理 ---
         if(context.mounted) _hideLoadingDialog(context);
       }
     }

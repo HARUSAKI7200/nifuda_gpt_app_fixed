@@ -136,7 +136,7 @@ String _buildNifudaPrompt() {
 
 String _buildProductListPrompt(String company) {
   final List<String> targetProductFields = [
-    "ITEM OF SPAARE", "品名記号", "形格", "製品コード番号", "注文数", "記事", "備考"
+    "ITEM OF SPARE", "品名記号", "形格", "製品コード番号", "注文数", "記事", "備考"
   ];
   String fieldsForPrompt = targetProductFields.map((f) => "- $f").join("\n");
 

@@ -24,6 +24,9 @@ import 'product_list_mask_preview_page.dart';
 import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
+// ★★★ 追加：新規作成した画像選択画面をインポート ★★★
+import 'directory_image_picker_page.dart';
+
 
 // --- (既存のヘルパー関数は変更なし) ---
 void _showLoadingDialog(BuildContext context, String message) {
@@ -285,7 +288,6 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
   }
 }
 
-// ★ 修正点: 関数名のタイプミスを修正
 void showAndExportNifudaListAction(
   BuildContext context,
   List<List<String>> nifudaData,
@@ -314,13 +316,28 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   void Function(bool) setLoading,
   String projectFolderPath,
 ) async {
-  final picker = ImagePicker();
-  final List<XFile> pickedFiles = await picker.pickMultiImage();
+  // ★★★ 変更点：ImagePickerからカスタム画像選択画面に変更 ★★★
+  const String targetDirectory = '/storage/emulated/0/DCIM/製品リスト原紙';
+  
+  if (!await Directory(targetDirectory).exists()) {
+    if(context.mounted) _showErrorDialog(context, 'フォルダ未検出', '指定されたフォルダが見つかりません:\n$targetDirectory');
+    return null;
+  }
 
-  if (pickedFiles.isEmpty) {
+  final List<String>? pickedFilePaths = await Navigator.push<List<String>>(
+    context,
+    MaterialPageRoute(
+      builder: (_) => DirectoryImagePickerPage(directoryPath: targetDirectory),
+    ),
+  );
+
+  if (pickedFilePaths == null || pickedFilePaths.isEmpty) {
     if (context.mounted) showCustomSnackBar(context, '製品リスト画像の選択がキャンセルされました。');
     return null;
   }
+  // 後続処理のためにXFileのリストに変換
+  final List<XFile> pickedFiles = pickedFilePaths.map((path) => XFile(path)).toList();
+  // ★★★ 変更点ここまで ★★★
 
   List<Uint8List> finalImagesToSend = [];
   
