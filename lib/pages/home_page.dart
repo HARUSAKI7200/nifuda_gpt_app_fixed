@@ -119,79 +119,15 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    _setLoading(true);
-    final List<Map<String, dynamic>>? allGptResults =
-        await Navigator.push<List<Map<String, dynamic>>>(
-      context,
-      MaterialPageRoute(builder: (_) => CameraCapturePage(
-          overlayText: '荷札を枠に合わせて撮影',
-          isProductListOcr: false,
-          projectFolderPath: _currentProjectFolderPath!,
-      )),
-    );
+    // ★ 修正点: home_actions.dartの関数を直接呼び出す
+    final List<List<String>>? confirmedNifudaRows = await captureProcessAndConfirmNifudaAction(context, _currentProjectFolderPath!);
 
-    if (mounted && allGptResults != null && allGptResults.isNotEmpty) {
-      List<List<String>> confirmedNifudaRows = [];
-      int imageIndex = 0;
-      for (final gptResult in allGptResults) {
-        imageIndex++;
-        if (!mounted) break;
-        
-        if (mounted) _showLoadingDialog(context, '$imageIndex / ${allGptResults.length} 枚目の結果を確認中...');
-
-        final Map<String, dynamic>? confirmedResultMap = await Navigator.push<Map<String, dynamic>>(
-          context,
-          MaterialPageRoute(
-            builder: (_) => NifudaOcrConfirmPage(
-              extractedData: gptResult,
-              imageIndex: imageIndex,
-              totalImages: allGptResults.length,
-            ),
-          ),
-        );
-        
-        if (mounted) _hideLoadingDialog(context);
-
-        if (confirmedResultMap != null) {
-          List<String> confirmedRowAsList = NifudaOcrConfirmPage.nifudaFields.map((field) {
-             return confirmedResultMap[field]?.toString() ?? '';
-          }).toList();
-          confirmedNifudaRows.add(confirmedRowAsList);
-        } else {
-          if (mounted) {
-             final proceed = await showDialog<bool>(
-                context: context,
-                barrierDismissible: false,
-                builder: (_) => AlertDialog(
-                  title: Text('$imageIndex枚目の確認が破棄されました'),
-                  content: const Text('次の画像の確認に進みますか？\n「いいえ」を選択すると処理を中断します。'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('いいえ (中断)')),
-                    TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('はい (次へ)')),
-                  ],
-                ));
-            if (proceed != true) {
-               if(mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
-               break;
-            }
-          } else {
-            break;
-          }
-        }
-      }
-
-      if (mounted && confirmedNifudaRows.isNotEmpty) {
+    if (mounted && confirmedNifudaRows != null && confirmedNifudaRows.isNotEmpty) {
         setState(() {
           _nifudaData.addAll(confirmedNifudaRows);
         });
         showCustomSnackBar(context, '${confirmedNifudaRows.length}件の荷札データが追加されました。');
-      } else if (mounted) {
-        showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。');
-      }
-    } else if (mounted) {
-      showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
     }
-    _setLoading(false);
   }
   
   void _showLoadingDialog(BuildContext context, String message) {
@@ -226,10 +162,10 @@ class _HomePageState extends State<HomePage> {
       showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
       return;
     }
+    // ★ 修正点: 正しい関数名を呼び出す
     showAndExportNifudaListAction(context, _nifudaData, _projectTitle, _currentProjectFolderPath!);
   }
 
-  // ★★★ 変更：GPT用の関数名を明確化 ★★★
   Future<void> _handlePickProductListWithGpt() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
@@ -237,7 +173,6 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     _setLoading(true);
-    // GPT用のアクションを呼び出す
     final List<List<String>>? confirmedRows = await pickProcessAndConfirmProductListAction(context, _selectedCompany, _setLoading, _currentProjectFolderPath!);
     if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
       setState(() {
@@ -255,7 +190,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // ★★★ 追加：Gemini用のボタン処理を追加 ★★★
   Future<void> _handlePickProductListWithGemini() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
@@ -263,7 +197,6 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     _setLoading(true);
-    // Gemini用のアクションを呼び出す
     final List<List<String>>? confirmedRows = await pickProcessAndConfirmProductListActionWithGemini(context, _selectedCompany, _setLoading, _currentProjectFolderPath!);
     if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
       setState(() {
@@ -387,7 +320,6 @@ class _HomePageState extends State<HomePage> {
                         const SizedBox(height: 10),
                         _buildCompanySelector(),
                         const SizedBox(height: 10),
-                        // ★★★ UIにGemini用のボタンを追加 ★★★
                         _buildActionButton(label: '製品リスト画像をOCRする (GPT)', onPressed: _handlePickProductListWithGpt, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null),
                         const SizedBox(height: 10),
                         _buildActionButton(label: '製品リスト画像をOCRする (Gemini)', onPressed: _handlePickProductListWithGemini, icon: Icons.flash_on, isEnabled: _currentProjectFolderPath != null, isEmphasized: true),

@@ -73,59 +73,6 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
-// ★★★★★ Isolateで実行するためのデータ構造 ★★★★★
-class _IsolateParams {
-  final String imagePath;
-  final List<Rect> maskRects;
-  final String maskTemplate;
-  final Size previewSize;
-
-  _IsolateParams({
-    required this.imagePath,
-    required this.maskRects,
-    required this.maskTemplate,
-    required this.previewSize,
-  });
-}
-
-// ★★★★★ Isolate（バックグラウンドスレッド）で実行される重い処理 ★★★★★
-Future<Uint8List> _processImageInIsolate(_IsolateParams params) async {
-  // 1. 高解像度の元ファイルを読み込み、デコードする
-  final originalImageBytes = await File(params.imagePath).readAsBytes();
-  final img.Image originalImage = img.decodeImage(originalImageBytes)!;
-
-  // 2. プレビューと元画像のサイズ比から、マスク範囲を拡大・補正する
-  final double scaleX = originalImage.width / params.previewSize.width;
-  final double scaleY = originalImage.height / params.previewSize.height;
-
-  final List<Rect> actualMaskRects = params.maskRects.map((rect) {
-    return Rect.fromLTRB(
-      rect.left * scaleX,
-      rect.top * scaleY,
-      rect.right * scaleX,
-      rect.bottom * scaleY,
-    );
-  }).toList();
-
-  // 3. 補正したマスクを高解像度画像に適用する
-  final img.Image maskedImage = await applyMaskToImage(
-    originalImage,
-    template: params.maskTemplate,
-    dynamicMaskRects: actualMaskRects,
-  );
-
-  // 4. GPT送信用にWebP形式に変換する
-  final Uint8List webpBytes = (await FlutterImageCompress.compressWithList(
-    Uint8List.fromList(img.encodeJpg(maskedImage)),
-    minHeight: maskedImage.height,
-    minWidth: maskedImage.width,
-    quality: 85,
-    format: CompressFormat.webp,
-  )) as Uint8List;
-
-  return webpBytes;
-}
-
 
 Future<void> saveProjectAction(
   BuildContext context,
@@ -338,6 +285,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
   }
 }
 
+// ★ 修正点: 関数名のタイプミスを修正
 void showAndExportNifudaListAction(
   BuildContext context,
   List<List<String>> nifudaData,
@@ -360,8 +308,6 @@ void showAndExportNifudaListAction(
   );
 }
 
-
-// ★★★★★ Isolateを組み込んだ新しい製品リスト処理 ★★★★★
 Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
@@ -376,8 +322,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
     return null;
   }
 
-  // Isolateで処理された最終的なバイト列（WebP）を格納するリスト
-  List<Future<Uint8List?>> processedImageFutures = [];
+  List<Uint8List> finalImagesToSend = [];
   
   String template;
   switch (selectedCompany) {
@@ -393,32 +338,27 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
     default:
       template = 'none';
   }
-
-  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
   
   try {
     for (int i = 0; i < pickedFiles.length; i++) {
       final file = pickedFiles[i];
       if (!context.mounted) break;
 
-      // --- 高速プレビュー生成 ---
+      _showLoadingDialog(context, 'プレビューを準備中... (${i + 1}/${pickedFiles.length})');
       final Uint8List previewImageBytes = (await FlutterImageCompress.compressWithFile(
         file.path,
         minWidth: 1280,
         minHeight: 1280,
         quality: 80,
       ))!;
+      if(context.mounted) _hideLoadingDialog(context);
 
-      if (!context.mounted) break;
-      _hideLoadingDialog(context);
-
-      // --- マスクプレビュー画面へ ---
       final Map<String, dynamic>? resultFromPreview =
           await Navigator.push<Map<String, dynamic>>(
         context,
         MaterialPageRoute(
           builder: (_) => ProductListMaskPreviewPage(
-            originalImagePath: file.path, // ★呼び出し側も修正
+            originalImagePath: file.path,
             previewImageBytes: previewImageBytes,
             maskTemplate: template,
             imageIndex: i + 1,
@@ -427,53 +367,74 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         ),
       );
 
-      // --- プレビュー画面から戻ってきた後の本処理 ---
       if (resultFromPreview != null) {
-        // compute を使って _processImageInIsolate をバックグラウンドで実行
-        final future = compute(_processImageInIsolate, _IsolateParams(
-          imagePath: resultFromPreview['path'],
-          maskRects: resultFromPreview['rects'],
-          maskTemplate: resultFromPreview['template'],
-          previewSize: resultFromPreview['previewSize'],
-        )).catchError((e) {
-            debugPrint('Isolate processing error: $e');
-            return null;
-        });
+        if(context.mounted) _showLoadingDialog(context, '画像を処理中... (${i + 1}/${pickedFiles.length})');
+        
+        final imagePath = resultFromPreview['path'] as String;
+        final maskRects = resultFromPreview['rects'] as List<Rect>;
+        final maskTemplate = resultFromPreview['template'] as String;
+        final previewSize = resultFromPreview['previewSize'] as Size;
 
-        processedImageFutures.add(future);
+        final originalImageBytes = await File(imagePath).readAsBytes();
+        final img.Image originalImage = img.decodeImage(originalImageBytes)!;
+
+        final double scaleX = originalImage.width / previewSize.width;
+        final double scaleY = originalImage.height / previewSize.height;
+
+        final List<Rect> actualMaskRects = maskRects.map((rect) {
+          return Rect.fromLTRB(
+            rect.left * scaleX, rect.top * scaleY,
+            rect.right * scaleX, rect.bottom * scaleY,
+          );
+        }).toList();
+
+        final img.Image maskedImage = applyMaskToImage(
+          originalImage,
+          template: maskTemplate,
+          dynamicMaskRects: actualMaskRects,
+        );
+
+        final Uint8List webpBytes = (await FlutterImageCompress.compressWithList(
+          Uint8List.fromList(img.encodeJpg(maskedImage)),
+          minHeight: maskedImage.height, minWidth: maskedImage.width,
+          quality: 85, format: CompressFormat.webp,
+        )) as Uint8List;
+
+        finalImagesToSend.add(webpBytes);
+        if(context.mounted) _hideLoadingDialog(context);
       }
     }
-  } finally {
-    if (context.mounted) _hideLoadingDialog(context);
+  } catch (e) {
+      if(context.mounted) {
+        _hideLoadingDialog(context);
+        _showErrorDialog(context, '画像処理エラー', e.toString());
+      }
+      return null;
   }
 
-  if (processedImageFutures.isEmpty) {
+  if (finalImagesToSend.isEmpty) {
     if(context.mounted) showCustomSnackBar(context, '処理対象の画像がありませんでした。');
     return null;
   }
 
   if (!context.mounted) return null;
   setLoading(true);
-  showCustomSnackBar(context, '${processedImageFutures.length} / ${pickedFiles.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...');
+  showCustomSnackBar(context, '${finalImagesToSend.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...');
 
-  // Isolateでの処理が終わるのを待つ
-  final List<Uint8List?> allProcessedImages = await Future.wait(processedImageFutures);
   final client = http.Client();
-  
   List<Future<Map<String, dynamic>?>> gptResultFutures = [];
-  for (final imageBytes in allProcessedImages) {
-    if (imageBytes != null) {
-      final gptFuture = sendImageToGPT(
-        imageBytes,
-        isProductList: true,
-        company: selectedCompany,
-        client: client,
-      ).catchError((e) {
-        debugPrint('GPT送信エラー: $e');
-        return null;
-      });
-      gptResultFutures.add(gptFuture);
-    }
+
+  for (final imageBytes in finalImagesToSend) {
+    final gptFuture = sendImageToGPT(
+      imageBytes,
+      isProductList: true,
+      company: selectedCompany,
+      client: client,
+    ).catchError((e) {
+      debugPrint('GPT送信エラー: $e');
+      return null;
+    });
+    gptResultFutures.add(gptFuture);
   }
 
   final List<Map<String, dynamic>?> allGptRawResults = await Future.wait(gptResultFutures);
@@ -490,9 +451,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         for (final item in productListRaw) {
           if (item is Map) {
             Map<String, String> row = {};
-            
             final String remarks = item['備考']?.toString() ?? '';
-
             String finalOrderNo = commonOrderNoFromGpt;
             if (commonOrderNoFromGpt.isNotEmpty && remarks.isNotEmpty) {
               final lastSeparatorIndex = commonOrderNoFromGpt.lastIndexOf(RegExp(r'[\s-]'));
@@ -503,13 +462,8 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
                 finalOrderNo = '$commonOrderNoFromGpt $remarks';
               }
             }
-
             for (String field in expectedProductFields) {
-              if (field == 'ORDER No.') {
-                row[field] = finalOrderNo;
-              } else {
-                row[field] = item[field]?.toString() ?? '';
-              }
+              row[field] = (field == 'ORDER No.') ? finalOrderNo : item[field]?.toString() ?? '';
             }
             allExtractedProductRows.add(row);
           }

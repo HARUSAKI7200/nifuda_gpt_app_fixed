@@ -73,66 +73,9 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
-// Isolateで実行するためのデータ構造
-class _IsolateParams {
-  final String imagePath;
-  final List<Rect> maskRects;
-  final String maskTemplate;
-  final Size previewSize;
+// ★★★★★ 変更点：Isolate関連のコードをすべて削除 ★★★★★
 
-  _IsolateParams({
-    required this.imagePath,
-    required this.maskRects,
-    required this.maskTemplate,
-    required this.previewSize,
-  });
-}
-
-// Isolate（バックグラウンドスレッド）で実行される重い画像処理
-Future<Uint8List> _processImageInIsolate(_IsolateParams params) async {
-  final originalImageBytes = await File(params.imagePath).readAsBytes();
-  final img.Image originalImage = img.decodeImage(originalImageBytes)!;
-
-  final double scaleX = originalImage.width / params.previewSize.width;
-  final double scaleY = originalImage.height / params.previewSize.height;
-
-  final List<Rect> actualMaskRects = params.maskRects.map((rect) {
-    return Rect.fromLTRB(
-      rect.left * scaleX, rect.top * scaleY,
-      rect.right * scaleX, rect.bottom * scaleY,
-    );
-  }).toList();
-
-  final img.Image maskedImage = await applyMaskToImage(
-    originalImage,
-    template: params.maskTemplate,
-    dynamicMaskRects: actualMaskRects,
-  );
-
-  final Uint8List webpBytes = (await FlutterImageCompress.compressWithList(
-    Uint8List.fromList(img.encodeJpg(maskedImage)),
-    minHeight: maskedImage.height, minWidth: maskedImage.width,
-    quality: 85, format: CompressFormat.webp,
-  )) as Uint8List;
-
-  return webpBytes;
-}
-
-
-// ★★★ 修正点：エラーハンドリングをより安全なtry-catchで行うヘルパー関数を追加 ★★★
-Future<Uint8List?> _safeProcessImageInIsolate(_IsolateParams params) async {
-  try {
-    // computeをtryブロックで呼び出す
-    return await compute(_processImageInIsolate, params);
-  } catch (e) {
-    // エラーが発生した場合はコンソールにログを出し、nullを返す
-    debugPrint('Isolate processing error: $e');
-    return null;
-  }
-}
-
-
-// ★★★ Geminiを利用する製品リストOCR処理 ★★★
+// ★★★ Geminiを利用する製品リストOCR処理（バックグラウンド処理なし） ★★★
 Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   BuildContext context,
   String selectedCompany,
@@ -147,7 +90,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
     return null;
   }
 
-  List<Future<Uint8List?>> processedImageFutures = [];
+  List<Uint8List> finalImagesToSend = [];
   
   String template;
   switch (selectedCompany) {
@@ -161,22 +104,19 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
       template = 'dynamic';
       break;
     default:
-      template = 'none'; // 想定外の場合のフォールバック
+      template = 'none'; 
   }
 
-  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
-  
   try {
     for (int i = 0; i < pickedFiles.length; i++) {
       final file = pickedFiles[i];
       if (!context.mounted) break;
 
+      _showLoadingDialog(context, 'プレビューを準備中... (${i + 1}/${pickedFiles.length})');
       final Uint8List previewImageBytes = (await FlutterImageCompress.compressWithFile(
         file.path, minWidth: 1280, minHeight: 1280, quality: 80,
       ))!;
-      
-      if (!context.mounted) break;
-      _hideLoadingDialog(context);
+      if(context.mounted) _hideLoadingDialog(context);
 
       final Map<String, dynamic>? resultFromPreview =
           await Navigator.push<Map<String, dynamic>>(
@@ -192,46 +132,76 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
       );
 
       if (resultFromPreview != null) {
-        // ★★★ 修正点：新しく作成した安全なヘルパー関数を呼び出すように変更 ★★★
-        final future = _safeProcessImageInIsolate(_IsolateParams(
-          imagePath: resultFromPreview['path'],
-          maskRects: resultFromPreview['rects'],
-          maskTemplate: resultFromPreview['template'],
-          previewSize: resultFromPreview['previewSize'],
-        ));
-        processedImageFutures.add(future);
+        if(context.mounted) _showLoadingDialog(context, '画像を処理中... (${i + 1}/${pickedFiles.length})');
+        
+        // --- ★★★ 変更点：ここから画像処理をメインスレッドで実行 ---
+        final imagePath = resultFromPreview['path'] as String;
+        final maskRects = resultFromPreview['rects'] as List<Rect>;
+        final maskTemplate = resultFromPreview['template'] as String;
+        final previewSize = resultFromPreview['previewSize'] as Size;
+
+        final originalImageBytes = await File(imagePath).readAsBytes();
+        final img.Image originalImage = img.decodeImage(originalImageBytes)!;
+
+        final double scaleX = originalImage.width / previewSize.width;
+        final double scaleY = originalImage.height / previewSize.height;
+
+        final List<Rect> actualMaskRects = maskRects.map((rect) {
+          return Rect.fromLTRB(
+            rect.left * scaleX, rect.top * scaleY,
+            rect.right * scaleX, rect.bottom * scaleY,
+          );
+        }).toList();
+
+        final img.Image maskedImage = applyMaskToImage(
+          originalImage,
+          template: maskTemplate,
+          dynamicMaskRects: actualMaskRects,
+        );
+
+        final Uint8List webpBytes = (await FlutterImageCompress.compressWithList(
+          Uint8List.fromList(img.encodeJpg(maskedImage)),
+          minHeight: maskedImage.height, minWidth: maskedImage.width,
+          quality: 85, format: CompressFormat.webp,
+        )) as Uint8List;
+
+        finalImagesToSend.add(webpBytes);
+        // --- ★★★ 変更点：ここまでが画像処理 ---
+        if(context.mounted) _hideLoadingDialog(context);
       }
     }
-  } finally {
-    if (context.mounted) _hideLoadingDialog(context);
+  } catch (e) {
+      if(context.mounted) {
+        _hideLoadingDialog(context);
+        _showErrorDialog(context, '画像処理エラー', e.toString());
+      }
+      return null;
   }
 
-  if (processedImageFutures.isEmpty) {
+
+  if (finalImagesToSend.isEmpty) {
     if(context.mounted) showCustomSnackBar(context, '処理対象の画像がありませんでした。');
     return null;
   }
 
   if (!context.mounted) return null;
   setLoading(true);
-  showCustomSnackBar(context, '${processedImageFutures.length} / ${pickedFiles.length} 枚の画像をGeminiへ送信依頼しました...');
+  showCustomSnackBar(context, '${finalImagesToSend.length} 枚の画像をGeminiへ送信依頼しました...');
 
-  final List<Uint8List?> allProcessedImages = await Future.wait(processedImageFutures);
   final client = http.Client();
   
   List<Future<Map<String, dynamic>?>> aiResultFutures = [];
-  for (final imageBytes in allProcessedImages) {
-    if (imageBytes != null) {
-      final future = sendImageToGemini(
-        imageBytes,
-        isProductList: true,
-        company: selectedCompany,
-        client: client,
-      ).catchError((e) {
-        debugPrint('Gemini送信エラー: $e');
-        return null;
-      });
-      aiResultFutures.add(future);
-    }
+  for (final imageBytes in finalImagesToSend) {
+    final future = sendImageToGemini(
+      imageBytes,
+      isProductList: true,
+      company: selectedCompany,
+      client: client,
+    ).catchError((e) {
+      debugPrint('Gemini送信エラー: $e');
+      return null;
+    });
+    aiResultFutures.add(future);
   }
 
   final List<Map<String, dynamic>?> allAiRawResults = await Future.wait(aiResultFutures);

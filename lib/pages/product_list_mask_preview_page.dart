@@ -8,9 +8,6 @@ import '../utils/ocr_masker.dart';
 import '../widgets/custom_snackbar.dart';
 
 class ProductListMaskPreviewPage extends StatefulWidget {
-  // ★★★ 修正点 ★★★
-  // Isolate化に伴い、高解像度の元画像(Imageオブジェクト)は受け取らず、
-  // 元のファイルパスと、軽量なプレビュー用のバイト列のみを受け取るように変更
   final String originalImagePath;
   final Uint8List previewImageBytes;
   final String maskTemplate;
@@ -19,7 +16,7 @@ class ProductListMaskPreviewPage extends StatefulWidget {
 
   const ProductListMaskPreviewPage({
     super.key,
-    required this.originalImagePath, // ★修正: originalImage -> originalImagePath
+    required this.originalImagePath,
     required this.previewImageBytes,
     required this.maskTemplate,
     required this.imageIndex,
@@ -36,37 +33,14 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   Rect? _currentDrawingRect;
   final GlobalKey _imageKey = GlobalKey();
   Size? _imageRenderSize;
-  bool _isLoading = false;
-
-  // プレビュー表示用のImageオブジェクト
+  
+  // ★★★ 変更点：プレビューへのマスク適用処理を削除 ★★★
   late img.Image _previewImage;
 
   @override
   void initState() {
     super.initState();
-    // 軽量なプレビューバイト列から画像をデコード（これは高速）
     _previewImage = img.decodeImage(widget.previewImageBytes)!;
-
-    // T社のような固定テンプレートの場合は、プレビュー画像にマスクをかける
-    if (widget.maskTemplate != 'dynamic') {
-      _applyFixedMaskToPreview();
-    }
-  }
-
-  // プレビュー画像に固定マスクを適用する非同期処理
-  Future<void> _applyFixedMaskToPreview() async {
-    setState(() => _isLoading = true);
-    try {
-      // applyMaskToImageはImageオブジェクトを扱うのでそのまま使える
-      _previewImage = await applyMaskToImage(
-        img.copyCrop(_previewImage, x: 0, y: 0, width: _previewImage.width, height: _previewImage.height),
-        template: widget.maskTemplate
-      );
-    } catch (e) {
-      if (mounted) showCustomSnackBar(context, 'プレビューへのマスク処理エラー: $e', isError: true);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
   }
 
   void _onPanStart(DragStartDetails details) {
@@ -111,16 +85,12 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     });
   }
 
-  // ★★★ 送信ボタンの処理 ★★★
   void _confirmAndPop() {
-    if (_isLoading) return;
-
-    // Isolateで処理するために、元のパス、マスク範囲、テンプレート名、プレビューサイズをMapで返す
     Navigator.pop(context, {
       'path': widget.originalImagePath,
       'rects': _maskRects,
       'template': widget.maskTemplate,
-      'previewSize': Size(_previewImage.width.toDouble(), _previewImage.height.toDouble()), // Isolateでの計算用にプレビューサイズを渡す
+      'previewSize': Size(_previewImage.width.toDouble(), _previewImage.height.toDouble()),
     });
   }
 
@@ -150,9 +120,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Center(
-                  child: _isLoading
-                      ? const CircularProgressIndicator()
-                      : _buildEditor(),
+                  child: _buildEditor(),
                 ),
               ),
             ),
@@ -172,7 +140,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
                   ElevatedButton.icon(
                     icon: const Icon(Icons.send_rounded),
                     label: const Text('この内容で送信'),
-                    onPressed: _isLoading ? null : _confirmAndPop, // ★修正: 新しい送信処理を呼ぶ
+                    onPressed: _confirmAndPop,
                     style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green[700],
                         foregroundColor: Colors.white),
@@ -187,17 +155,12 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   }
 
   Widget _buildEditor() {
-    // 動的マスクの場合は描画用のPainterを、固定マスクの場合は空のPainterを設定
     final painter = widget.maskTemplate == 'dynamic' 
       ? MaskPainter(rects: _maskRects, currentDrawingRect: _currentDrawingRect)
-      : MaskPainter(rects: [], currentDrawingRect: null);
+      : MaskPainter(rects: const [], currentDrawingRect: null);
 
-    // 動的マスクの場合は元のプレビューを、固定マスクの場合は加工済みのプレビュー画像を表示
-    final imageWidget = Image.memory(
-        widget.maskTemplate == 'dynamic' 
-            ? widget.previewImageBytes 
-            : Uint8List.fromList(img.encodeJpg(_previewImage))
-    );
+    // ★★★ 変更点：常にオリジナルのプレビュー画像を表示 ★★★
+    final imageWidget = Image.memory(widget.previewImageBytes);
 
     return GestureDetector(
       onPanStart: widget.maskTemplate == 'dynamic' ? _onPanStart : null,
@@ -208,12 +171,14 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
         child: CustomPaint(
           key: _imageKey,
           foregroundPainter: painter,
-          child: LayoutBuilder( // 描画サイズを取得するためにLayoutBuilderを使用
+          child: LayoutBuilder( 
             builder: (context, constraints) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted) {
                   final renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
-                  _imageRenderSize = renderBox?.size;
+                  if(renderBox != null && renderBox.hasSize){
+                    _imageRenderSize = renderBox.size;
+                  }
                 }
               });
               return imageWidget;
@@ -229,7 +194,7 @@ class MaskPainter extends CustomPainter {
   final List<Rect> rects;
   final Rect? currentDrawingRect;
 
-  MaskPainter({required this.rects, this.currentDrawingRect});
+  const MaskPainter({required this.rects, this.currentDrawingRect});
 
   @override
   void paint(Canvas canvas, Size size) {
