@@ -84,7 +84,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   void Function(bool) setLoading,
   String projectFolderPath,
 ) async {
-  // ★★★ 変更点：ImagePickerからカスタム画像選択画面に変更 ★★★
   const String targetDirectory = '/storage/emulated/0/DCIM/製品リスト原紙';
   
   if (!await Directory(targetDirectory).exists()) {
@@ -95,7 +94,8 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   final List<String>? pickedFilePaths = await Navigator.push<List<String>>(
     context,
     MaterialPageRoute(
-      builder: (_) => DirectoryImagePickerPage(directoryPath: targetDirectory),
+      // ★★★ 修正点: パラメータ名を`directoryPath`から`rootDirectoryPath`に変更 ★★★
+      builder: (_) => DirectoryImagePickerPage(rootDirectoryPath: targetDirectory),
     ),
   );
 
@@ -103,9 +103,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
     if (context.mounted) showCustomSnackBar(context, '製品リスト画像の選択がキャンセルされました。');
     return null;
   }
-  // 後続処理のためにXFileのリストに変換
   final List<XFile> pickedFiles = pickedFilePaths.map((path) => XFile(path)).toList();
-  // ★★★ 変更点ここまで ★★★
 
   List<Uint8List> finalImagesToSend = [];
   

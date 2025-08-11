@@ -132,7 +132,6 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       }
     }
     try {
-      // 保存パスを projectFolderPath/荷札画像 に変更
       final String albumPath = p.join(widget.projectFolderPath, "荷札画像");
       final Directory albumDir = Directory(albumPath);
       if (!await albumDir.exists()) {
@@ -141,7 +140,6 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       final File file = File(p.join(albumDir.path, fileName));
       await file.writeAsBytes(imageBytes);
       await MediaScanner.loadMedia(path: file.path);
-      // メッセージ用にパスを短縮
       return p.join(p.basename(widget.projectFolderPath), "荷札画像", fileName);
     } catch (e) {
       debugPrint('画像保存エラー: $e');
@@ -154,7 +152,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       return;
     }
     if (_cameraPreviewAreaOnScreen.isEmpty || _overlayRectOnScreen.isEmpty) {
-         if(mounted) showCustomSnackBar(layoutContext, 'レイアウト計算待機中。', showAtTop: true); // 修正
+         if(mounted) showCustomSnackBar(layoutContext, 'レイアウト計算待機中。', showAtTop: true);
         return;
     }
 
@@ -190,25 +188,15 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       final int finalCropH = cropH.clamp(1, imgH - finalCropY).round();
 
       if (finalCropW <= 0 || finalCropH <= 0) {
-        debugPrint("--- Invalid Crop Calculation ---");
-        debugPrint("Raw Image: ${imgW}x$imgH");
-        debugPrint("Camera Preview Rect on Screen: $_cameraPreviewAreaOnScreen");
-        debugPrint("Overlay Rect on Screen: $_overlayRectOnScreen");
-        debugPrint("Scale factors: scaleX=$scaleX, scaleY=$scaleY");
-        debugPrint("Overlay Local Coords (relative to cam preview): X=${overlayLocalX.round()}, Y=${overlayLocalY.round()}");
-        debugPrint("Calculated Crop Box (img coords): x=$cropX, y=$cropY, w=$cropW, h=$cropH");
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★ 変更点：パフォーマンス向上のため、詳細なログ出力を削除
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         throw Exception("Invalid crop dimensions after clamp: W=$finalCropW, H=$finalCropH.");
       }
       
-      debugPrint("--- Cropping Parameters ---");
-      debugPrint("Original Image (oriented): ${imgW}x$imgH");
-      debugPrint("Camera Preview Rect on Screen: $_cameraPreviewAreaOnScreen");
-      debugPrint("Overlay Rect on Screen: $_overlayRectOnScreen");
-      debugPrint("Scale factors (img_px / screen_preview_px): scaleX=$scaleX, scaleY=$scaleY");
-      debugPrint("Overlay Local Coords (relative to cam preview): X=${overlayLocalX.round()}, Y=${overlayLocalY.round()}");
-      debugPrint("Calculated Crop Box (img coords): x=$cropX, y=$cropY, w=$cropW, h=$cropH");
-      debugPrint("Final Clamped Crop Box (img coords): x=$finalCropX, y=$finalCropY, w=$finalCropW, h=$finalCropH");
-      debugPrint("--------------------------");
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      // ★ 変更点：パフォーマンス向上のため、詳細なログ出力を削除
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
       final img.Image croppedImage = img.copyCrop(
           orientedImage,
@@ -218,7 +206,12 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
           height: finalCropH,
       );
       
-      final Uint8List bytesForProcessing = Uint8List.fromList(img.encodeJpg(croppedImage));
+      final img.Image resizedImage = img.copyResize(
+        croppedImage,
+        width: 1200,
+      );
+
+      final Uint8List bytesForProcessing = Uint8List.fromList(img.encodeJpg(resizedImage));
 
       if(mounted) setState(() => _requestedImageCount++);
 
@@ -239,18 +232,18 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       final String fileName = 'nifuda_cropped_${DateTime.now().millisecondsSinceEpoch}.jpg';
       _saveCroppedImage(bytesForProcessing, fileName).then((savedPath) {
           if (savedPath != null && mounted) {
-              showCustomSnackBar(layoutContext, '画像を保存しました: $savedPath', showAtTop: true); // 修正
+              showCustomSnackBar(layoutContext, '画像を保存しました: $savedPath', showAtTop: true);
           }
       }).catchError((e) {
           if (mounted) {
-              showCustomSnackBar(layoutContext, '画像保存エラー: ${e.toString()}', isError: true, showAtTop: true); // 修正
+              showCustomSnackBar(layoutContext, '画像保存エラー: ${e.toString()}', isError: true, showAtTop: true);
           }
       });
       
     } catch (e, s) {
       debugPrint('撮影または処理エラー: $e');
       debugPrintStack(stackTrace: s);
-      if (mounted) showCustomSnackBar(layoutContext, '撮影または処理に失敗: ${e.toString()}', isError: true, showAtTop: true); // 修正
+      if (mounted) showCustomSnackBar(layoutContext, '撮影または処理に失敗: ${e.toString()}', isError: true, showAtTop: true);
     } finally {
       if (mounted) setState(() => _isProcessingImage = false);
     }
@@ -290,11 +283,6 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
 
   @override
   Widget build(BuildContext context) {
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    // ★ 変更点：手動でのパディング計算を削除
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    // final double buttonBottomPadding = 90.0 + MediaQuery.of(context).padding.bottom;
-
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(title: Text(widget.isProductListOcr ? '製品リスト連続撮影' : '荷札連続撮影')),
@@ -318,14 +306,11 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
                   ),
                 ),
               Positioned(
-                bottom: 0, // 画面下部に固定
+                bottom: 0,
                 left: 0,
                 right: 0,
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-                // ★ 変更点：ボタン領域をSafeAreaでラップ
-                // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
                 child: SafeArea(
-                  top: false, // 上のSafeAreaは不要
+                  top: false,
                   child: Container(
                     color: Colors.black.withOpacity(0.7),
                     padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 16),
@@ -383,7 +368,6 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
 
         final cameraPreviewWidth = _controller!.value.previewSize!.height;
         final cameraPreviewHeight = _controller!.value.previewSize!.width;
-        final cameraAspectRatio = cameraPreviewWidth / cameraPreviewHeight;
 
         final FittedSizes fittedSizes = applyBoxFit(
           BoxFit.contain,
