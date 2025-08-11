@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 
-/// Gemini API (gemini-1.5-flash-latest) を呼び出し、画像からテキストを抽出してJSON形式で返します。
+/// Gemini API (gemini-2.5-flash) を呼び出し、画像からテキストを抽出してJSON形式で返します。
 ///
 /// APIキーは --dart-define=GOOGLE_API_KEY=... の形式で渡す必要があります。
 Future<Map<String, dynamic>> sendImageToGemini(
@@ -16,7 +16,7 @@ Future<Map<String, dynamic>> sendImageToGemini(
 }) async {
   // 実行コマンドからAPIキーを取得
   const apiKey = String.fromEnvironment('GOOGLE_API_KEY');
-  // モデルを最新のFlashモデルに指定
+  // お客様ご指摘の通り、最新の `gemini-2.5-flash` を使用します
   const modelName = 'gemini-2.5-flash';
 
   if (apiKey.isEmpty) {

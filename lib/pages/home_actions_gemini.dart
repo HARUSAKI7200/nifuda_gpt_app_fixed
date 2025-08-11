@@ -12,7 +12,6 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 import 'package:http/http.dart' as http;
 
-// ★★★ 変更点：インポート先をgemini_serviceに変更 ★★★
 import '../utils/gemini_service.dart';
 import '../utils/ocr_masker.dart';
 import '../utils/product_matcher.dart';
@@ -119,6 +118,20 @@ Future<Uint8List> _processImageInIsolate(_IsolateParams params) async {
   return webpBytes;
 }
 
+
+// ★★★ 修正点：エラーハンドリングをより安全なtry-catchで行うヘルパー関数を追加 ★★★
+Future<Uint8List?> _safeProcessImageInIsolate(_IsolateParams params) async {
+  try {
+    // computeをtryブロックで呼び出す
+    return await compute(_processImageInIsolate, params);
+  } catch (e) {
+    // エラーが発生した場合はコンソールにログを出し、nullを返す
+    debugPrint('Isolate processing error: $e');
+    return null;
+  }
+}
+
+
 // ★★★ Geminiを利用する製品リストOCR処理 ★★★
 Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   BuildContext context,
@@ -138,9 +151,17 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   
   String template;
   switch (selectedCompany) {
-    case 'T社': template = 't'; break;
-    case 'マスク処理なし': template = 'none'; break;
-    default: template = 'dynamic';
+    case 'T社':
+      template = 't';
+      break;
+    case 'マスク処理なし':
+      template = 'none';
+      break;
+    case '動的マスク処理':
+      template = 'dynamic';
+      break;
+    default:
+      template = 'none'; // 想定外の場合のフォールバック
   }
 
   if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
@@ -153,8 +174,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
       final Uint8List previewImageBytes = (await FlutterImageCompress.compressWithFile(
         file.path, minWidth: 1280, minHeight: 1280, quality: 80,
       ))!;
-      final previewImage = img.decodeImage(previewImageBytes)!;
-
+      
       if (!context.mounted) break;
       _hideLoadingDialog(context);
 
@@ -172,15 +192,13 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
       );
 
       if (resultFromPreview != null) {
-        final future = compute(_processImageInIsolate, _IsolateParams(
+        // ★★★ 修正点：新しく作成した安全なヘルパー関数を呼び出すように変更 ★★★
+        final future = _safeProcessImageInIsolate(_IsolateParams(
           imagePath: resultFromPreview['path'],
           maskRects: resultFromPreview['rects'],
           maskTemplate: resultFromPreview['template'],
-          previewSize: Size(previewImage.width.toDouble(), previewImage.height.toDouble()),
-        )).catchError((e) {
-            debugPrint('Isolate processing error: $e');
-            return null;
-        });
+          previewSize: resultFromPreview['previewSize'],
+        ));
         processedImageFutures.add(future);
       }
     }
@@ -203,7 +221,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   List<Future<Map<String, dynamic>?>> aiResultFutures = [];
   for (final imageBytes in allProcessedImages) {
     if (imageBytes != null) {
-      // ★★★ 変更点：sendImageToGeminiを呼び出す ★★★
       final future = sendImageToGemini(
         imageBytes,
         isProductList: true,
@@ -220,7 +237,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   final List<Map<String, dynamic>?> allAiRawResults = await Future.wait(aiResultFutures);
   client.close();
 
-  // (AIからのレスポンスを整形する処理は共通なので変更なし)
   List<Map<String, String>> allExtractedProductRows = [];
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
 
