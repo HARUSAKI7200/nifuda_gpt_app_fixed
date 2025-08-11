@@ -21,7 +21,13 @@ Future<Map<String, dynamic>> sendImageToGPT(
 
   final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
   final base64Image = base64Encode(imageBytes);
+
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  // ★ 変更点：製品リストの場合、MIMEタイプをwebpに変更
+  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+  final String mimeType = isProductList ? 'image/webp' : 'image/jpeg';
   final prompt = isProductList ? _buildProductListPrompt(company) : _buildNifudaPrompt();
+
 
   final body = jsonEncode({
     'model': modelName,
@@ -32,7 +38,10 @@ Future<Map<String, dynamic>> sendImageToGPT(
         'content': [
           {
             'type': 'image_url',
-            'image_url': {'url': 'data:image/jpeg;base64,$base64Image'}
+            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            // ★ 変更点：mimeType変数を使用するように変更
+            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            'image_url': {'url': 'data:$mimeType;base64,$base64Image'}
           }
         ]
       }
@@ -127,7 +136,7 @@ String _buildNifudaPrompt() {
 
 String _buildProductListPrompt(String company) {
   final List<String> targetProductFields = [
-    "ITEM OF SPARE", "品名記号", "形格", "製品コード番号", "注文数", "記事", "備考"
+    "ITEM OF SPAARE", "品名記号", "形格", "製品コード番号", "注文数", "記事", "備考"
   ];
   String fieldsForPrompt = targetProductFields.map((f) => "- $f").join("\n");
 

@@ -1,4 +1,3 @@
-// lib/pages/home_actions.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -399,10 +398,18 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
       if (maskedImageBytes != null) {
         successCount++;
         // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 変更点：生成したclientを渡して通信する
+        // ★ 修正点: FlutterImageCompressを使ってWebPに変換
         // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        final gptFuture = sendImageToGPT(
+        final Uint8List webpBytes = (await FlutterImageCompress.compressWithList(
           maskedImageBytes,
+          minHeight: 1920,
+          minWidth: 1080,
+          quality: 85,
+          format: CompressFormat.webp,
+        )) as Uint8List;
+
+        final gptFuture = sendImageToGPT(
+          webpBytes, // WebP形式のバイト列を送信
           isProductList: true,
           company: selectedCompany,
           client: client, // ★ clientを渡す
