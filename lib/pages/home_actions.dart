@@ -1,7 +1,10 @@
+// lib/pages/home_actions.dart
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart'; // computeのために必要
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
@@ -69,6 +72,60 @@ void _showErrorDialog(BuildContext context, String title, String message) {
     },
   );
 }
+
+// ★★★★★ Isolateで実行するためのデータ構造 ★★★★★
+class _IsolateParams {
+  final String imagePath;
+  final List<Rect> maskRects;
+  final String maskTemplate;
+  final Size previewSize;
+
+  _IsolateParams({
+    required this.imagePath,
+    required this.maskRects,
+    required this.maskTemplate,
+    required this.previewSize,
+  });
+}
+
+// ★★★★★ Isolate（バックグラウンドスレッド）で実行される重い処理 ★★★★★
+Future<Uint8List> _processImageInIsolate(_IsolateParams params) async {
+  // 1. 高解像度の元ファイルを読み込み、デコードする
+  final originalImageBytes = await File(params.imagePath).readAsBytes();
+  final img.Image originalImage = img.decodeImage(originalImageBytes)!;
+
+  // 2. プレビューと元画像のサイズ比から、マスク範囲を拡大・補正する
+  final double scaleX = originalImage.width / params.previewSize.width;
+  final double scaleY = originalImage.height / params.previewSize.height;
+
+  final List<Rect> actualMaskRects = params.maskRects.map((rect) {
+    return Rect.fromLTRB(
+      rect.left * scaleX,
+      rect.top * scaleY,
+      rect.right * scaleX,
+      rect.bottom * scaleY,
+    );
+  }).toList();
+
+  // 3. 補正したマスクを高解像度画像に適用する
+  final img.Image maskedImage = await applyMaskToImage(
+    originalImage,
+    template: params.maskTemplate,
+    dynamicMaskRects: actualMaskRects,
+  );
+
+  // 4. GPT送信用にWebP形式に変換する
+  final Uint8List webpBytes = (await FlutterImageCompress.compressWithList(
+    Uint8List.fromList(img.encodeJpg(maskedImage)),
+    minHeight: maskedImage.height,
+    minWidth: maskedImage.width,
+    quality: 85,
+    format: CompressFormat.webp,
+  )) as Uint8List;
+
+  return webpBytes;
+}
+
 
 Future<void> saveProjectAction(
   BuildContext context,
@@ -304,7 +361,7 @@ void showAndExportNifudaListAction(
 }
 
 
-// --- 機能8-9: 製品リスト画像選択とOCR・確認 ---
+// ★★★★★ Isolateを組み込んだ新しい製品リスト処理 ★★★★★
 Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
@@ -319,7 +376,8 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
     return null;
   }
 
-  List<Future<Map<String, dynamic>?>> gptResultFutures = [];
+  // Isolateで処理された最終的なバイト列（WebP）を格納するリスト
+  List<Future<Uint8List?>> processedImageFutures = [];
   
   String template;
   switch (selectedCompany) {
@@ -336,60 +394,31 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
       template = 'none';
   }
 
-  int successCount = 0;
-
-  if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
+  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
   
-  final client = http.Client();
   try {
     for (int i = 0; i < pickedFiles.length; i++) {
       final file = pickedFiles[i];
-      if (!context.mounted) return null;
+      if (!context.mounted) break;
 
-      Uint8List originalImageBytes = await file.readAsBytes();
-      // ★修正点1: デコードを最初に行う
-      final img.Image? decodedImage = img.decodeImage(originalImageBytes);
-      if (decodedImage == null) {
-        debugPrint('Image decoding failed for file: ${file.name}');
-        continue;
-      }
+      // --- 高速プレビュー生成 ---
+      final Uint8List previewImageBytes = (await FlutterImageCompress.compressWithFile(
+        file.path,
+        minWidth: 1280,
+        minHeight: 1280,
+        quality: 80,
+      ))!;
 
-      Uint8List previewImageBytes = originalImageBytes;
+      if (!context.mounted) break;
+      _hideLoadingDialog(context);
 
-      final tempDir = await getTemporaryDirectory();
-      final cacheFileName = 'preview_${file.path.hashCode}.jpg';
-      final cacheFile = File(p.join(tempDir.path, cacheFileName));
-
-      if (await cacheFile.exists()) {
-        previewImageBytes = await cacheFile.readAsBytes();
-      } else {
-        try {
-          const int previewMaxDimension = 1500;
-          if (decodedImage.width > previewMaxDimension || decodedImage.height > previewMaxDimension) {
-              previewImageBytes = await FlutterImageCompress.compressWithList(
-                originalImageBytes,
-                minHeight: decodedImage.height > decodedImage.width ? previewMaxDimension : 0,
-                minWidth: decodedImage.width > decodedImage.height ? previewMaxDimension : 0,
-                quality: 85,
-              );
-              await cacheFile.writeAsBytes(previewImageBytes);
-          } else {
-            previewImageBytes = originalImageBytes;
-          }
-        } catch (e) {
-            debugPrint('Preview image generation failed: $e');
-            previewImageBytes = originalImageBytes;
-        }
-      }
-      
-      if (!context.mounted) return null;
-
-      // ★修正点2: Imageオブジェクトをマスクプレビューページに渡す
-      final img.Image? maskedImage = await Navigator.push<img.Image>(
+      // --- マスクプレビュー画面へ ---
+      final Map<String, dynamic>? resultFromPreview =
+          await Navigator.push<Map<String, dynamic>>(
         context,
         MaterialPageRoute(
           builder: (_) => ProductListMaskPreviewPage(
-            originalImage: decodedImage, // デコード済みのImageオブジェクトを渡す
+            originalImagePath: file.path, // ★呼び出し側も修正
             previewImageBytes: previewImageBytes,
             maskTemplate: template,
             imageIndex: i + 1,
@@ -398,49 +427,59 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         ),
       );
 
-      if (maskedImage != null) {
-        successCount++;
-        // ★修正点3: マスク済みのImageオブジェクトをWebPに変換
-        final Uint8List webpBytes = (await FlutterImageCompress.compressWithList(
-          Uint8List.fromList(img.encodeJpg(maskedImage)),
-          minHeight: maskedImage.height,
-          minWidth: maskedImage.width,
-          quality: 85,
-          format: CompressFormat.webp,
-        )) as Uint8List;
-
-        final gptFuture = sendImageToGPT(
-          webpBytes,
-          isProductList: true,
-          company: selectedCompany,
-          client: client,
-        ).then<Map<String, dynamic>?>((result) {
-          return result;
-        }).catchError((e) {
-          debugPrint('GPT送信エラー(ファイル: ${file.name}): $e');
-          return null;
+      // --- プレビュー画面から戻ってきた後の本処理 ---
+      if (resultFromPreview != null) {
+        // compute を使って _processImageInIsolate をバックグラウンドで実行
+        final future = compute(_processImageInIsolate, _IsolateParams(
+          imagePath: resultFromPreview['path'],
+          maskRects: resultFromPreview['rects'],
+          maskTemplate: resultFromPreview['template'],
+          previewSize: resultFromPreview['previewSize'],
+        )).catchError((e) {
+            debugPrint('Isolate processing error: $e');
+            return null;
         });
-        gptResultFutures.add(gptFuture);
+
+        processedImageFutures.add(future);
       }
     }
   } finally {
     if (context.mounted) _hideLoadingDialog(context);
-    client.close();
   }
 
-  if (gptResultFutures.isEmpty) {
+  if (processedImageFutures.isEmpty) {
     if(context.mounted) showCustomSnackBar(context, '処理対象の画像がありませんでした。');
     return null;
   }
 
   if (!context.mounted) return null;
   setLoading(true);
-  showCustomSnackBar(context, '$successCount / ${pickedFiles.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...');
+  showCustomSnackBar(context, '${processedImageFutures.length} / ${pickedFiles.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...');
+
+  // Isolateでの処理が終わるのを待つ
+  final List<Uint8List?> allProcessedImages = await Future.wait(processedImageFutures);
+  final client = http.Client();
+  
+  List<Future<Map<String, dynamic>?>> gptResultFutures = [];
+  for (final imageBytes in allProcessedImages) {
+    if (imageBytes != null) {
+      final gptFuture = sendImageToGPT(
+        imageBytes,
+        isProductList: true,
+        company: selectedCompany,
+        client: client,
+      ).catchError((e) {
+        debugPrint('GPT送信エラー: $e');
+        return null;
+      });
+      gptResultFutures.add(gptFuture);
+    }
+  }
 
   final List<Map<String, dynamic>?> allGptRawResults = await Future.wait(gptResultFutures);
+  client.close();
 
   List<Map<String, String>> allExtractedProductRows = [];
-
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
 
   for(final gptResponse in allGptRawResults){

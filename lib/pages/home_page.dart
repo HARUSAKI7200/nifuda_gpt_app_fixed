@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import 'home_actions.dart';
 import '../widgets/home_widgets.dart';
 import '../widgets/custom_snackbar.dart';
-import 'dart:io'; // Directoryを使うために追加
-import 'package:path/path.dart' as p; // パス操作のために追加
-// Missing imports for CameraCapturePage and NifudaOcrConfirmPage
-import 'camera_capture_page.dart'; // 追加
-import 'nifuda_ocr_confirm_page.dart'; // 追加
+import 'dart:io'; 
+import 'package:path/path.dart' as p; 
+import 'camera_capture_page.dart';
+import 'nifuda_ocr_confirm_page.dart';
+
+// ★★★ 追加：新しいGemini用アクションファイルをインポート ★★★
+import 'home_actions_gemini.dart'; 
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -18,14 +20,11 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   String _projectTitle = '(新規プロジェクト)';
-  String _selectedCompany = 'T社'; // デフォルト選択
-  final List<String> _companies = ['T社', 'マスク処理なし', '動的マスク処理']; // 会社リスト
+  String _selectedCompany = 'T社';
+  final List<String> _companies = ['T社', 'マスク処理なし', '動的マスク処理'];
 
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-  // ★ 機能追加：照合パターンの選択状態を追加
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-  String _selectedMatchingPattern = 'T社（製番・項目番号）'; // デフォルトの照合パターン
-  final List<String> _matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）']; // 選択可能な照合パターンリスト
+  String _selectedMatchingPattern = 'T社（製番・項目番号）';
+  final List<String> _matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）'];
 
   List<List<String>> _nifudaData = [
     ['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード'],
@@ -34,7 +33,7 @@ class _HomePageState extends State<HomePage> {
     ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考'],
   ];
   bool _isLoading = false;
-  String? _currentProjectFolderPath; // 現在のプロジェクトの保存フォルダパス
+  String? _currentProjectFolderPath;
 
   void _setLoading(bool loading) {
     if (mounted) setState(() => _isLoading = loading);
@@ -60,7 +59,6 @@ class _HomePageState extends State<HomePage> {
               inputCode = value.trim();
             },
             onSubmitted: (value) {
-              // エンターキーでの確定も考慮
               Navigator.of(dialogContext).pop(inputCode);
             },
           ),
@@ -97,19 +95,19 @@ class _HomePageState extends State<HomePage> {
             _nifudaData = [['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード']];
             _productListKariData = [['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']];
           });
-          showCustomSnackBar(context, 'プロジェクト「$projectCode」が作成されました。'); // 修正
+          showCustomSnackBar(context, 'プロジェクト「$projectCode」が作成されました。');
         }
       } catch (e) {
         debugPrint('プロジェクトフォルダ作成エラー: $e');
         if (mounted) {
-          showCustomSnackBar(context, 'プロジェクトフォルダの作成に失敗しました: $e', isError: true); // 修正
+          showCustomSnackBar(context, 'プロジェクトフォルダの作成に失敗しました: $e', isError: true);
         }
       } finally {
         _setLoading(false);
       }
     } else {
       if (mounted) {
-        showCustomSnackBar(context, 'プロジェクト作成がキャンセルされました。'); // 修正
+        showCustomSnackBar(context, 'プロジェクト作成がキャンセルされました。');
       }
     }
   }
@@ -117,7 +115,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _handleCaptureNifuda() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
       return;
     }
 
@@ -128,7 +126,7 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute(builder: (_) => CameraCapturePage(
           overlayText: '荷札を枠に合わせて撮影',
           isProductListOcr: false,
-          projectFolderPath: _currentProjectFolderPath!, // パスを渡す
+          projectFolderPath: _currentProjectFolderPath!,
       )),
     );
 
@@ -173,8 +171,8 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ));
             if (proceed != true) {
-               if(mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。'); // 修正
-               break; // 処理を中断
+               if(mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
+               break;
             }
           } else {
             break;
@@ -186,12 +184,12 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _nifudaData.addAll(confirmedNifudaRows);
         });
-        showCustomSnackBar(context, '${confirmedNifudaRows.length}件の荷札データが追加されました。'); // 修正
+        showCustomSnackBar(context, '${confirmedNifudaRows.length}件の荷札データが追加されました。');
       } else if (mounted) {
-        showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。'); // 修正
+        showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。');
       }
     } else if (mounted) {
-      showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。'); // 修正
+      showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
     }
     _setLoading(false);
   }
@@ -225,20 +223,22 @@ class _HomePageState extends State<HomePage> {
   void _handleShowNifudaList() {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
       return;
     }
-    showAndExportNifudaListAction(context, _nifudaData, _projectTitle, _currentProjectFolderPath!); // パスを渡す
+    showAndExportNifudaListAction(context, _nifudaData, _projectTitle, _currentProjectFolderPath!);
   }
 
-  Future<void> _handlePickProductList() async {
+  // ★★★ 変更：GPT用の関数名を明確化 ★★★
+  Future<void> _handlePickProductListWithGpt() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
       return;
     }
     _setLoading(true);
-    final List<List<String>>? confirmedRows = await pickProcessAndConfirmProductListAction(context, _selectedCompany, _setLoading, _currentProjectFolderPath!); // パスを渡す
+    // GPT用のアクションを呼び出す
+    final List<List<String>>? confirmedRows = await pickProcessAndConfirmProductListAction(context, _selectedCompany, _setLoading, _currentProjectFolderPath!);
     if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
       setState(() {
         if(_productListKariData.length == 1 && _productListKariData.first[0] != 'ORDER No.') {
@@ -248,7 +248,33 @@ class _HomePageState extends State<HomePage> {
         }
         _productListKariData.addAll(confirmedRows);
       });
-      showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータが追加されました。'); // 修正
+      showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータが追加されました。');
+    }
+    if (mounted && _isLoading) {
+      _setLoading(false);
+    }
+  }
+
+  // ★★★ 追加：Gemini用のボタン処理を追加 ★★★
+  Future<void> _handlePickProductListWithGemini() async {
+    if (_isLoading) return;
+    if (_currentProjectFolderPath == null) {
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+      return;
+    }
+    _setLoading(true);
+    // Gemini用のアクションを呼び出す
+    final List<List<String>>? confirmedRows = await pickProcessAndConfirmProductListActionWithGemini(context, _selectedCompany, _setLoading, _currentProjectFolderPath!);
+    if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
+      setState(() {
+        if(_productListKariData.length == 1 && _productListKariData.first[0] != 'ORDER No.') {
+          _productListKariData = [
+              ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考'],
+          ];
+        }
+        _productListKariData.addAll(confirmedRows);
+      });
+      showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータが追加されました。');
     }
     if (mounted && _isLoading) {
       _setLoading(false);
@@ -258,31 +284,25 @@ class _HomePageState extends State<HomePage> {
   void _handleShowProductList() {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
       return;
     }
-    showAndExportProductListAction(context, _productListKariData, _currentProjectFolderPath!); // パスを渡す
+    showAndExportProductListAction(context, _productListKariData, _currentProjectFolderPath!);
   }
 
   void _handleStartMatching() {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true); // 修正
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
       return;
     }
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    // ★ 変更点：選択された照合パターンを渡す
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     startMatchingAndShowResultsAction(context, _nifudaData, _productListKariData, _selectedMatchingPattern, _currentProjectFolderPath!);
   }
   
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-  // ★ 機能追加：プロジェクト保存処理の呼び出し
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
   Future<void> _handleSaveProject() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, '保存するプロジェクトがありません。', isError: true); // 修正
+      showCustomSnackBar(context, '保存するプロジェクトがありません。', isError: true);
       return;
     }
     await saveProjectAction(
@@ -294,9 +314,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-  // ★ 機能追加：プロジェクト読み込み処理の呼び出し
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
   Future<void> _handleLoadProject() async {
     if (_isLoading) return;
     final loadedData = await loadProjectAction(context);
@@ -315,10 +332,7 @@ class _HomePageState extends State<HomePage> {
     final buttonColumnWidth = (MediaQuery.of(context).size.width * 0.5).clamp(280.0, 450.0);
 
     return Scaffold(
-      appBar: AppBar(title: Text('シンコー府中輸出課 荷札照合アプリ - $_projectTitle')), // タイトルにプロジェクト名を表示
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-      // ★ 変更点：bodyをSafeAreaでラップ
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      appBar: AppBar(title: Text('シンコー府中輸出課 荷札照合アプリ - $_projectTitle')),
       body: SafeArea(
         child: Stack(
           children: [
@@ -332,15 +346,12 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       SizedBox(
                         width: buttonColumnWidth,
-                        child: _buildActionButton(label: '新規作成', onPressed: _handleNewProject, icon: Icons.create_new_folder), // アイコン変更
+                        child: _buildActionButton(label: '新規作成', onPressed: _handleNewProject, icon: Icons.create_new_folder),
                       ),
                       const Spacer(),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-                  // ★ UI変更：保存・読み込みボタンを追加
-                  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
                   SizedBox(
                     width: buttonColumnWidth,
                     child: Row(
@@ -374,15 +385,15 @@ class _HomePageState extends State<HomePage> {
                         const SizedBox(height: 10),
                         _buildActionButton(label: '荷札リスト (${_nifudaData.length > 1 ? _nifudaData.length - 1 : 0}件)', onPressed: _handleShowNifudaList, icon: Icons.list_alt_rounded, isEnabled: _nifudaData.length > 1 && _currentProjectFolderPath != null),
                         const SizedBox(height: 10),
-                        _buildCompanySelector(), // マスク処理選択
+                        _buildCompanySelector(),
                         const SizedBox(height: 10),
-                        _buildActionButton(label: '製品リスト画像(JPEG)をOCRする', onPressed: _handlePickProductList, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null),
+                        // ★★★ UIにGemini用のボタンを追加 ★★★
+                        _buildActionButton(label: '製品リスト画像をOCRする (GPT)', onPressed: _handlePickProductListWithGpt, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null),
+                        const SizedBox(height: 10),
+                        _buildActionButton(label: '製品リスト画像をOCRする (Gemini)', onPressed: _handlePickProductListWithGemini, icon: Icons.flash_on, isEnabled: _currentProjectFolderPath != null, isEmphasized: true),
                         const SizedBox(height: 10),
                         _buildActionButton(label: '製品リスト (${_productListKariData.length > 1 ? _productListKariData.length - 1 : 0}件)', onPressed: _handleShowProductList, icon: Icons.inventory_2_outlined, isEnabled: _productListKariData.length > 1 && _currentProjectFolderPath != null),
                         const SizedBox(height: 20),
-                        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-                        // ★ UI変更：照合パターン選択ドロップダウンを追加
-                        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
                         _buildMatchingPatternSelector(),
                         const SizedBox(height: 10),
                         _buildActionButton(label: '照合を開始する', onPressed: _handleStartMatching, icon: Icons.compare_arrows_rounded, isEnabled: _nifudaData.length > 1 && _productListKariData.length > 1 && _currentProjectFolderPath != null, isEmphasized: true),
@@ -430,32 +441,31 @@ class _HomePageState extends State<HomePage> {
     bool isEmphasized = false,
     bool isInfoButton = false,
   }) {
+    // ボタンのスタイル定義（強調表示、情報ボタン、通常ボタン）
+    final ButtonStyle style = isInfoButton
+        ? ElevatedButton.styleFrom(
+            backgroundColor: Colors.blueGrey[600], foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+            textStyle: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+            fixedSize: const Size(150, 48),
+          )
+        : isEmphasized
+            ? ElevatedButton.styleFrom(
+                backgroundColor: Colors.green[700], foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+                textStyle: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)
+              )
+            : ElevatedButton.styleFrom(
+                backgroundColor: Colors.indigo[50], foregroundColor: Colors.indigo[700],
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+                textStyle: const TextStyle(fontSize: 14.5)
+              );
+              
     return ElevatedButton.icon(
       icon: Icon(icon, size: 18),
       label: Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 14.5)),
       onPressed: (_isLoading && onPressed != _handleNewProject && !isInfoButton) ? null : (isEnabled ? onPressed : null),
-      style: (isInfoButton
-          ? ElevatedButton.styleFrom(
-              backgroundColor: Colors.blueGrey[600],
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-              textStyle: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
-              fixedSize: const Size(150, 48),
-            )
-          : isEmphasized
-              ? ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green[700],
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
-                  textStyle: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)
-                )
-              : ElevatedButton.styleFrom(
-                  backgroundColor: Colors.indigo[50],
-                  foregroundColor: Colors.indigo[700],
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
-                  textStyle: const TextStyle(fontSize: 14.5)
-                )
-      ).copyWith(
+      style: style.copyWith(
         minimumSize: MaterialStateProperty.all(isInfoButton ? const Size(150, 48) : const Size(double.infinity, 48)),
       ),
     );
@@ -477,7 +487,7 @@ class _HomePageState extends State<HomePage> {
             return DropdownMenuItem<String>(
               value: company, 
               child: Text(
-                'マスク処理: $company', // ラベルを分かりやすく変更
+                'マスク処理: $company',
                 style: TextStyle(color: Colors.indigo[800], fontWeight: FontWeight.w600, fontSize: 14.5),
                 overflow: TextOverflow.ellipsis,
               )
@@ -492,9 +502,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-  // ★ UI変更：照合パターン選択ドロップダウンのWidgetを追加
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
   Widget _buildMatchingPatternSelector() {
     return Container(
       height: 48,
@@ -511,7 +518,7 @@ class _HomePageState extends State<HomePage> {
             return DropdownMenuItem<String>(
               value: pattern,
               child: Text(
-                '照合パターン: $pattern', // ラベルを追加
+                '照合パターン: $pattern',
                 style: TextStyle(color: Colors.green[800], fontWeight: FontWeight.w600, fontSize: 14.5),
                 overflow: TextOverflow.ellipsis,
               )

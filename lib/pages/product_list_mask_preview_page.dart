@@ -1,3 +1,4 @@
+// lib/pages/product_list_mask_preview_page.dart
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -7,7 +8,10 @@ import '../utils/ocr_masker.dart';
 import '../widgets/custom_snackbar.dart';
 
 class ProductListMaskPreviewPage extends StatefulWidget {
-  final img.Image originalImage; // ★修正点: バイト列ではなくImageオブジェクトを受け取る
+  // ★★★ 修正点 ★★★
+  // Isolate化に伴い、高解像度の元画像(Imageオブジェクト)は受け取らず、
+  // 元のファイルパスと、軽量なプレビュー用のバイト列のみを受け取るように変更
+  final String originalImagePath;
   final Uint8List previewImageBytes;
   final String maskTemplate;
   final int imageIndex;
@@ -15,7 +19,7 @@ class ProductListMaskPreviewPage extends StatefulWidget {
 
   const ProductListMaskPreviewPage({
     super.key,
-    required this.originalImage, // ★修正点
+    required this.originalImagePath, // ★修正: originalImage -> originalImagePath
     required this.previewImageBytes,
     required this.maskTemplate,
     required this.imageIndex,
@@ -32,49 +36,36 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   Rect? _currentDrawingRect;
   final GlobalKey _imageKey = GlobalKey();
   Size? _imageRenderSize;
-  Size? _actualImageSize;
   bool _isLoading = false;
 
-  late img.Image _maskedImage; // ★修正点: マスク処理後のImageオブジェクトを保持
+  // プレビュー表示用のImageオブジェクト
+  late img.Image _previewImage;
 
   @override
   void initState() {
     super.initState();
-    // 最初にオリジナル画像をコピーして、マスク処理用のオブジェクトを作成
-    _maskedImage = img.copy(widget.originalImage);
+    // 軽量なプレビューバイト列から画像をデコード（これは高速）
+    _previewImage = img.decodeImage(widget.previewImageBytes)!;
+
+    // T社のような固定テンプレートの場合は、プレビュー画像にマスクをかける
     if (widget.maskTemplate != 'dynamic') {
-      _applyFixedMask();
-    } else {
-      _getActualImageSize();
+      _applyFixedMaskToPreview();
     }
   }
 
-  // ★修正点: applyMaskToImageの引数をImageオブジェクトに変更
-  Future<void> _applyFixedMask() async {
+  // プレビュー画像に固定マスクを適用する非同期処理
+  Future<void> _applyFixedMaskToPreview() async {
     setState(() => _isLoading = true);
     try {
-      _maskedImage = await applyMaskToImage(img.copy(_maskedImage), // コピーを渡す
-          template: widget.maskTemplate);
-      if (mounted) {
-        setState(() {});
-      }
+      // applyMaskToImageはImageオブジェクトを扱うのでそのまま使える
+      _previewImage = await applyMaskToImage(
+        img.copyCrop(_previewImage, x: 0, y: 0, width: _previewImage.width, height: _previewImage.height),
+        template: widget.maskTemplate
+      );
     } catch (e) {
-      if (mounted) {
-        showCustomSnackBar(context, 'マスク処理エラー: $e', isError: true, showAtTop: true);
-      }
-      rethrow;
+      if (mounted) showCustomSnackBar(context, 'プレビューへのマスク処理エラー: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _getActualImageSize() async {
-    // 実際の画像サイズは、既にデコードされているoriginalImageから取得できる
-    if (mounted) {
-      setState(() {
-        _actualImageSize =
-            Size(widget.originalImage.width.toDouble(), widget.originalImage.height.toDouble());
-      });
     }
   }
 
@@ -106,9 +97,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   void _onPanEnd(DragEndDetails details) {
     if (widget.maskTemplate != 'dynamic' || _currentDrawingRect == null) return;
     if (_currentDrawingRect!.width.abs() < 10 || _currentDrawingRect!.height.abs() < 10) {
-       setState(() {
-        _currentDrawingRect = null;
-      });
+       setState(() { _currentDrawingRect = null; });
       return;
     }
     setState(() {
@@ -122,40 +111,17 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     });
   }
 
-  // 動的マスクを適用して画像を返す
-  Future<void> _confirmDynamicMask() async {
-    if (_actualImageSize == null || _imageRenderSize == null) return;
-    setState(() => _isLoading = true);
+  // ★★★ 送信ボタンの処理 ★★★
+  void _confirmAndPop() {
+    if (_isLoading) return;
 
-    try {
-      final double scaleX = _actualImageSize!.width / _imageRenderSize!.width;
-      final double scaleY = _actualImageSize!.height / _imageRenderSize!.height;
-
-      final List<Rect> actualMaskRects = _maskRects.map((rect) {
-        return Rect.fromLTRB(
-          rect.left * scaleX,
-          rect.top * scaleY,
-          rect.right * scaleX,
-          rect.bottom * scaleY,
-        );
-      }).toList();
-
-      _maskedImage = await applyMaskToImage(
-        img.copy(widget.originalImage), // ここでもコピーを渡す
-        template: 'dynamic',
-        dynamicMaskRects: actualMaskRects,
-      );
-
-      if (mounted) {
-        Navigator.pop(context, _maskedImage); // 最終的なImageオブジェクトを返す
-      }
-    } catch(e) {
-      if (mounted) {
-        showCustomSnackBar(context, '動的マスクの適用に失敗: $e', isError: true, showAtTop: true);
-      }
-    } finally {
-       if (mounted) setState(() => _isLoading = false);
-    }
+    // Isolateで処理するために、元のパス、マスク範囲、テンプレート名、プレビューサイズをMapで返す
+    Navigator.pop(context, {
+      'path': widget.originalImagePath,
+      'rects': _maskRects,
+      'template': widget.maskTemplate,
+      'previewSize': Size(_previewImage.width.toDouble(), _previewImage.height.toDouble()), // Isolateでの計算用にプレビューサイズを渡す
+    });
   }
 
 
@@ -185,10 +151,8 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
                 padding: const EdgeInsets.all(8.0),
                 child: Center(
                   child: _isLoading
-                    ? const CircularProgressIndicator()
-                    : widget.maskTemplate == 'dynamic'
-                        ? _buildDynamicMaskEditor()
-                        : _buildFixedMaskViewer(),
+                      ? const CircularProgressIndicator()
+                      : _buildEditor(),
                 ),
               ),
             ),
@@ -208,14 +172,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
                   ElevatedButton.icon(
                     icon: const Icon(Icons.send_rounded),
                     label: const Text('この内容で送信'),
-                    onPressed: _isLoading ? null : () {
-                      if (widget.maskTemplate == 'dynamic') {
-                        _confirmDynamicMask();
-                      } else {
-                         // ★修正点: 固定マスクの場合は既に処理済みなので、そのImageオブジェクトを返す
-                        Navigator.pop(context, _maskedImage);
-                      }
-                    },
+                    onPressed: _isLoading ? null : _confirmAndPop, // ★修正: 新しい送信処理を呼ぶ
                     style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green[700],
                         foregroundColor: Colors.white),
@@ -229,40 +186,39 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     );
   }
 
-  // 固定マスク表示用Widget
-  Widget _buildFixedMaskViewer() {
-    return FutureBuilder(
-      future: null,
-      builder: (context, snapshot) {
-        if (_isLoading) {
-          return const CircularProgressIndicator();
-        }
-        // ここでは_maskedImageが既にセットされている前提
-        return InteractiveViewer(
-          child: Image.memory(Uint8List.fromList(img.encodeJpg(_maskedImage))),
-        );
-      },
-    );
-  }
+  Widget _buildEditor() {
+    // 動的マスクの場合は描画用のPainterを、固定マスクの場合は空のPainterを設定
+    final painter = widget.maskTemplate == 'dynamic' 
+      ? MaskPainter(rects: _maskRects, currentDrawingRect: _currentDrawingRect)
+      : MaskPainter(rects: [], currentDrawingRect: null);
 
-  // 動的マスク編集用Widget
-  Widget _buildDynamicMaskEditor() {
-    if (_actualImageSize == null) {
-      return const CircularProgressIndicator();
-    }
+    // 動的マスクの場合は元のプレビューを、固定マスクの場合は加工済みのプレビュー画像を表示
+    final imageWidget = Image.memory(
+        widget.maskTemplate == 'dynamic' 
+            ? widget.previewImageBytes 
+            : Uint8List.fromList(img.encodeJpg(_previewImage))
+    );
+
     return GestureDetector(
-      onPanStart: _onPanStart,
-      onPanUpdate: _onPanUpdate,
-      onPanEnd: _onPanEnd,
+      onPanStart: widget.maskTemplate == 'dynamic' ? _onPanStart : null,
+      onPanUpdate: widget.maskTemplate == 'dynamic' ? _onPanUpdate : null,
+      onPanEnd: widget.maskTemplate == 'dynamic' ? _onPanEnd : null,
       child: InteractiveViewer(
         maxScale: 5.0,
         child: CustomPaint(
           key: _imageKey,
-          foregroundPainter: MaskPainter(
-            rects: _maskRects,
-            currentDrawingRect: _currentDrawingRect,
+          foregroundPainter: painter,
+          child: LayoutBuilder( // 描画サイズを取得するためにLayoutBuilderを使用
+            builder: (context, constraints) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  final renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+                  _imageRenderSize = renderBox?.size;
+                }
+              });
+              return imageWidget;
+            },
           ),
-          child: Image.memory(widget.previewImageBytes),
         ),
       ),
     );
