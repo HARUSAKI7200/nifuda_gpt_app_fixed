@@ -8,7 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
-import 'package:http/http.dart' as http; // ★ httpパッケージをインポート
+import 'package:http/http.dart' as http;
 
 import '../utils/gpt_service.dart';
 import '../utils/ocr_masker.dart';
@@ -340,9 +340,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
 
   if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
   
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-  // ★ 変更点：http.Clientを生成
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
   final client = http.Client();
   try {
     for (int i = 0; i < pickedFiles.length; i++) {
@@ -350,6 +347,13 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
       if (!context.mounted) return null;
 
       Uint8List originalImageBytes = await file.readAsBytes();
+      // ★修正点1: デコードを最初に行う
+      final img.Image? decodedImage = img.decodeImage(originalImageBytes);
+      if (decodedImage == null) {
+        debugPrint('Image decoding failed for file: ${file.name}');
+        continue;
+      }
+
       Uint8List previewImageBytes = originalImageBytes;
 
       final tempDir = await getTemporaryDirectory();
@@ -361,13 +365,11 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
       } else {
         try {
           const int previewMaxDimension = 1500;
-          final img.Image? decoded = img.decodeImage(originalImageBytes);
-          
-          if (decoded != null && (decoded.width > previewMaxDimension || decoded.height > previewMaxDimension)) {
+          if (decodedImage.width > previewMaxDimension || decodedImage.height > previewMaxDimension) {
               previewImageBytes = await FlutterImageCompress.compressWithList(
                 originalImageBytes,
-                minHeight: decoded.height > decoded.width ? previewMaxDimension : 0,
-                minWidth: decoded.width > decoded.height ? previewMaxDimension : 0,
+                minHeight: decodedImage.height > decodedImage.width ? previewMaxDimension : 0,
+                minWidth: decodedImage.width > decodedImage.height ? previewMaxDimension : 0,
                 quality: 85,
               );
               await cacheFile.writeAsBytes(previewImageBytes);
@@ -382,11 +384,12 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
       
       if (!context.mounted) return null;
 
-      final Uint8List? maskedImageBytes = await Navigator.push<Uint8List>(
+      // ★修正点2: Imageオブジェクトをマスクプレビューページに渡す
+      final img.Image? maskedImage = await Navigator.push<img.Image>(
         context,
         MaterialPageRoute(
           builder: (_) => ProductListMaskPreviewPage(
-            originalImageBytes: originalImageBytes,
+            originalImage: decodedImage, // デコード済みのImageオブジェクトを渡す
             previewImageBytes: previewImageBytes,
             maskTemplate: template,
             imageIndex: i + 1,
@@ -395,24 +398,22 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         ),
       );
 
-      if (maskedImageBytes != null) {
+      if (maskedImage != null) {
         successCount++;
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 修正点: FlutterImageCompressを使ってWebPに変換
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★修正点3: マスク済みのImageオブジェクトをWebPに変換
         final Uint8List webpBytes = (await FlutterImageCompress.compressWithList(
-          maskedImageBytes,
-          minHeight: 1920,
-          minWidth: 1080,
+          Uint8List.fromList(img.encodeJpg(maskedImage)),
+          minHeight: maskedImage.height,
+          minWidth: maskedImage.width,
           quality: 85,
           format: CompressFormat.webp,
         )) as Uint8List;
 
         final gptFuture = sendImageToGPT(
-          webpBytes, // WebP形式のバイト列を送信
+          webpBytes,
           isProductList: true,
           company: selectedCompany,
-          client: client, // ★ clientを渡す
+          client: client,
         ).then<Map<String, dynamic>?>((result) {
           return result;
         }).catchError((e) {
@@ -424,7 +425,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
     }
   } finally {
     if (context.mounted) _hideLoadingDialog(context);
-    client.close(); // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★ ★ 最後に必ずclientを閉じる
+    client.close();
   }
 
   if (gptResultFutures.isEmpty) {

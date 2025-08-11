@@ -1,22 +1,22 @@
-// lib/pages/product_list_mask_preview_page.dart
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:ui' as ui; // ImageInfoを取得するために必要
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img;
 import '../utils/ocr_masker.dart';
-import '../widgets/custom_snackbar.dart'; // custom_snackbar.dartをインポート
+import '../widgets/custom_snackbar.dart';
 
 class ProductListMaskPreviewPage extends StatefulWidget {
-  final Uint8List originalImageBytes;
-  final Uint8List previewImageBytes; // ★ 追加：プレビュー用の軽量画像
+  final img.Image originalImage; // ★修正点: バイト列ではなくImageオブジェクトを受け取る
+  final Uint8List previewImageBytes;
   final String maskTemplate;
   final int imageIndex;
   final int totalImages;
 
   const ProductListMaskPreviewPage({
     super.key,
-    required this.originalImageBytes,
-    required this.previewImageBytes, // ★ 追加
+    required this.originalImage, // ★修正点
+    required this.previewImageBytes,
     required this.maskTemplate,
     required this.imageIndex,
     required this.totalImages,
@@ -28,7 +28,6 @@ class ProductListMaskPreviewPage extends StatefulWidget {
 }
 
 class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage> {
-  // 動的マスク用の状態
   final List<Rect> _maskRects = [];
   Rect? _currentDrawingRect;
   final GlobalKey _imageKey = GlobalKey();
@@ -36,30 +35,29 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   Size? _actualImageSize;
   bool _isLoading = false;
 
-  // 固定マスク用の状態
-  Future<Uint8List>? _fixedMaskingFuture;
-  Uint8List? _fixedMaskedImageBytes;
+  late img.Image _maskedImage; // ★修正点: マスク処理後のImageオブジェクトを保持
 
   @override
   void initState() {
     super.initState();
+    // 最初にオリジナル画像をコピーして、マスク処理用のオブジェクトを作成
+    _maskedImage = img.copy(widget.originalImage);
     if (widget.maskTemplate != 'dynamic') {
-      _fixedMaskingFuture = _applyFixedMask();
+      _applyFixedMask();
     } else {
-      // 動的マスクの場合、画像の実際のサイズを取得する
-      // ★ 重要な注意：サイズ計算には必ずオリジナル画像を使うこと！
       _getActualImageSize();
     }
   }
 
-  Future<Uint8List> _applyFixedMask() async {
+  // ★修正点: applyMaskToImageの引数をImageオブジェクトに変更
+  Future<void> _applyFixedMask() async {
     setState(() => _isLoading = true);
     try {
-      // ★ 処理には必ずオリジナル画像を使う！
-      final bytes = await applyMaskToImage(widget.originalImageBytes,
+      _maskedImage = await applyMaskToImage(img.copy(_maskedImage), // コピーを渡す
           template: widget.maskTemplate);
-      if (mounted) setState(() => _fixedMaskedImageBytes = bytes);
-      return bytes;
+      if (mounted) {
+        setState(() {});
+      }
     } catch (e) {
       if (mounted) {
         showCustomSnackBar(context, 'マスク処理エラー: $e', isError: true, showAtTop: true);
@@ -71,21 +69,11 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   }
 
   Future<void> _getActualImageSize() async {
-    // ★ サイズ計算には必ずオリジナル画像を使う！
-    final image = Image.memory(widget.originalImageBytes);
-    final completer = Completer<ui.Image>();
-    image.image
-        .resolve(const ImageConfiguration())
-        .addListener(ImageStreamListener((info, _) {
-      if (!completer.isCompleted) {
-        completer.complete(info.image);
-      }
-    }));
-    final ui.Image imageInfo = await completer.future;
+    // 実際の画像サイズは、既にデコードされているoriginalImageから取得できる
     if (mounted) {
       setState(() {
         _actualImageSize =
-            Size(imageInfo.width.toDouble(), imageInfo.height.toDouble());
+            Size(widget.originalImage.width.toDouble(), widget.originalImage.height.toDouble());
       });
     }
   }
@@ -117,7 +105,6 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
 
   void _onPanEnd(DragEndDetails details) {
     if (widget.maskTemplate != 'dynamic' || _currentDrawingRect == null) return;
-    // 面積が小さすぎる矩形は無視
     if (_currentDrawingRect!.width.abs() < 10 || _currentDrawingRect!.height.abs() < 10) {
        setState(() {
         _currentDrawingRect = null;
@@ -125,12 +112,11 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       return;
     }
     setState(() {
-      // 正規化された矩形を保存
       _maskRects.add(Rect.fromLTRB(
           _currentDrawingRect!.left < _currentDrawingRect!.right ? _currentDrawingRect!.left : _currentDrawingRect!.right,
           _currentDrawingRect!.top < _currentDrawingRect!.bottom ? _currentDrawingRect!.top : _currentDrawingRect!.bottom,
           _currentDrawingRect!.left > _currentDrawingRect!.right ? _currentDrawingRect!.left : _currentDrawingRect!.right,
-          _currentDrawingRect!.top > _currentDrawingRect!.bottom ? _currentDrawingRect!.top : _currentDrawingRect!.bottom
+          _currentDrawingRect!.top > _currentDrawingRect!.bottom ? _currentDrawingRect!.bottom : _currentDrawingRect!.top
       ));
       _currentDrawingRect = null;
     });
@@ -142,7 +128,6 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     setState(() => _isLoading = true);
 
     try {
-      // 画面上の描画座標を、実際の画像座標に変換
       final double scaleX = _actualImageSize!.width / _imageRenderSize!.width;
       final double scaleY = _actualImageSize!.height / _imageRenderSize!.height;
 
@@ -155,15 +140,14 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
         );
       }).toList();
 
-      // ★ 処理には必ずオリジナル画像を使う！
-      final maskedBytes = await applyMaskToImage(
-        widget.originalImageBytes,
+      _maskedImage = await applyMaskToImage(
+        img.copy(widget.originalImage), // ここでもコピーを渡す
         template: 'dynamic',
         dynamicMaskRects: actualMaskRects,
       );
 
       if (mounted) {
-        Navigator.pop(context, maskedBytes);
+        Navigator.pop(context, _maskedImage); // 最終的なImageオブジェクトを返す
       }
     } catch(e) {
       if (mounted) {
@@ -228,9 +212,8 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
                       if (widget.maskTemplate == 'dynamic') {
                         _confirmDynamicMask();
                       } else {
-                        if (_fixedMaskedImageBytes != null) {
-                          Navigator.pop(context, _fixedMaskedImageBytes);
-                        }
+                         // ★修正点: 固定マスクの場合は既に処理済みなので、そのImageオブジェクトを返す
+                        Navigator.pop(context, _maskedImage);
                       }
                     },
                     style: ElevatedButton.styleFrom(
@@ -248,22 +231,16 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
 
   // 固定マスク表示用Widget
   Widget _buildFixedMaskViewer() {
-    return FutureBuilder<Uint8List>(
-      future: _fixedMaskingFuture,
+    return FutureBuilder(
+      future: null,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (_isLoading) {
           return const CircularProgressIndicator();
         }
-        if (snapshot.hasError) {
-          return const Text('マスク処理に失敗しました', style: TextStyle(color: Colors.red));
-        }
-        if (snapshot.hasData) {
-          // 固定マスクはオリジナルから生成されたバイト列を使うのでこれでOK
-          return InteractiveViewer(
-            child: Image.memory(snapshot.data!),
-          );
-        }
-        return const Text('画像を読み込めません');
+        // ここでは_maskedImageが既にセットされている前提
+        return InteractiveViewer(
+          child: Image.memory(Uint8List.fromList(img.encodeJpg(_maskedImage))),
+        );
       },
     );
   }
@@ -281,14 +258,10 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
         maxScale: 5.0,
         child: CustomPaint(
           key: _imageKey,
-          // 前景にマスク矩形を描画
           foregroundPainter: MaskPainter(
             rects: _maskRects,
             currentDrawingRect: _currentDrawingRect,
           ),
-          // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-          // ★ 変更点：背景画像には軽量版のプレビュー画像を使う
-          // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
           child: Image.memory(widget.previewImageBytes),
         ),
       ),
@@ -296,7 +269,6 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   }
 }
 
-// マスク描画用のCustomPainter
 class MaskPainter extends CustomPainter {
   final List<Rect> rects;
   final Rect? currentDrawingRect;
@@ -309,12 +281,10 @@ class MaskPainter extends CustomPainter {
       ..color = Colors.black
       ..style = PaintingStyle.fill;
       
-    // 確定したマスク領域を描画
     for (final rect in rects) {
       canvas.drawRect(rect, paint);
     }
     
-    // 現在ドラッグ中のマスク領域を描画
     if (currentDrawingRect != null) {
       final drawingPaint = Paint()
       ..color = Colors.blue.withOpacity(0.5)

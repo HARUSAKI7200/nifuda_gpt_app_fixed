@@ -1,51 +1,46 @@
 import 'dart:typed_data';
-import 'package:flutter/widgets.dart'; // Rectを使うために追加
+import 'package:flutter/widgets.dart';
 import 'package:image/image.dart' as img;
 import 'mask_profiles/masker_t.dart' as masker_t;
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ 変更点：動的マスクに対応させるため、引数とロジックを追加
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
 /// 指定テンプレートまたは動的範囲に従って画像にマスク処理を適用して返す。
-Future<Uint8List> applyMaskToImage(
-  Uint8List originalBytes, {
+// ★修正点: 引数をUint8Listからimg.Imageに変更
+Future<img.Image> applyMaskToImage(
+  img.Image originalImage, {
   String template = 'default',
-  List<Rect>? dynamicMaskRects, // 動的マスクの範囲を格納するリスト
+  List<Rect>? dynamicMaskRects,
 }) async {
-  final decoded = img.decodeImage(originalBytes);
-  if (decoded == null) {
-    throw Exception('画像のデコードに失敗しました');
-  }
+  // ここではデコードは不要
 
   switch (template) {
     case 't':
-      return masker_t.maskImage(originalBytes);
+      // masker_t.maskImageはバイト列を扱うため、一度エンコードして渡す
+      final bytes = Uint8List.fromList(img.encodeJpg(originalImage, quality: 85));
+      final maskedBytes = await masker_t.maskImage(bytes);
+      final maskedImage = img.decodeImage(maskedBytes);
+      return maskedImage!;
 
     case 'none':
-      return Uint8List.fromList(img.encodeJpg(decoded, quality: 85));
+      return originalImage;
 
-    case 'dynamic': // 動的マスク処理用の新しいケース
+    case 'dynamic':
       if (dynamicMaskRects == null || dynamicMaskRects.isEmpty) {
-        // マスク範囲が指定されていない場合は何もしない
-        return originalBytes;
+        return originalImage;
       }
 
-      final int imageWidth = decoded.width;
-      final int imageHeight = decoded.height;
-      final maskColor = img.ColorRgb8(0, 0, 0); // マスクの色（黒）
+      final int imageWidth = originalImage.width;
+      final int imageHeight = originalImage.height;
+      final maskColor = img.ColorRgb8(0, 0, 0);
 
       // 渡された各Rect範囲を塗りつぶす
       for (final rect in dynamicMaskRects) {
-        // FlutterのRect座標をimageライブラリの座標に変換
         final x1 = rect.left.toInt().clamp(0, imageWidth);
         final y1 = rect.top.toInt().clamp(0, imageHeight);
         final x2 = rect.right.toInt().clamp(0, imageWidth);
         final y2 = rect.bottom.toInt().clamp(0, imageHeight);
         
-        // fillRectはx1, y1, x2, y2で矩形を指定する
         img.fillRect(
-          decoded,
+          originalImage,
           x1: x1,
           y1: y1,
           x2: x2,
@@ -53,7 +48,7 @@ Future<Uint8List> applyMaskToImage(
           color: maskColor,
         );
       }
-      return Uint8List.fromList(img.encodeJpg(decoded, quality: 85));
+      return originalImage;
 
     default:
       throw UnimplementedError('マスクテンプレート [$template] は未対応です');
