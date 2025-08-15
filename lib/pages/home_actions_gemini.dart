@@ -9,13 +9,14 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
-import 'package:image/image.dart' as img;
+// import 'package:image/image.dart' as img; // このファイルでは不要に
 import 'package:http/http.dart' as http;
 
 import '../utils/gemini_service.dart';
-import '../utils/ocr_masker.dart';
+// import '../utils/ocr_masker.dart'; // Isolate側に移譲
 import '../utils/product_matcher.dart';
 import '../utils/excel_export.dart';
+import '../utils/image_processor.dart'; // ★★★ 追加 ★★★
 import 'camera_capture_page.dart';
 import 'nifuda_ocr_confirm_page.dart';
 import 'product_list_ocr_confirm_page.dart';
@@ -26,8 +27,7 @@ import '../widgets/custom_snackbar.dart';
 import 'directory_image_picker_page.dart';
 
 
-// (このファイル内では共通のヘルパー関数やクラスも定義します)
-
+// --- (ヘルパー関数は変更なし) ---
 void _showLoadingDialog(BuildContext context, String message) {
   if (!context.mounted) return;
   showDialog(
@@ -75,9 +75,10 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
+
 // ★★★ 追加：Geminiで荷札OCRを行う新機能 ★★★
 Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(BuildContext context, String projectFolderPath) async {
-  // ★★★ 変更点：CameraCapturePageにGeminiのサービス関数を渡す ★★★
+  // (この関数は変更なし)
   final List<Map<String, dynamic>>? allAiResults =
       await Navigator.push<List<Map<String, dynamic>>>(
     context,
@@ -230,37 +231,21 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
       if (resultFromPreview != null) {
         if(context.mounted) _showLoadingDialog(context, '画像を処理中... (${i + 1}/${pickedFiles.length})');
         
-        final imagePath = resultFromPreview['path'] as String;
-        final maskRects = resultFromPreview['rects'] as List<Rect>;
-        final maskTemplate = resultFromPreview['template'] as String;
-        final previewSize = resultFromPreview['previewSize'] as Size;
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★ 変更点：重い画像処理をcomputeで別スレッドに逃がす
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        final Map<String, dynamic> isolateArgs = {
+          'imagePath': resultFromPreview['path'] as String,
+          'rects': resultFromPreview['rects'] as List<Rect>,
+          'template': resultFromPreview['template'] as String,
+          'previewSize': resultFromPreview['previewSize'] as Size,
+        };
+        
+        final Uint8List? webpBytes = await compute(processImageForOcr, isolateArgs);
 
-        final originalImageBytes = await File(imagePath).readAsBytes();
-        final img.Image originalImage = img.decodeImage(originalImageBytes)!;
-
-        final double scaleX = originalImage.width / previewSize.width;
-        final double scaleY = originalImage.height / previewSize.height;
-
-        final List<Rect> actualMaskRects = maskRects.map((rect) {
-          return Rect.fromLTRB(
-            rect.left * scaleX, rect.top * scaleY,
-            rect.right * scaleX, rect.bottom * scaleY,
-          );
-        }).toList();
-
-        final img.Image maskedImage = applyMaskToImage(
-          originalImage,
-          template: maskTemplate,
-          dynamicMaskRects: actualMaskRects,
-        );
-
-        final Uint8List webpBytes = (await FlutterImageCompress.compressWithList(
-          Uint8List.fromList(img.encodeJpg(maskedImage)),
-          minHeight: maskedImage.height, minWidth: maskedImage.width,
-          quality: 85, format: CompressFormat.webp,
-        )) as Uint8List;
-
-        finalImagesToSend.add(webpBytes);
+        if (webpBytes != null) {
+          finalImagesToSend.add(webpBytes);
+        }
         if(context.mounted) _hideLoadingDialog(context);
       }
     }

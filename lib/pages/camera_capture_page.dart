@@ -101,7 +101,10 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       );
       _controller = CameraController(
         backCamera,
-        ResolutionPreset.veryHigh,
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        // ★ 変更点：解像度を veryHigh から high に変更し、処理負荷と速度のバランスを取る
+        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        ResolutionPreset.high,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
@@ -216,9 +219,6 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
           height: finalCropH,
       );
       
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-      // ★ 変更点：品質を100%に指定してJPGにエンコード
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
       final Uint8List bytesForProcessing = Uint8List.fromList(img.encodeJpg(croppedImage, quality: 100));
 
       if(mounted) setState(() => _requestedImageCount++);
