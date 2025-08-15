@@ -12,7 +12,7 @@ import 'package:http/http.dart' as http;
 
 import '../widgets/custom_snackbar.dart';
 
-// ★★★ 追加：AIサービスを関数として受け取るための型定義 ★★★
+// ★★★ AIサービスを関数として受け取るための型定義（変更なし） ★★★
 typedef AiServiceFunction = Future<Map<String, dynamic>?> Function(
   Uint8List imageBytes, {
   required bool isProductList,
@@ -28,7 +28,6 @@ class CameraCapturePage extends StatefulWidget {
   final bool isProductListOcr;
   final String? companyForGpt;
   final String projectFolderPath;
-  // ★★★ 追加：使用するAIサービスを外部から受け取る ★★★
   final AiServiceFunction aiService;
 
   const CameraCapturePage({
@@ -39,7 +38,7 @@ class CameraCapturePage extends StatefulWidget {
     required this.isProductListOcr,
     this.companyForGpt,
     required this.projectFolderPath,
-    required this.aiService, // ★★★ 追加 ★★★
+    required this.aiService,
   });
 
   @override
@@ -102,7 +101,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       );
       _controller = CameraController(
         backCamera,
-        ResolutionPreset.high,
+        ResolutionPreset.veryHigh,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
@@ -132,18 +131,18 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
     });
   }
 
-  Future<String?> _saveCroppedImage(Uint8List imageBytes, String fileName) async {
+  Future<void> _saveCroppedImage(Uint8List imageBytes, String fileName) async {
     if (!Platform.isAndroid) {
       debugPrint("この画像保存方法はAndroid専用です。");
-      return null;
-    }
-    final status = await Permission.storage.request();
-    if (!status.isGranted) {
-      if (!await Permission.manageExternalStorage.request().isGranted) {
-        throw Exception('ストレージへのアクセス権限がありません。');
-      }
+      return;
     }
     try {
+      final status = await Permission.storage.request();
+      if (!status.isGranted) {
+        if (!await Permission.manageExternalStorage.request().isGranted) {
+          throw Exception('ストレージへのアクセス権限がありません。');
+        }
+      }
       final String albumPath = p.join(widget.projectFolderPath, "荷札画像");
       final Directory albumDir = Directory(albumPath);
       if (!await albumDir.exists()) {
@@ -152,10 +151,16 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       final File file = File(p.join(albumDir.path, fileName));
       await file.writeAsBytes(imageBytes);
       await MediaScanner.loadMedia(path: file.path);
-      return p.join(p.basename(widget.projectFolderPath), "荷札画像", fileName);
+      
+      if (mounted) {
+        final savedPath = p.join(p.basename(widget.projectFolderPath), "荷札画像", fileName);
+        showCustomSnackBar(context, '画像を保存しました: $savedPath', showAtTop: true);
+      }
     } catch (e) {
       debugPrint('画像保存エラー: $e');
-      throw Exception('画像保存に失敗しました: $e');
+      if (mounted) {
+        showCustomSnackBar(context, '画像保存エラー: ${e.toString()}', isError: true, showAtTop: true);
+      }
     }
   }
 
@@ -211,16 +216,14 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
           height: finalCropH,
       );
       
-      final img.Image resizedImage = img.copyResize(
-        croppedImage,
-        width: 1200,
-      );
-
-      final Uint8List bytesForProcessing = Uint8List.fromList(img.encodeJpg(resizedImage));
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      // ★ 変更点：品質を100%に指定してJPGにエンコード
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      final Uint8List bytesForProcessing = Uint8List.fromList(img.encodeJpg(croppedImage, quality: 100));
 
       if(mounted) setState(() => _requestedImageCount++);
 
-      // ★★★ 変更点：コンストラクタで渡されたAIサービスを呼び出す ★★★
+      // AIへの送信処理を開始
       final aiFuture = widget.aiService(
         bytesForProcessing,
         isProductList: widget.isProductListOcr,
@@ -236,15 +239,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       _aiResultFutures.add(aiFuture);
       
       final String fileName = 'nifuda_cropped_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      _saveCroppedImage(bytesForProcessing, fileName).then((savedPath) {
-          if (savedPath != null && mounted) {
-              showCustomSnackBar(layoutContext, '画像を保存しました: $savedPath', showAtTop: true);
-          }
-      }).catchError((e) {
-          if (mounted) {
-              showCustomSnackBar(layoutContext, '画像保存エラー: ${e.toString()}', isError: true, showAtTop: true);
-          }
-      });
+      unawaited(_saveCroppedImage(bytesForProcessing, fileName));
       
     } catch (e, s) {
       debugPrint('撮影または処理エラー: $e');
