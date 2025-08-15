@@ -1,5 +1,5 @@
 // lib/utils/image_processor.dart
-import 'dart:io';
+import 'dart.io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -11,17 +11,16 @@ import 'ocr_masker.dart';
 ///
 /// この関数はUIスレッドをブロックすることなく、以下の処理をバックグラウンドで実行します。
 /// 1. ファイルパスから画像を読み込み、デコードする
-/// 2. プレビューサイズとの比率から、マスクを適用する実際の座標を計算する
-/// 3. マスク処理を適用する
-/// 4. AI送信用にWebP形式に圧縮して返す
+/// 2. ★★★ 画像の向きをEXIF情報に基づいて補正する ★★★
+/// 3. プレビューサイズとの比率から、マスクを適用する実際の座標を計算する
+/// 4. マスク処理を適用する
+/// 5. AI送信用にWebP形式に圧縮して返す
 Future<Uint8List?> processImageForOcr(Map<String, dynamic> args) async {
   final String imagePath = args['imagePath'];
-  // ★★★ 変更点：MapのリストからRectのリストに復元 ★★★
   final List<Rect> maskRects = (args['rects'] as List)
       .map((r) => Rect.fromLTRB(r['l'], r['t'], r['r'], r['b']))
       .toList();
   final String maskTemplate = args['template'];
-  // ★★★ 変更点：MapからSizeに復元 ★★★
   final Size previewSize = Size(args['previewW'], args['previewH']);
 
   try {
@@ -32,7 +31,7 @@ Future<Uint8List?> processImageForOcr(Map<String, dynamic> args) async {
       return null;
     }
 
-    // 画像の向きを自動補正
+    // ★★★ 修正点：画像の向きを自動補正する処理を復活 ★★★
     originalImage = img.bakeOrientation(originalImage);
 
     final double scaleX = originalImage.width / previewSize.width;

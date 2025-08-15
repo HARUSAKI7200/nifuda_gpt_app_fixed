@@ -1,5 +1,7 @@
 // lib/pages/home_actions.dart
 
+import 'dart:async';
+import 'dart:convert'; // ★★★ 修正点：この行を追加 ★★★
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart'; // computeのために必要
@@ -386,9 +388,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
       if (resultFromPreview != null) {
         if(context.mounted) _showLoadingDialog(context, '画像を処理中... (${i + 1}/${pickedFiles.length})');
         
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 変更点：Isolateに渡すため、RectとSizeをMapに変換
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         final List<Rect> rects = resultFromPreview['rects'] as List<Rect>;
         final Size previewSize = resultFromPreview['previewSize'] as Size;
 
