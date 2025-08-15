@@ -3,10 +3,9 @@ import 'package:image/image.dart' as img;
 import 'mask_profiles/masker_t.dart' as masker_t;
 
 /// 指定テンプレートまたは動的範囲に従って画像にマスク処理を適用して返す。
-/// ★ 修正点: 速度向上のため、画像のコピーを作成せず、渡されたオリジナル画像を直接変更する方式に戻す
 img.Image applyMaskToImage(
   img.Image originalImage, {
-  String template = 'default',
+  String template = 'none',
   List<Rect>? dynamicMaskRects,
 }) {
   switch (template) {
@@ -32,7 +31,7 @@ img.Image applyMaskToImage(
         final y1 = rect.top.toInt().clamp(0, imageHeight);
         final x2 = rect.right.toInt().clamp(0, imageWidth);
         final y2 = rect.bottom.toInt().clamp(0, imageHeight);
-        
+
         // originalImageオブジェクトを直接変更する
         img.fillRect(
           originalImage,
@@ -47,6 +46,8 @@ img.Image applyMaskToImage(
       return originalImage;
 
     default:
+      // ★★★ 修正点：予期せぬテンプレートが指定された場合、明確にエラーを発生させる ★★★
+      // これにより、意図しないマスク処理のスキップを防止し、安全に処理を中断させます。
       throw UnimplementedError('予期せぬマスクテンプレート [$template] が指定されました。');
   }
 }

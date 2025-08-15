@@ -64,24 +64,29 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     }
   }
 
-  // ★★★ 追加：動的マスクをプレビューに反映させるための関数 ★★★
+  // ★★★ 変更点：try-catch-finally を追加して安定性を向上 ★★★
   void _applyDynamicMasksToPreview() {
     setState(() => _isLoading = true);
-    // 元のプレビュー画像のコピーに対して処理を行う
-    img.Image newImage = img.Image.from(_originalPreviewImage);
-    
-    // `applyMaskToImage` を呼び出してマスクを適用
-    newImage = applyMaskToImage(
-      newImage,
-      template: 'dynamic', // 'dynamic' テンプレートを明示
-      dynamicMaskRects: _maskRects,
-    );
+    try {
+      // 元のプレビュー画像のコピーに対して処理を行う
+      img.Image newImage = img.Image.from(_originalPreviewImage);
 
-    // 表示用のバイト列を更新
-    setState(() {
-      _displayImageBytes = Uint8List.fromList(img.encodeJpg(newImage));
-      _isLoading = false;
-    });
+      // `applyMaskToImage` を呼び出してマスクを適用
+      newImage = applyMaskToImage(
+        newImage,
+        template: 'dynamic', // 'dynamic' テンプレートを明示
+        dynamicMaskRects: _maskRects,
+      );
+
+      // 表示用のバイト列を更新
+      setState(() {
+        _displayImageBytes = Uint8List.fromList(img.encodeJpg(newImage));
+      });
+    } catch (e) {
+      if (mounted) showCustomSnackBar(context, 'プレビューへのマスク処理エラー: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
 
@@ -103,7 +108,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
         _imageKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return;
     final Offset localPosition = renderBox.globalToLocal(details.globalPosition);
-    
+
     setState(() {
       _currentDrawingRect = Rect.fromPoints(_currentDrawingRect!.topLeft, localPosition);
     });
@@ -123,7 +128,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
           _currentDrawingRect!.top > _currentDrawingRect!.bottom ? _currentDrawingRect!.bottom : _currentDrawingRect!.top
       ));
       _currentDrawingRect = null;
-      _applyDynamicMasksToPreview(); // ★★★ 変更点：描画完了時にプレビューを更新 ★★★
+      _applyDynamicMasksToPreview();
     });
   }
 
@@ -148,7 +153,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
             tooltip: '最後のマスクを取り消し',
             onPressed: _maskRects.isEmpty ? null : () {
               setState(() => _maskRects.removeLast());
-              _applyDynamicMasksToPreview(); // ★★★ 変更点：Undo時もプレビューを更新 ★★★
+              _applyDynamicMasksToPreview();
             },
           ),
           IconButton(
@@ -156,7 +161,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
              tooltip: '全てのマスクを消去',
             onPressed: _maskRects.isEmpty ? null : () {
               setState(() => _maskRects.clear());
-              _applyDynamicMasksToPreview(); // ★★★ 変更点：全消去時もプレビューを更新 ★★★
+              _applyDynamicMasksToPreview();
             },
           ),
         ] : null,
@@ -168,7 +173,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Center(
-                  child: _isLoading 
+                  child: _isLoading
                       ? const CircularProgressIndicator()
                       : _buildEditor(),
                 ),
@@ -205,13 +210,12 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   }
 
   Widget _buildEditor() {
-    // ★★★ 変更点：動的マスク描画中は描画中の矩形のみオーバーレイで表示 ★★★
-    final painter = widget.maskTemplate == 'dynamic' 
-      ? MaskPainter(rects: const [], currentDrawingRect: _currentDrawingRect) // 確定済みの矩形は描画しない
+    final painter = widget.maskTemplate == 'dynamic'
+      ? MaskPainter(rects: const [], currentDrawingRect: _currentDrawingRect)
       : MaskPainter(rects: const [], currentDrawingRect: null);
 
     final imageWidget = _displayImageBytes != null
-        ? Image.memory(_displayImageBytes!, key: ValueKey(_displayImageBytes!.length)) // キーを追加して更新を確実に
+        ? Image.memory(_displayImageBytes!, key: ValueKey(_displayImageBytes!.length))
         : const Center(child: Text("画像がありません"));
 
 
@@ -242,11 +246,11 @@ class MaskPainter extends CustomPainter {
     final paint = Paint()
       ..color = Colors.black
       ..style = PaintingStyle.fill;
-      
+
     for (final rect in rects) {
       canvas.drawRect(rect, paint);
     }
-    
+
     if (currentDrawingRect != null) {
       final drawingPaint = Paint()
       ..color = Colors.blue.withOpacity(0.5)
