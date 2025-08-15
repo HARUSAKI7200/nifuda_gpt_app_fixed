@@ -24,7 +24,6 @@ import 'product_list_mask_preview_page.dart';
 import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
-// ★★★ 追加：新規作成した画像選択画面をインポート ★★★
 import 'directory_image_picker_page.dart';
 
 
@@ -209,6 +208,7 @@ Future<Map<String, dynamic>?> loadProjectAction(BuildContext context) async {
 }
 
 Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext context, String projectFolderPath) async {
+  // ★★★ 変更点：CameraCapturePageにGPTのサービス関数を渡す ★★★
   final List<Map<String, dynamic>>? allGptResults =
       await Navigator.push<List<Map<String, dynamic>>>(
     context,
@@ -216,6 +216,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
         overlayText: '荷札を枠に合わせて撮影',
         isProductListOcr: false,
         projectFolderPath: projectFolderPath,
+        aiService: sendImageToGPT, // GPTの関数を渡す
     )),
   );
 
@@ -326,7 +327,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
   final List<String>? pickedFilePaths = await Navigator.push<List<String>>(
     context,
     MaterialPageRoute(
-      // ★★★ 修正点: パラメータ名を`directoryPath`から`rootDirectoryPath`に変更 ★★★
       builder: (_) => DirectoryImagePickerPage(rootDirectoryPath: targetDirectory),
     ),
   );

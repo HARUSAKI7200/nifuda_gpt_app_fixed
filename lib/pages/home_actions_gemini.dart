@@ -23,7 +23,6 @@ import 'product_list_mask_preview_page.dart';
 import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
-// ★★★ 追加：新規作成した画像選択画面をインポート ★★★
 import 'directory_image_picker_page.dart';
 
 
@@ -76,6 +75,89 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
+// ★★★ 追加：Geminiで荷札OCRを行う新機能 ★★★
+Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(BuildContext context, String projectFolderPath) async {
+  // ★★★ 変更点：CameraCapturePageにGeminiのサービス関数を渡す ★★★
+  final List<Map<String, dynamic>>? allAiResults =
+      await Navigator.push<List<Map<String, dynamic>>>(
+    context,
+    MaterialPageRoute(builder: (_) => CameraCapturePage(
+        overlayText: '荷札を枠に合わせて撮影',
+        isProductListOcr: false,
+        projectFolderPath: projectFolderPath,
+        aiService: sendImageToGemini, // Geminiの関数を渡す
+    )),
+  );
+
+  if (allAiResults == null || allAiResults.isEmpty) {
+    if (context.mounted) {
+      showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
+    }
+    return null;
+  }
+
+  if (!context.mounted) return null;
+
+  List<List<String>> allConfirmedNifudaRows = [];
+  int imageIndex = 0;
+
+  for (final result in allAiResults) {
+    imageIndex++;
+    if (!context.mounted) break;
+    
+    if (context.mounted) _showLoadingDialog(context, '$imageIndex / ${allAiResults.length} 枚目の結果を確認中...');
+
+    final Map<String, dynamic>? confirmedResultMap = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NifudaOcrConfirmPage(
+          extractedData: result,
+          imageIndex: imageIndex,
+          totalImages: allAiResults.length,
+        ),
+      ),
+    );
+    
+    if (context.mounted) _hideLoadingDialog(context);
+
+    if (confirmedResultMap != null) {
+      List<String> confirmedRowAsList = NifudaOcrConfirmPage.nifudaFields.map((field) {
+         return confirmedResultMap[field]?.toString() ?? '';
+      }).toList();
+      allConfirmedNifudaRows.add(confirmedRowAsList);
+    } else {
+      if (context.mounted) {
+         final proceed = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => AlertDialog(
+                  title: Text('$imageIndex枚目の確認が破棄されました'),
+                  content: const Text('次の画像の確認に進みますか？\n「いいえ」を選択すると処理を中断します。'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('いいえ (中断)')),
+                    TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('はい (次へ)')),
+                  ],
+                ));
+        if (proceed != true) {
+           if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
+           return allConfirmedNifudaRows.isNotEmpty ? allConfirmedNifudaRows : null;
+        }
+      } else {
+        break;
+      }
+    }
+  }
+
+  if (allConfirmedNifudaRows.isNotEmpty) {
+    return allConfirmedNifudaRows;
+  } else {
+    if (context.mounted) {
+        showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。');
+    }
+    return null;
+  }
+}
+
 
 // ★★★ Geminiを利用する製品リストOCR処理 ★★★
 Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
@@ -94,7 +176,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   final List<String>? pickedFilePaths = await Navigator.push<List<String>>(
     context,
     MaterialPageRoute(
-      // ★★★ 修正点: パラメータ名を`directoryPath`から`rootDirectoryPath`に変更 ★★★
       builder: (_) => DirectoryImagePickerPage(rootDirectoryPath: targetDirectory),
     ),
   );

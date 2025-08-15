@@ -8,9 +8,18 @@ import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path/path.dart' as p;
 import 'package:media_scanner/media_scanner.dart';
+import 'package:http/http.dart' as http;
 
-import '../utils/gpt_service.dart';
 import '../widgets/custom_snackbar.dart';
+
+// ★★★ 追加：AIサービスを関数として受け取るための型定義 ★★★
+typedef AiServiceFunction = Future<Map<String, dynamic>?> Function(
+  Uint8List imageBytes, {
+  required bool isProductList,
+  required String company,
+  http.Client? client,
+});
+
 
 class CameraCapturePage extends StatefulWidget {
   final String overlayText;
@@ -18,7 +27,9 @@ class CameraCapturePage extends StatefulWidget {
   final double overlayHeightRatio;
   final bool isProductListOcr;
   final String? companyForGpt;
-  final String projectFolderPath; // 追加
+  final String projectFolderPath;
+  // ★★★ 追加：使用するAIサービスを外部から受け取る ★★★
+  final AiServiceFunction aiService;
 
   const CameraCapturePage({
     super.key,
@@ -27,7 +38,8 @@ class CameraCapturePage extends StatefulWidget {
     this.overlayHeightRatio = 0.4,
     required this.isProductListOcr,
     this.companyForGpt,
-    required this.projectFolderPath, // 追加
+    required this.projectFolderPath,
+    required this.aiService, // ★★★ 追加 ★★★
   });
 
   @override
@@ -41,7 +53,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
   String? _errorMessage;
   bool _isProcessingImage = false;
 
-  final List<Future<Map<String, dynamic>?>> _gptResultFutures = [];
+  final List<Future<Map<String, dynamic>?>> _aiResultFutures = [];
   int _requestedImageCount = 0;
   int _respondedImageCount = 0;
   OverlayEntry? _flashOverlay;
@@ -188,16 +200,9 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       final int finalCropH = cropH.clamp(1, imgH - finalCropY).round();
 
       if (finalCropW <= 0 || finalCropH <= 0) {
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 変更点：パフォーマンス向上のため、詳細なログ出力を削除
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         throw Exception("Invalid crop dimensions after clamp: W=$finalCropW, H=$finalCropH.");
       }
       
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-      // ★ 変更点：パフォーマンス向上のため、詳細なログ出力を削除
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
       final img.Image croppedImage = img.copyCrop(
           orientedImage,
           x: finalCropX,
@@ -215,7 +220,8 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
 
       if(mounted) setState(() => _requestedImageCount++);
 
-      final gptFuture = sendImageToGPT(
+      // ★★★ 変更点：コンストラクタで渡されたAIサービスを呼び出す ★★★
+      final aiFuture = widget.aiService(
         bytesForProcessing,
         isProductList: widget.isProductListOcr,
         company: widget.isProductListOcr ? (widget.companyForGpt ?? 'none') : 'none',
@@ -224,10 +230,10 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
         return result;
       }).catchError((error) {
         if (mounted) setState(() => _respondedImageCount++);
-        debugPrint("GPT処理エラー: $error");
+        debugPrint("AI処理エラー: $error");
         return null;
       });
-      _gptResultFutures.add(gptFuture);
+      _aiResultFutures.add(aiFuture);
       
       final String fileName = 'nifuda_cropped_${DateTime.now().millisecondsSinceEpoch}.jpg';
       _saveCroppedImage(bytesForProcessing, fileName).then((savedPath) {
@@ -270,7 +276,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
     }
     if (mounted) setState(() => _isProcessingImage = true);
     List<Map<String, dynamic>> validResults = [];
-    final allRawResults = await Future.wait(_gptResultFutures);
+    final allRawResults = await Future.wait(_aiResultFutures);
     for (final result in allRawResults) {
         if (result != null) {
             validResults.add(result);

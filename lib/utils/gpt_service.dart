@@ -22,9 +22,6 @@ Future<Map<String, dynamic>> sendImageToGPT(
   final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
   final base64Image = base64Encode(imageBytes);
 
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-  // ★ 変更点：製品リストの場合、MIMEタイプをwebpに変更
-  // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
   final String mimeType = isProductList ? 'image/webp' : 'image/jpeg';
   final prompt = isProductList ? _buildProductListPrompt(company) : _buildNifudaPrompt();
 
@@ -38,15 +35,18 @@ Future<Map<String, dynamic>> sendImageToGPT(
         'content': [
           {
             'type': 'image_url',
-            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-            // ★ 変更点：mimeType変数を使用するように変更
-            // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-            'image_url': {'url': 'data:$mimeType;base64,$base64Image'}
+            'image_url': {
+              'url': 'data:$mimeType;base64,$base64Image',
+              'detail': 'high',
+            }
           }
         ]
       }
     ],
-    'max_completion_tokens': 8000, // 上限を4096に設定
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    // ★ 変更点：エラーログに基づき 'max_tokens' を 'max_completion_tokens' に修正
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    'max_completion_tokens': 4096,
     'response_format': {'type': 'json_object'},
   });
 
@@ -59,10 +59,6 @@ Future<Map<String, dynamic>> sendImageToGPT(
     final response = await postRequest.timeout(const Duration(seconds: 90));
 
     if (response.statusCode == 200) {
-      if (kDebugMode) {
-        print('GPT Raw Response Body: ${utf8.decode(response.bodyBytes)}');
-      }
-
       final jsonResponse = jsonDecode(utf8.decode(response.bodyBytes));
       if (jsonResponse['choices'] != null && jsonResponse['choices'].isNotEmpty) {
         final contentString = jsonResponse['choices'][0]['message']['content'];

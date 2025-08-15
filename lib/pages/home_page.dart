@@ -8,7 +8,6 @@ import 'package:path/path.dart' as p;
 import 'camera_capture_page.dart';
 import 'nifuda_ocr_confirm_page.dart';
 
-// ★★★ 追加：新しいGemini用アクションファイルをインポート ★★★
 import 'home_actions_gemini.dart'; 
 
 class HomePage extends StatefulWidget {
@@ -112,21 +111,41 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _handleCaptureNifuda() async {
+  // ★★★ 変更点：GPTで荷札を撮影する処理 ★★★
+  Future<void> _handleCaptureNifudaWithGpt() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
       showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
       return;
     }
+    _setLoading(true);
+    final List<List<String>>? confirmedRows = await captureProcessAndConfirmNifudaAction(context, _currentProjectFolderPath!);
+    _setLoading(false);
 
-    // ★ 修正点: home_actions.dartの関数を直接呼び出す
-    final List<List<String>>? confirmedNifudaRows = await captureProcessAndConfirmNifudaAction(context, _currentProjectFolderPath!);
+    if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
+      setState(() {
+        _nifudaData.addAll(confirmedRows);
+      });
+      showCustomSnackBar(context, '${confirmedRows.length}件の荷札データがGPTで追加されました。');
+    }
+  }
 
-    if (mounted && confirmedNifudaRows != null && confirmedNifudaRows.isNotEmpty) {
-        setState(() {
-          _nifudaData.addAll(confirmedNifudaRows);
-        });
-        showCustomSnackBar(context, '${confirmedNifudaRows.length}件の荷札データが追加されました。');
+  // ★★★ 追加：Geminiで荷札を撮影する処理 ★★★
+  Future<void> _handleCaptureNifudaWithGemini() async {
+    if (_isLoading) return;
+    if (_currentProjectFolderPath == null) {
+      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+      return;
+    }
+    _setLoading(true);
+    final List<List<String>>? confirmedRows = await captureProcessAndConfirmNifudaActionWithGemini(context, _currentProjectFolderPath!);
+    _setLoading(false);
+
+    if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
+      setState(() {
+        _nifudaData.addAll(confirmedRows);
+      });
+      showCustomSnackBar(context, '${confirmedRows.length}件の荷札データがGeminiで追加されました。');
     }
   }
   
@@ -162,7 +181,6 @@ class _HomePageState extends State<HomePage> {
       showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
       return;
     }
-    // ★ 修正点: 正しい関数名を呼び出す
     showAndExportNifudaListAction(context, _nifudaData, _projectTitle, _currentProjectFolderPath!);
   }
 
@@ -314,7 +332,10 @@ class _HomePageState extends State<HomePage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: <Widget>[
-                        _buildActionButton(label: '荷札を複数撮影して一括抽出', onPressed: _handleCaptureNifuda, icon: Icons.camera_alt_rounded, isEnabled: _currentProjectFolderPath != null),
+                        // ★★★ 変更点：荷札撮影ボタンを２つに分割 ★★★
+                        _buildActionButton(label: '荷札を撮影して抽出 (GPT)', onPressed: _handleCaptureNifudaWithGpt, icon: Icons.camera_alt_outlined, isEnabled: _currentProjectFolderPath != null),
+                        const SizedBox(height: 10),
+                        _buildActionButton(label: '荷札を撮影して抽出 (Gemini)', onPressed: _handleCaptureNifudaWithGemini, icon: Icons.camera, isEnabled: _currentProjectFolderPath != null, isEmphasized: true),
                         const SizedBox(height: 10),
                         _buildActionButton(label: '荷札リスト (${_nifudaData.length > 1 ? _nifudaData.length - 1 : 0}件)', onPressed: _handleShowNifudaList, icon: Icons.list_alt_rounded, isEnabled: _nifudaData.length > 1 && _currentProjectFolderPath != null),
                         const SizedBox(height: 10),

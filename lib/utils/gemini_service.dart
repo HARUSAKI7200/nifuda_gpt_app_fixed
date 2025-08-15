@@ -65,9 +65,12 @@ Future<Map<String, dynamic>> sendImageToGemini(
     if (client == null) httpClient.close();
 
     if (response.statusCode == 200) {
-      if (kDebugMode) {
-        print('Gemini Raw Response Body: ${utf8.decode(response.bodyBytes)}');
-      }
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      // ★ 変更点：不要なログ出力を削除
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      // if (kDebugMode) {
+      //   print('Gemini Raw Response Body: ${utf8.decode(response.bodyBytes)}');
+      // }
 
       final jsonResponse = jsonDecode(utf8.decode(response.bodyBytes));
       
