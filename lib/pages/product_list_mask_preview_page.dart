@@ -31,36 +31,29 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   final List<Rect> _maskRects = [];
   Rect? _currentDrawingRect;
   final GlobalKey _imageKey = GlobalKey();
-  Size? _imageRenderSize;
   bool _isLoading = false;
 
-  late img.Image _previewImage;
-  // ★ 追加：画面に表示するための画像バイト列を保持する変数
+  late img.Image _originalPreviewImage;
   Uint8List? _displayImageBytes;
 
   @override
   void initState() {
     super.initState();
-    // 最初に表示するのは元のプレビュー画像
     _displayImageBytes = widget.previewImageBytes;
-    _previewImage = img.decodeImage(widget.previewImageBytes)!;
+    _originalPreviewImage = img.decodeImage(widget.previewImageBytes)!;
 
-    // ★ 修正点：T社テンプレートの場合、プレビュー画像にマスクを適用する処理を復活
     if (widget.maskTemplate == 't') {
       _applyFixedMaskToPreview();
     }
   }
 
-  // ★ 修正点：プレビューに固定マスクを適用する処理
   void _applyFixedMaskToPreview() {
     setState(() => _isLoading = true);
     try {
-      // ocr_masker.dart を使ってプレビュー画像にマスクを適用
       final maskedPreviewImage = applyMaskToImage(
-        _previewImage, // デコード済みのプレビュー画像を渡す
+        img.Image.from(_originalPreviewImage), // 元画像のコピーを渡す
         template: widget.maskTemplate,
       );
-      // 表示用のバイト列を更新
       setState(() {
         _displayImageBytes = Uint8List.fromList(img.encodeJpg(maskedPreviewImage));
       });
@@ -71,13 +64,32 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     }
   }
 
+  // ★★★ 追加：動的マスクをプレビューに反映させるための関数 ★★★
+  void _applyDynamicMasksToPreview() {
+    setState(() => _isLoading = true);
+    // 元のプレビュー画像のコピーに対して処理を行う
+    img.Image newImage = img.Image.from(_originalPreviewImage);
+    
+    // `applyMaskToImage` を呼び出してマスクを適用
+    newImage = applyMaskToImage(
+      newImage,
+      template: 'dynamic', // 'dynamic' テンプレートを明示
+      dynamicMaskRects: _maskRects,
+    );
+
+    // 表示用のバイト列を更新
+    setState(() {
+      _displayImageBytes = Uint8List.fromList(img.encodeJpg(newImage));
+      _isLoading = false;
+    });
+  }
+
 
   void _onPanStart(DragStartDetails details) {
     if (widget.maskTemplate != 'dynamic') return;
     final RenderBox? renderBox =
         _imageKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return;
-    _imageRenderSize = renderBox.size;
     final Offset localPosition = renderBox.globalToLocal(details.globalPosition);
 
     setState(() {
@@ -111,6 +123,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
           _currentDrawingRect!.top > _currentDrawingRect!.bottom ? _currentDrawingRect!.bottom : _currentDrawingRect!.top
       ));
       _currentDrawingRect = null;
+      _applyDynamicMasksToPreview(); // ★★★ 変更点：描画完了時にプレビューを更新 ★★★
     });
   }
 
@@ -119,7 +132,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       'path': widget.originalImagePath,
       'rects': _maskRects,
       'template': widget.maskTemplate,
-      'previewSize': Size(_previewImage.width.toDouble(), _previewImage.height.toDouble()),
+      'previewSize': Size(_originalPreviewImage.width.toDouble(), _originalPreviewImage.height.toDouble()),
     });
   }
 
@@ -133,12 +146,18 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
           IconButton(
             icon: const Icon(Icons.undo),
             tooltip: '最後のマスクを取り消し',
-            onPressed: _maskRects.isEmpty ? null : () => setState(() => _maskRects.removeLast()),
+            onPressed: _maskRects.isEmpty ? null : () {
+              setState(() => _maskRects.removeLast());
+              _applyDynamicMasksToPreview(); // ★★★ 変更点：Undo時もプレビューを更新 ★★★
+            },
           ),
           IconButton(
             icon: const Icon(Icons.delete_forever),
              tooltip: '全てのマスクを消去',
-            onPressed: _maskRects.isEmpty ? null : () => setState(() => _maskRects.clear()),
+            onPressed: _maskRects.isEmpty ? null : () {
+              setState(() => _maskRects.clear());
+              _applyDynamicMasksToPreview(); // ★★★ 変更点：全消去時もプレビューを更新 ★★★
+            },
           ),
         ] : null,
       ),
@@ -186,14 +205,13 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   }
 
   Widget _buildEditor() {
-    // 動的マスクの場合は描画用のPainterを、固定マスクの場合は何も描画しないPainterを設定
+    // ★★★ 変更点：動的マスク描画中は描画中の矩形のみオーバーレイで表示 ★★★
     final painter = widget.maskTemplate == 'dynamic' 
-      ? MaskPainter(rects: _maskRects, currentDrawingRect: _currentDrawingRect)
+      ? MaskPainter(rects: const [], currentDrawingRect: _currentDrawingRect) // 確定済みの矩形は描画しない
       : MaskPainter(rects: const [], currentDrawingRect: null);
 
-    // ★ 修正点：表示用のバイト列（_displayImageBytes）を使って画像を表示する
     final imageWidget = _displayImageBytes != null
-        ? Image.memory(_displayImageBytes!)
+        ? Image.memory(_displayImageBytes!, key: ValueKey(_displayImageBytes!.length)) // キーを追加して更新を確実に
         : const Center(child: Text("画像がありません"));
 
 
@@ -206,19 +224,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
         child: CustomPaint(
           key: _imageKey,
           foregroundPainter: painter,
-          child: LayoutBuilder( 
-            builder: (context, constraints) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) {
-                  final renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
-                  if(renderBox != null && renderBox.hasSize){
-                    _imageRenderSize = renderBox.size;
-                  }
-                }
-              });
-              return imageWidget;
-            },
-          ),
+          child: imageWidget,
         ),
       ),
     );
@@ -234,7 +240,7 @@ class MaskPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.black // 確定したマスクは黒
+      ..color = Colors.black
       ..style = PaintingStyle.fill;
       
     for (final rect in rects) {
@@ -243,7 +249,7 @@ class MaskPainter extends CustomPainter {
     
     if (currentDrawingRect != null) {
       final drawingPaint = Paint()
-      ..color = Colors.blue.withOpacity(0.5) // 描画中は半透明の青
+      ..color = Colors.blue.withOpacity(0.5)
       ..style = PaintingStyle.fill;
       canvas.drawRect(currentDrawingRect!, drawingPaint);
     }

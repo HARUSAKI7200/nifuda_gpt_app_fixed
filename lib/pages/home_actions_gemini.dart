@@ -232,13 +232,17 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
         if(context.mounted) _showLoadingDialog(context, '画像を処理中... (${i + 1}/${pickedFiles.length})');
         
         // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 変更点：重い画像処理をcomputeで別スレッドに逃がす
+        // ★ 変更点：Isolateに渡すため、RectとSizeをMapに変換
         // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        final List<Rect> rects = resultFromPreview['rects'] as List<Rect>;
+        final Size previewSize = resultFromPreview['previewSize'] as Size;
+        
         final Map<String, dynamic> isolateArgs = {
           'imagePath': resultFromPreview['path'] as String,
-          'rects': resultFromPreview['rects'] as List<Rect>,
+          'rects': rects.map((r) => {'l': r.left, 't': r.top, 'r': r.right, 'b': r.bottom}).toList(),
           'template': resultFromPreview['template'] as String,
-          'previewSize': resultFromPreview['previewSize'] as Size,
+          'previewW': previewSize.width,
+          'previewH': previewSize.height,
         };
         
         final Uint8List? webpBytes = await compute(processImageForOcr, isolateArgs);

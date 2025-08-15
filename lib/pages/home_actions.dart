@@ -1,7 +1,5 @@
 // lib/pages/home_actions.dart
 
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart'; // computeのために必要
@@ -17,7 +15,7 @@ import '../utils/gpt_service.dart';
 // import '../utils/ocr_masker.dart'; // Isolate側に移譲
 import '../utils/product_matcher.dart';
 import '../utils/excel_export.dart';
-import '../utils/image_processor.dart'; // ★★★ 追加 ★★★
+import '../utils/image_processor.dart';
 import 'camera_capture_page.dart';
 import 'nifuda_ocr_confirm_page.dart';
 import 'product_list_ocr_confirm_page.dart';
@@ -26,6 +24,7 @@ import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
 import 'directory_image_picker_page.dart';
+
 
 
 // --- (ヘルパー関数は変更なし) ---
@@ -388,16 +387,19 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         if(context.mounted) _showLoadingDialog(context, '画像を処理中... (${i + 1}/${pickedFiles.length})');
         
         // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 変更点：重い画像処理をcomputeで別スレッドに逃がす
+        // ★ 変更点：Isolateに渡すため、RectとSizeをMapに変換
         // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        final List<Rect> rects = resultFromPreview['rects'] as List<Rect>;
+        final Size previewSize = resultFromPreview['previewSize'] as Size;
+
         final Map<String, dynamic> isolateArgs = {
           'imagePath': resultFromPreview['path'] as String,
-          'rects': resultFromPreview['rects'] as List<Rect>,
+          'rects': rects.map((r) => {'l': r.left, 't': r.top, 'r': r.right, 'b': r.bottom}).toList(),
           'template': resultFromPreview['template'] as String,
-          'previewSize': resultFromPreview['previewSize'] as Size,
+          'previewW': previewSize.width,
+          'previewH': previewSize.height,
         };
         
-        // `compute` を使ってバックグラウンドで処理を実行
         final Uint8List? webpBytes = await compute(processImageForOcr, isolateArgs);
 
         if (webpBytes != null) {

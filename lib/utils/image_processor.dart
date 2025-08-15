@@ -16,9 +16,13 @@ import 'ocr_masker.dart';
 /// 4. AI送信用にWebP形式に圧縮して返す
 Future<Uint8List?> processImageForOcr(Map<String, dynamic> args) async {
   final String imagePath = args['imagePath'];
-  final List<Rect> maskRects = args['rects'];
+  // ★★★ 変更点：MapのリストからRectのリストに復元 ★★★
+  final List<Rect> maskRects = (args['rects'] as List)
+      .map((r) => Rect.fromLTRB(r['l'], r['t'], r['r'], r['b']))
+      .toList();
   final String maskTemplate = args['template'];
-  final Size previewSize = args['previewSize'];
+  // ★★★ 変更点：MapからSizeに復元 ★★★
+  final Size previewSize = Size(args['previewW'], args['previewH']);
 
   try {
     final originalImageBytes = await File(imagePath).readAsBytes();
