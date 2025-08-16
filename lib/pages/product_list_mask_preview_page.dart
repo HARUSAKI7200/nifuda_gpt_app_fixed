@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart';
 import 'package:image/image.dart' as img;
 import '../utils/ocr_masker.dart';
 import '../widgets/custom_snackbar.dart';
@@ -29,9 +30,10 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   late img.Image _editableImage;
   late Uint8List _displayImageBytes;
   Rect? _currentDrawingRect;
-  final GlobalKey _imageKey = GlobalKey();
+  final GlobalKey _imageContainerKey = GlobalKey();
   bool _isLoading = false;
   final List<img.Image> _undoStack = [];
+  img.Image? _initialImageState;
 
   @override
   void initState() {
@@ -42,8 +44,10 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   void _initializeImage() {
     setState(() => _isLoading = true);
     try {
-      _editableImage = img.decodeImage(widget.previewImageBytes)!;
-      // T社用の固定マスクは初期状態で適用
+      final decodedImage = img.decodeImage(widget.previewImageBytes)!;
+      _initialImageState = img.Image.from(decodedImage); // Undo用に初期状態を保存
+      _editableImage = decodedImage;
+
       if (widget.maskTemplate == 't') {
         _editableImage = applyMaskToImage(_editableImage, template: 't');
       }
@@ -57,94 +61,141 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
 
   void _updateDisplayImage() {
     setState(() {
-      // 編集された画像を品質80%のJPEGに再エンコードして表示用データとする
-      _displayImageBytes = Uint8List.fromList(img.encodeJpg(_editableImage, quality: 80));
+      _displayImageBytes =
+          Uint8List.fromList(img.encodeJpg(_editableImage, quality: 80));
     });
   }
 
   void _onPanStart(DragStartDetails details) {
     if (widget.maskTemplate != 'dynamic') return;
-    final RenderBox? renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    final localPosition = renderBox.globalToLocal(details.globalPosition);
     setState(() {
-      _currentDrawingRect = Rect.fromPoints(localPosition, localPosition);
+      _currentDrawingRect = Rect.fromPoints(details.localPosition, details.localPosition);
     });
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
     if (widget.maskTemplate != 'dynamic' || _currentDrawingRect == null) return;
-    final RenderBox? renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    final localPosition = renderBox.globalToLocal(details.globalPosition);
     setState(() {
-      _currentDrawingRect = Rect.fromPoints(_currentDrawingRect!.topLeft, localPosition);
+      _currentDrawingRect =
+          Rect.fromPoints(_currentDrawingRect!.topLeft, details.localPosition);
     });
   }
 
   void _onPanEnd(DragEndDetails details) {
     if (widget.maskTemplate != 'dynamic' || _currentDrawingRect == null) return;
-    // 小さすぎる範囲は無視
-    if (_currentDrawingRect!.width.abs() < 10 || _currentDrawingRect!.height.abs() < 10) {
-      setState(() { _currentDrawingRect = null; });
+
+    if (_currentDrawingRect!.width.abs() < 5 || _currentDrawingRect!.height.abs() < 5) {
+      setState(() => _currentDrawingRect = null);
       return;
     }
 
-    // Undo(元に戻す)用に現在の画像状態を保存
-    _undoStack.add(img.Image.from(_editableImage));
+    final RenderBox? containerBox =
+        _imageContainerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (containerBox == null) return;
 
-    // 矩形を正規化（始点と終点が逆でもOKなように）
-    final rect = Rect.fromLTRB(
-        _currentDrawingRect!.left < _currentDrawingRect!.right ? _currentDrawingRect!.left : _currentDrawingRect!.right,
-        _currentDrawingRect!.top < _currentDrawingRect!.bottom ? _currentDrawingRect!.top : _currentDrawingRect!.bottom,
-        _currentDrawingRect!.left > _currentDrawingRect!.right ? _currentDrawingRect!.left : _currentDrawingRect!.right,
-        _currentDrawingRect!.top > _currentDrawingRect!.bottom ? _currentDrawingRect!.bottom : _currentDrawingRect!.top
+    final Size containerSize = containerBox.size;
+    final Size imagePixelSize = Size(_editableImage.width.toDouble(), _editableImage.height.toDouble());
+
+    final FittedSizes fittedSizes = applyBoxFit(BoxFit.contain, imagePixelSize, containerSize);
+    final Size imageDisplaySize = fittedSizes.destination;
+    final Rect imageDisplayRect = Rect.fromLTWH(
+      (containerSize.width - imageDisplaySize.width) / 2,
+      (containerSize.height - imageDisplaySize.height) / 2,
+      imageDisplaySize.width,
+      imageDisplaySize.height,
     );
 
-    // 編集中の画像データに直接黒い四角を描画する
+    final Rect intersection = _currentDrawingRect!.intersect(imageDisplayRect);
+
+    if (intersection.width <= 0 || intersection.height <= 0) {
+      setState(() => _currentDrawingRect = null);
+      return;
+    }
+
+    final double scaleX = imagePixelSize.width / imageDisplaySize.width;
+    final double scaleY = imagePixelSize.height / imageDisplaySize.height;
+
+    final Rect rectOnImage = Rect.fromLTRB(
+      (intersection.left - imageDisplayRect.left) * scaleX,
+      (intersection.top - imageDisplayRect.top) * scaleY,
+      (intersection.right - imageDisplayRect.left) * scaleX,
+      (intersection.bottom - imageDisplayRect.top) * scaleY,
+    );
+
+    _undoStack.add(img.Image.from(_editableImage));
     img.fillRect(
       _editableImage,
-      x1: rect.left.toInt(),
-      y1: rect.top.toInt(),
-      x2: rect.right.toInt(),
-      y2: rect.bottom.toInt(),
+      x1: rectOnImage.left.toInt(),
+      y1: rectOnImage.top.toInt(),
+      x2: rectOnImage.right.toInt(),
+      y2: rectOnImage.bottom.toInt(),
       color: img.ColorRgb8(0, 0, 0),
     );
 
     setState(() {
-      _currentDrawingRect = null; // 描画中矩形をクリア
+      _currentDrawingRect = null;
+      _updateDisplayImage();
     });
-    _updateDisplayImage(); // 表示を更新
   }
 
   void _undo() {
     if (_undoStack.isEmpty) return;
     setState(() {
       _editableImage = _undoStack.removeLast();
+      _updateDisplayImage();
     });
-    _updateDisplayImage();
   }
 
   void _reset() {
     setState(() {
       _undoStack.clear();
-      // 元のプレビュー画像からリセット
-      _editableImage = img.decodeImage(widget.previewImageBytes)!;
-      // T社テンプレートの場合は固定マスクを再適用
-      if (widget.maskTemplate == 't') {
-          _editableImage = applyMaskToImage(_editableImage, template: 't');
+      if (_initialImageState != null) {
+         _editableImage = img.Image.from(_initialImageState!);
+         if (widget.maskTemplate == 't') {
+            _editableImage = applyMaskToImage(_editableImage, template: 't');
+         }
       }
+      _updateDisplayImage();
     });
-    _updateDisplayImage();
   }
 
-  /// 確定して、マスク処理済みの画像データを前の画面に返す
   void _confirmAndPop() {
     Navigator.pop(context, _displayImageBytes);
   }
 
+  Widget _buildEditor() {
+    return Container(
+      key: _imageContainerKey,
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      // ★ 修正点：画像の余白部分の背景色を白に変更
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      color: Colors.white,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.memory(
+            _displayImageBytes,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+          ),
+          CustomPaint(
+            painter: MaskPainter(currentDrawingRect: _currentDrawingRect),
+          ),
+          GestureDetector(
+            onPanStart: widget.maskTemplate == 'dynamic' ? _onPanStart : null,
+            onPanUpdate: widget.maskTemplate == 'dynamic' ? _onPanUpdate : null,
+            onPanEnd: widget.maskTemplate == 'dynamic' ? _onPanEnd : null,
+            behavior: HitTestBehavior.translucent,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    bool hasChanges = _undoStack.isNotEmpty;
+
     return Scaffold(
       appBar: AppBar(
         title: Text('マスクプレビュー (${widget.imageIndex} / ${widget.totalImages})'),
@@ -153,12 +204,12 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
                 IconButton(
                   icon: const Icon(Icons.undo),
                   tooltip: '最後のマスクを取り消し',
-                  onPressed: _undoStack.isEmpty ? null : _undo,
+                  onPressed: hasChanges ? _undo : null,
                 ),
                 IconButton(
                   icon: const Icon(Icons.delete_forever),
                   tooltip: '全てのマスクを消去',
-                  onPressed: _undoStack.isEmpty ? null : _reset,
+                  onPressed: hasChanges ? _reset : null,
                 ),
               ]
             : null,
@@ -169,17 +220,14 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
-                child: Center(
-                  child: _isLoading
-                      ? const CircularProgressIndicator()
-                      : _buildEditor(),
-                ),
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _buildEditor(),
               ),
             ),
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
@@ -212,41 +260,19 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       ),
     );
   }
-
-  Widget _buildEditor() {
-    // 描画中の矩形のみをリアルタイムで表示するPainter
-    final painter = MaskPainter(currentDrawingRect: _currentDrawingRect);
-    // マスクが焼き付けられた最新の画像データを表示
-    final imageWidget = Image.memory(_displayImageBytes, key: _imageKey, gaplessPlayback: true);
-
-    return GestureDetector(
-      onPanStart: widget.maskTemplate == 'dynamic' ? _onPanStart : null,
-      onPanUpdate: widget.maskTemplate == 'dynamic' ? _onPanUpdate : null,
-      onPanEnd: widget.maskTemplate == 'dynamic' ? _onPanEnd : null,
-      child: InteractiveViewer(
-        maxScale: 5.0,
-        child: CustomPaint(
-          foregroundPainter: painter,
-          child: imageWidget,
-        ),
-      ),
-    );
-  }
 }
 
-/// 描画中の半透明マスクを描画するためだけのシンプルなPainter
 class MaskPainter extends CustomPainter {
   final Rect? currentDrawingRect;
-
   const MaskPainter({this.currentDrawingRect});
 
   @override
   void paint(Canvas canvas, Size size) {
     if (currentDrawingRect != null) {
-      final drawingPaint = Paint()
+      final paint = Paint()
         ..color = Colors.black.withOpacity(0.5)
         ..style = PaintingStyle.fill;
-      canvas.drawRect(currentDrawingRect!, drawingPaint);
+      canvas.drawRect(currentDrawingRect!, paint);
     }
   }
 
