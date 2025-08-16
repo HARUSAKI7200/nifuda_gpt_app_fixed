@@ -4,17 +4,18 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:image/image.dart' as img;
-import 'package:flutter_image_compress/flutter_image_compress.dart';
+// ★★★ 修正点: flutter_image_compress のインポートを削除 ★★★
+// import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'ocr_masker.dart';
 
 /// Isolateで画像処理を実行するためのトップレベル関数
 ///
 /// この関数はUIスレッドをブロックすることなく、以下の処理をバックグラウンドで実行します。
 /// 1. ファイルパスから画像を読み込み、デコードする
-/// 2. ★★★ 画像の向きをEXIF情報に基づいて補正する ★★★
+/// 2. 画像の向きをEXIF情報に基づいて補正する
 /// 3. プレビューサイズとの比率から、マスクを適用する実際の座標を計算する
 /// 4. マスク処理を適用する
-/// 5. AI送信用にJPEG形式に圧縮して返す
+/// 5. AI送信用にJPEG形式にエンコードして返す (imageパッケージを使用)
 Future<Uint8List?> processImageForOcr(Map<String, dynamic> args) async {
   final String imagePath = args['imagePath'];
   final List<Rect> maskRects = (args['rects'] as List)
@@ -56,16 +57,18 @@ Future<Uint8List?> processImageForOcr(Map<String, dynamic> args) async {
       dynamicMaskRects: actualMaskRects,
     );
 
-    // AI送信用にJPEG形式へ圧縮
-    final Uint8List? jpegBytes = await FlutterImageCompress.compressWithList(
-        Uint8List.fromList(img.encodeJpg(maskedImage)), // JPEGにエンコード
-        minHeight: maskedImage.height,
-        minWidth: maskedImage.width,
-        quality: 85,
-        format: CompressFormat.jpeg // 出力形式をJPEGに指定
-    );
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    // ★ 変更点：
+    // ★ flutter_image_compress の呼び出しを削除し、
+    // ★ imageパッケージのencodeJpgで品質を指定してエンコードする方式に変更。
+    // ★ これにより、Isolate内でネイティブコードを呼び出す必要がなくなり、
+    // ★ UnimplementedErrorが解消されます。
+    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    final Uint8List jpegBytes = Uint8List.fromList(img.encodeJpg(maskedImage, quality: 85));
     
+    debugPrint('Isolate: 画像処理完了、${jpegBytes.lengthInBytes} bytes');
     return jpegBytes;
+    
   } catch (e) {
     debugPrint('Isolateでの画像処理中にエラーが発生しました: $e');
     return null;
