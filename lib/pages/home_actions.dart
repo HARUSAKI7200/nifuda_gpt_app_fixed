@@ -1,7 +1,7 @@
 // lib/pages/home_actions.dart
 
 import 'dart:async';
-import 'dart:convert'; // ★★★ 修正点：この行を追加 ★★★
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart'; // computeのために必要
@@ -9,15 +9,12 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
-// import 'package:image/image.dart' as img; // このファイルでは不要に
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 
 import '../utils/gpt_service.dart';
-// import '../utils/ocr_masker.dart'; // Isolate側に移譲
 import '../utils/product_matcher.dart';
 import '../utils/excel_export.dart';
-// import '../utils/image_processor.dart'; // 不要になったためコメントアウト
 import 'camera_capture_page.dart';
 import 'nifuda_ocr_confirm_page.dart';
 import 'product_list_ocr_confirm_page.dart';
@@ -370,12 +367,12 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         file.path,
         minWidth: 1280,
         minHeight: 1280,
-        quality: 80, // 品質80%で圧縮
+        quality: 80,
       ))!;
       if(context.mounted) _hideLoadingDialog(context);
 
-      // ★★★ 変更点：プレビュー画面からマスク適用済みの画像(Uint8List)を直接受け取る ★★★
-      final Uint8List? finalMaskedImageBytes = await Navigator.push<Uint8List>(
+      final Uint8List? finalMaskedImageBytes =
+          await Navigator.push<Uint8List>(
         context,
         MaterialPageRoute(
           builder: (_) => ProductListMaskPreviewPage(
@@ -387,11 +384,9 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         ),
       );
 
-      // ★★★ 変更点：バックグラウンド処理を削除し、結果を直接リストに追加 ★★★
       if (finalMaskedImageBytes != null) {
         finalImagesToSend.add(finalMaskedImageBytes);
       }
-      // ユーザーが破棄した場合は finalMaskedImageBytes が null になり、何もせず次のループに進む
     }
   } catch (e) {
       if(context.mounted) {

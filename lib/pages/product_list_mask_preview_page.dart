@@ -116,7 +116,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     });
     _updateDisplayImage(); // 表示を更新
   }
-  
+
   void _undo() {
     if (_undoStack.isEmpty) return;
     setState(() {
