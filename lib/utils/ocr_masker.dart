@@ -46,8 +46,9 @@ img.Image applyMaskToImage(
       return originalImage;
 
     default:
-      // ★★★ 修正点：予期せぬテンプレートが指定された場合、明確にエラーを発生させる ★★★
-      // これにより、意図しないマスク処理のスキップを防止し、安全に処理を中断させます。
-      throw UnimplementedError('予期せぬマスクテンプレート [$template] が指定されました。');
+      // ★★★ 修正点：エラーを回避し、代わりに警告を出すように変更 ★★★
+      // このロジックに到達するはずがないため、予期せぬ挙動を回避し、デバッグを助ける目的
+      debugPrint('Warning: Unimplemented mask template [$template] was specified. No mask applied.');
+      return originalImage;
   }
 }

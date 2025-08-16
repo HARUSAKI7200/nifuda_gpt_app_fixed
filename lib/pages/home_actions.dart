@@ -354,13 +354,17 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
       template = 'dynamic';
       break;
     default:
-      template = 'none';
+      // ★★★ 修正点：無効なテンプレート名が渡されるのを防ぐ ★★★
+      if(context.mounted) {
+        _showErrorDialog(context, 'テンプレートエラー', '無効な会社名が選択されました。');
+      }
+      return null;
   }
   
   try {
     for (int i = 0; i < pickedFiles.length; i++) {
       final file = pickedFiles[i];
-      if (!context.mounted) break;
+      if (!context.mounted) return null;
 
       _showLoadingDialog(context, 'プレビューを準備中... (${i + 1}/${pickedFiles.length})');
       final Uint8List previewImageBytes = (await FlutterImageCompress.compressWithFile(
@@ -400,12 +404,18 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListAction(
         };
         
         final Uint8List? webpBytes = await compute(processImageForOcr, isolateArgs);
+        
+        if (context.mounted) {
+            _hideLoadingDialog(context);
+        }
 
         if (webpBytes != null) {
           finalImagesToSend.add(webpBytes);
+        } else {
+            if (context.mounted) {
+              showCustomSnackBar(context, '画像 (${i + 1}/${pickedFiles.length}) の処理に失敗しました。', isError: true);
+            }
         }
-        
-        if(context.mounted) _hideLoadingDialog(context);
       }
     }
   } catch (e) {

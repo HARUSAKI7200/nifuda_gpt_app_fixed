@@ -201,13 +201,17 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
       template = 'dynamic';
       break;
     default:
-      template = 'none'; 
+      // ★★★ 修正点：無効なテンプレート名が渡されるのを防ぐ ★★★
+      if(context.mounted) {
+        _showErrorDialog(context, 'テンプレートエラー', '無効な会社名が選択されました。');
+      }
+      return null;
   }
 
   try {
     for (int i = 0; i < pickedFiles.length; i++) {
       final file = pickedFiles[i];
-      if (!context.mounted) break;
+      if (!context.mounted) return null;
 
       _showLoadingDialog(context, 'プレビューを準備中... (${i + 1}/${pickedFiles.length})');
       final Uint8List previewImageBytes = (await FlutterImageCompress.compressWithFile(
@@ -231,9 +235,6 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
       if (resultFromPreview != null) {
         if(context.mounted) _showLoadingDialog(context, '画像を処理中... (${i + 1}/${pickedFiles.length})');
         
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 変更点：Isolateに渡すため、RectとSizeをMapに変換
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         final List<Rect> rects = resultFromPreview['rects'] as List<Rect>;
         final Size previewSize = resultFromPreview['previewSize'] as Size;
         
@@ -246,11 +247,18 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
         };
         
         final Uint8List? webpBytes = await compute(processImageForOcr, isolateArgs);
+        
+        if (context.mounted) {
+            _hideLoadingDialog(context);
+        }
 
         if (webpBytes != null) {
           finalImagesToSend.add(webpBytes);
+        } else {
+            if (context.mounted) {
+              showCustomSnackBar(context, '画像 (${i + 1}/${pickedFiles.length}) の処理に失敗しました。', isError: true);
+            }
         }
-        if(context.mounted) _hideLoadingDialog(context);
       }
     }
   } catch (e) {

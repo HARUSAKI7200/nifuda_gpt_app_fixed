@@ -22,6 +22,10 @@ Future<Uint8List?> processImageForOcr(Map<String, dynamic> args) async {
       .toList();
   final String maskTemplate = args['template'];
   final Size previewSize = Size(args['previewW'], args['previewH']);
+  
+  // ★★★ 修正点: デバッグのためにテンプレート名と引数をログに出力 ★★★
+  debugPrint('Isolate: 画像処理開始');
+  debugPrint('Isolate: template: $maskTemplate, rects count: ${maskRects.length}');
 
   try {
     final originalImageBytes = await File(imagePath).readAsBytes();
