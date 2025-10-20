@@ -1,14 +1,27 @@
 // lib/pages/matching_result_page.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart'; // ★ 追加
 import '../utils/excel_export.dart';
 import '../widgets/custom_snackbar.dart';
+import 'home_actions.dart'; // saveProjectActionのために必要
 
 class MatchingResultPage extends StatelessWidget {
   final Map<String, dynamic> matchingResults;
-  final String projectFolderPath; // 追加
+  final String projectFolderPath; 
+  final String projectTitle; // ★ 追加
+  final List<List<String>> nifudaData; // ★ 追加
+  final List<List<String>> productListKariData; // ★ 追加
 
-  const MatchingResultPage({super.key, required this.matchingResults, required this.projectFolderPath}); // 追加
+  const MatchingResultPage({
+    super.key, 
+    required this.matchingResults, 
+    required this.projectFolderPath,
+    required this.projectTitle, // ★ 追加
+    required this.nifudaData, // ★ 追加
+    required this.productListKariData, // ★ 追加
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -26,10 +39,11 @@ class MatchingResultPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('照合結果'),
         actions: [
+          // ★ 変更点: アクションボタンを「エクセル保存」のみに戻す（「検品完了＆共有」はFAB上に移動）
           IconButton(
             icon: const Icon(Icons.download_for_offline_outlined),
             tooltip: 'Excelで保存',
-            onPressed: allRows.isEmpty ? null : () => _saveAsExcel(context, displayHeaders, allRows),
+            onPressed: allRows.isEmpty ? null : () => _saveAsExcel(context, displayHeaders, allRows, false), // false: 共有なし
           )
         ],
       ),
@@ -80,10 +94,13 @@ class MatchingResultPage extends StatelessWidget {
                 ),
         ),
       ),
+      // ★ 変更点: FABを「検品完了＆共有」ボタンに変更
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: allRows.isEmpty ? null : () => _saveAsExcel(context, displayHeaders, allRows), 
-        icon: const Icon(Icons.download_for_offline_outlined),
-        label: const Text('Excelで保存'),
+        onPressed: allRows.isEmpty ? null : () => _handleCompleteAndShare(context, displayHeaders, allRows),
+        icon: const Icon(Icons.check_circle_outline_rounded),
+        label: const Text('検品完了＆共有'),
+        backgroundColor: Colors.green[700],
+        foregroundColor: Colors.white,
       ),
     );
   }
@@ -105,7 +122,7 @@ class MatchingResultPage extends StatelessWidget {
     return sorted;
   }
 
-  Future<void> _saveAsExcel(BuildContext context, List<String> headers, List<Map<String, dynamic>> data) async {
+  Future<String?> _saveAsExcel(BuildContext context, List<String> headers, List<Map<String, dynamic>> data, bool silent) async {
     final now = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
     final fileName = '照合結果_$now.xlsx';
 
@@ -114,7 +131,7 @@ class MatchingResultPage extends StatelessWidget {
     }).toList();
 
     try {
-      final filePath = await exportToExcelStorage( 
+      final String shortPath = await exportToExcelStorage( 
         fileName: fileName,
         sheetName: '照合結果',
         headers: headers,
@@ -122,11 +139,16 @@ class MatchingResultPage extends StatelessWidget {
         projectFolderPath: projectFolderPath, // 渡されたパスを使用
         subfolder: '抽出結果', // サブフォルダ名を指定
       );
-      if (context.mounted) {
-        showCustomSnackBar(context, 'Excelを保存しました: $filePath'); // 修正
+      
+      // share_plusのためにフルパスが必要なので、p.joinを使ってフルパスを再構成する
+      final String fullPath = p.join(projectFolderPath, '抽出結果', fileName);
+      
+      if (context.mounted && !silent) {
+        showCustomSnackBar(context, 'Excelを保存しました: $shortPath'); // 修正
       }
+      return fullPath;
     } catch (e) {
-      if (context.mounted) {
+      if (context.mounted && !silent) {
         showDialog(
             context: context,
             builder: (_) => AlertDialog(
@@ -135,6 +157,67 @@ class MatchingResultPage extends StatelessWidget {
                   actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
                 ));
       }
+      return null;
+    }
+  }
+  
+  // ★ 検品完了＆共有ロジック
+  Future<void> _handleCompleteAndShare(BuildContext context, List<String> headers, List<Map<String, dynamic>> data) async {
+    if (!context.mounted) return;
+    
+    // 1. Loading表示
+    showCustomSnackBar(context, '検品完了データを保存中...', showAtTop: true);
+
+    // 2. プロジェクトデータ (JSON) の保存
+    // saveProjectActionはJSONファイルのフルパスを返すようにlib/pages/home_actions.dartで変更済み
+    final String? jsonFilePath = await saveProjectAction(
+      context,
+      projectFolderPath,
+      projectTitle,
+      nifudaData,
+      productListKariData,
+    );
+    
+    // 3. 照合結果 Excel の保存 (サイレント)
+    final String? excelFilePath = await _saveAsExcel(context, headers, data, true);
+
+    final List<XFile> filesToShare = [];
+    String message = 'プロジェクト「$projectTitle」の検品が完了しました。\n\n';
+
+    if (jsonFilePath != null) {
+      filesToShare.add(XFile(jsonFilePath));
+      message += '・プロジェクトデータ (JSON) を添付しました。\n';
+    } else {
+      message += '・プロジェクトデータ (JSON) の保存に失敗しました。\n';
+    }
+
+    if (excelFilePath != null) {
+      filesToShare.add(XFile(excelFilePath));
+      message += '・照合結果 (Excel) を添付しました。';
+    } else {
+      message += '・照合結果 (Excel) の保存に失敗しました。\n';
+    }
+
+    if (!context.mounted) return;
+    showCustomSnackBar(context, '共有メニューを開きます...', showAtTop: true);
+    
+    // 4. ファイル共有の実行
+    if (filesToShare.isNotEmpty) {
+       await Share.shareXFiles(
+          filesToShare,
+          text: message,
+          subject: '【検品完了】$projectTitle',
+       );
+    } else {
+       await Share.share(message, subject: '【検品完了】$projectTitle');
+    }
+    
+    if (context.mounted) {
+       // ★ 修正箇所: Future.delayed を挟んで、OSのレジューム処理が完了するのを待つ ★
+       // これにより、画面暗転の問題を防ぎ、安定したナビゲーションを実現します。
+       await Future.delayed(Duration.zero);
+       // 5. HomePageに「検品完了」ステータスを返して遷移
+       Navigator.pop(context, 'COMPLETED'); 
     }
   }
 }

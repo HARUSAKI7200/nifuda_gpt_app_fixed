@@ -74,15 +74,15 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
-// (saveProjectAction, loadProjectAction は変更なし)
-Future<void> saveProjectAction(
+// ★★★ 修正点: 戻り値の型を Future<void> から Future<String?> に変更 ★★★
+Future<String?> saveProjectAction(
   BuildContext context,
   String projectFolderPath,
   String projectTitle,
   List<List<String>> nifudaData,
   List<List<String>> productListData,
 ) async {
-  if (!context.mounted) return;
+  if (!context.mounted) return null;
   _showLoadingDialog(context, 'プロジェクトを保存中...');
 
   try {
@@ -101,11 +101,13 @@ Future<void> saveProjectAction(
       _hideLoadingDialog(context);
       showCustomSnackBar(context, 'プロジェクト「$projectTitle」を保存しました。');
     }
+    return filePath; // 保存したファイルのパスを返す
   } catch (e) {
     if (context.mounted) {
       _hideLoadingDialog(context);
       _showErrorDialog(context, '保存エラー', 'プロジェクトの保存に失敗しました: $e');
     }
+    return null;
   }
 }
 
@@ -503,16 +505,18 @@ void showAndExportProductListAction(
   );
 }
 
-void startMatchingAndShowResultsAction(
+// ★★★ 修正点: 戻り値の型を Future<void> から Future<String?> に変更 ★★★
+Future<String?> startMatchingAndShowResultsAction(
   BuildContext context,
   List<List<String>> nifudaData,
   List<List<String>> productListData,
   String matchingPattern,
+  String projectTitle, // 追加
   String projectFolderPath,
-) {
+) async {
   if (nifudaData.length <= 1 || productListData.length <= 1) {
     _showErrorDialog(context, 'データ不足', '照合するには荷札と製品リストの両方のデータが必要です。');
-    return;
+    return null; // データ不足の場合は null を返す
   }
 
   final nifudaHeaders = nifudaData.first;
@@ -527,20 +531,32 @@ void startMatchingAndShowResultsAction(
   
   if (nifudaMapList.isEmpty || productMapList.isEmpty) {
      _showErrorDialog(context, 'データ不足', '荷札または製品リストの有効なデータがありません。');
-    return;
+    return null; // データ不足の場合は null を返す
   }
   
   final matchingLogic = ProductMatcher();
 
   final Map<String, dynamic> rawResults = matchingLogic.match(nifudaMapList, productMapList, pattern: matchingPattern);
 
-  Navigator.push(
+  // MatchingResultPageに生データとプロジェクト名を渡す
+  final String? newStatus = await Navigator.push<String>(
     context,
     MaterialPageRoute(
       builder: (_) => MatchingResultPage(
         matchingResults: rawResults,
         projectFolderPath: projectFolderPath,
+        projectTitle: projectTitle, // 追加
+        nifudaData: nifudaData, // 追加
+        productListKariData: productListData, // 追加
       ),
     ),
   );
+  
+  // 戻り値があれば、それをHomePageに伝えるためにさらにpopする
+  if (context.mounted && newStatus != null) {
+    Navigator.pop(context, newStatus);
+    return newStatus; // Navigator.pop(context, newStatus); が実行された場合でも、この関数自体は値を返す必要がある
+  }
+  
+  return null; // 照合結果画面から何も返されなかった場合や、エラーの場合
 }

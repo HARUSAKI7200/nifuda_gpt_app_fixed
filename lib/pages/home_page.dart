@@ -12,6 +12,11 @@ import 'camera_capture_page.dart';
 import 'nifuda_ocr_confirm_page.dart';
 import 'home_actions_gemini.dart'; 
 
+// ★★★ 定数定義: 進捗ステータス ★★★
+const String STATUS_PENDING = '検品前';
+const String STATUS_IN_PROGRESS = '検品中';
+const String STATUS_COMPLETED = '検品完了';
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -36,6 +41,35 @@ class _HomePageState extends State<HomePage> {
   bool _isLoading = false;
   String? _currentProjectFolderPath;
   String _productListPath = '/storage/emulated/0/DCIM/製品リスト原紙';
+  
+  // ★★★ 追加: 進捗ステータス管理 ★★★
+  String _inspectionStatus = STATUS_PENDING;
+  
+  @override
+  void initState() {
+    super.initState();
+    // 初期状態のステータスを設定
+    _updateStatus();
+  }
+  
+  void _updateStatus([String? status]) {
+    setState(() {
+      if (status != null) {
+        _inspectionStatus = status;
+      } else if (_currentProjectFolderPath == null) {
+        _inspectionStatus = STATUS_PENDING;
+      } else if (_nifudaData.length > 1 || _productListKariData.length > 1) {
+        // データが存在する場合は、完了していない限り「検品中」
+        if (_inspectionStatus != STATUS_COMPLETED) {
+           _inspectionStatus = STATUS_IN_PROGRESS;
+        }
+      } else {
+        // プロジェクトフォルダがあるがデータがない場合
+        _inspectionStatus = STATUS_IN_PROGRESS;
+      }
+    });
+  }
+
 
   void _setLoading(bool loading) {
     if (mounted) setState(() => _isLoading = loading);
@@ -96,6 +130,7 @@ class _HomePageState extends State<HomePage> {
             _currentProjectFolderPath = projectFolderPath;
             _nifudaData = [['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード']];
             _productListKariData = [['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']];
+            _inspectionStatus = STATUS_IN_PROGRESS; // ★ ステータスを検品中に設定
           });
           showCustomSnackBar(context, 'プロジェクト「$projectCode」が作成されました。');
         }
@@ -147,6 +182,7 @@ class _HomePageState extends State<HomePage> {
     if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
       setState(() {
         _nifudaData.addAll(confirmedRows);
+        _updateStatus(); // ステータスを更新
       });
       showCustomSnackBar(context, '${confirmedRows.length}件の荷札データがGPTで追加されました。');
     }
@@ -165,6 +201,7 @@ class _HomePageState extends State<HomePage> {
     if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
       setState(() {
         _nifudaData.addAll(confirmedRows);
+        _updateStatus(); // ステータスを更新
       });
       showCustomSnackBar(context, '${confirmedRows.length}件の荷札データがGeminiで追加されました。');
     }
@@ -221,6 +258,7 @@ class _HomePageState extends State<HomePage> {
            ];
         }
         _productListKariData.addAll(confirmedRows);
+        _updateStatus(); // ステータスを更新
       });
       showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータが追加されました。');
     }
@@ -245,6 +283,7 @@ class _HomePageState extends State<HomePage> {
           ];
         }
         _productListKariData.addAll(confirmedRows);
+        _updateStatus(); // ステータスを更新
       });
       showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータが追加されました。');
     }
@@ -262,13 +301,30 @@ class _HomePageState extends State<HomePage> {
     showAndExportProductListAction(context, _productListKariData, _currentProjectFolderPath!);
   }
 
-  void _handleStartMatching() {
+  // ★★★ 変更点: startMatchingAndShowResultsActionをawaitで呼び出し、戻り値のステータスを処理する ★★★
+  Future<void> _handleStartMatching() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
       showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
       return;
     }
-    startMatchingAndShowResultsAction(context, _nifudaData, _productListKariData, _selectedMatchingPattern, _currentProjectFolderPath!);
+    
+    // home_actions.dart の startMatchingAndShowResultsAction を await で呼び出し
+    final String? newStatus = await startMatchingAndShowResultsAction(
+      context, 
+      _nifudaData, 
+      _productListKariData, 
+      _selectedMatchingPattern,
+      _projectTitle, // projectTitleを追加
+      _currentProjectFolderPath!,
+    );
+    
+    if (mounted && newStatus == STATUS_COMPLETED) { // STATUS_COMPLETED を使用
+      setState(() {
+        _inspectionStatus = STATUS_COMPLETED;
+      });
+      showCustomSnackBar(context, 'プロジェクト「$_projectTitle」の検品を完了しました！', durationSeconds: 5);
+    }
   }
   
   Future<void> _handleSaveProject() async {
@@ -277,6 +333,7 @@ class _HomePageState extends State<HomePage> {
       showCustomSnackBar(context, '保存するプロジェクトがありません。', isError: true);
       return;
     }
+    // saveProjectActionはJSONパスを返すように変更したが、ここでは戻り値は無視
     await saveProjectAction(
       context,
       _currentProjectFolderPath!,
@@ -295,16 +352,34 @@ class _HomePageState extends State<HomePage> {
         _currentProjectFolderPath = loadedData['currentProjectFolderPath'] as String;
         _nifudaData = loadedData['nifudaData'] as List<List<String>>;
         _productListKariData = loadedData['productListKariData'] as List<List<String>>;
+        // 読み込み完了後、未完了であれば「検品中」
+        _inspectionStatus = STATUS_IN_PROGRESS; 
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final buttonColumnWidth = (MediaQuery.of(context).size.width * 0.5).clamp(280.0, 450.0);
+    // ボタンカラムの幅を計算し、画面全体を効率的に使う
+    final screenWidth = MediaQuery.of(context).size.width;
+    // 右側の撮影の仕方ボタンとステータスチップの領域を考慮して、ボタンカラムの最大幅を画面幅から引く
+    final statusChipWidth = 120.0; // チップの概算幅
+    final infoButtonWidth = 150.0; // 撮影の仕方ボタンの幅
+    final maxContentWidth = screenWidth - 32.0; // 左右Paddingを除いた幅
+
+    // 新規作成ボタンの幅は、画面左側にある他のアクションボタンと揃える
+    final actionColumnWidth = (maxContentWidth * 0.5).clamp(280.0, 450.0);
 
     return Scaffold(
       appBar: AppBar(title: Text('シンコー府中輸出課 荷札照合アプリ - $_projectTitle')),
+      // ★★★ 修正箇所 3: 画面右下にFABを配置し、タップ遮断を解消 ★★★
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => showPhotoGuide(context),
+        icon: const Icon(Icons.info_outline),
+        label: const Text('撮影の仕方'),
+        backgroundColor: Colors.indigo[600],
+        foregroundColor: Colors.white,
+      ),
       body: SafeArea(
         child: Stack(
           children: [
@@ -314,19 +389,28 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ★★★ 修正箇所 1: Row内に新規作成ボタンとステータスチップを配置 ★★★
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.start, 
+                      crossAxisAlignment: CrossAxisAlignment.center, // 垂直方向中央揃え
                       children: [
+                        // 新規作成ボタンの幅を固定
                         SizedBox(
-                          width: buttonColumnWidth,
+                          width: actionColumnWidth,
                           child: _buildActionButton(label: '新規作成', onPressed: _handleNewProject, icon: Icons.create_new_folder),
                         ),
-                        const Spacer(),
+                        
+                        const SizedBox(width: 16), // 間隔
+                        const Spacer(), 
+                        // ステータスチップを右端に配置
+                        _buildStatusChip(),
                       ],
                     ),
                     const SizedBox(height: 10),
+                    
+                    // ★★★ 修正箇所 2: ボタンカラムの幅を actionColumnWidth に統一 ★★★
                     SizedBox(
-                      width: buttonColumnWidth,
+                      width: actionColumnWidth,
                       child: Row(
                         children: [
                           Expanded(
@@ -350,7 +434,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(height: 10),
                     SizedBox(
-                      width: buttonColumnWidth,
+                      width: actionColumnWidth,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: <Widget>[
@@ -381,15 +465,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-            Positioned(
-              top: 16.0,
-              right: 16.0,
-              child: _buildActionButton(
-                label: '撮影の仕方',
-                onPressed: () => showPhotoGuide(context),
-                icon: Icons.info_outline,
-              ),
-            ),
+            
             if (_isLoading)
               Container(
                 color: Colors.black.withOpacity(0.5),
@@ -407,6 +483,41 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
+    );
+  }
+
+  // ★★★ 追加: ステータス表示用のChipウィジェット ★★★
+  Widget _buildStatusChip() {
+    Color color;
+    IconData icon;
+    switch (_inspectionStatus) {
+      case STATUS_COMPLETED:
+        color = Colors.green;
+        icon = Icons.check_circle_outline;
+        break;
+      case STATUS_IN_PROGRESS:
+        color = Colors.orange;
+        icon = Icons.pending_actions;
+        break;
+      case STATUS_PENDING:
+      default:
+        color = Colors.blueGrey;
+        icon = Icons.pause_circle_outline;
+        break;
+    }
+
+    return Chip(
+      label: Text(
+        _inspectionStatus,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 14,
+        ),
+      ),
+      avatar: Icon(icon, color: Colors.white, size: 18),
+      backgroundColor: color,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
     );
   }
 
