@@ -38,8 +38,8 @@ class MatchingResultPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('照合結果'),
+        // 標準の戻る矢印を有効化（変更なし）
         actions: [
-          // ★ 変更点: アクションボタンを「エクセル保存」のみに戻す（「検品完了＆共有」はFAB上に移動）
           IconButton(
             icon: const Icon(Icons.download_for_offline_outlined),
             tooltip: 'Excelで保存',
@@ -47,9 +47,6 @@ class MatchingResultPage extends StatelessWidget {
           )
         ],
       ),
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-      // ★ 変更点：bodyをSafeAreaでラップ
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(8.0), 
@@ -94,10 +91,10 @@ class MatchingResultPage extends StatelessWidget {
                 ),
         ),
       ),
-      // ★ 変更点: FABを「検品完了＆共有」ボタンに変更
+      // ★★★ 修正: FABを extended に戻し、「検品完了＆共有」と表示する ★★★
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: allRows.isEmpty ? null : () => _handleCompleteAndShare(context, displayHeaders, allRows),
-        icon: const Icon(Icons.check_circle_outline_rounded),
+        onPressed: allRows.isEmpty ? null : () => _handleSaveAndShare(context, displayHeaders, allRows),
+        icon: const Icon(Icons.share),
         label: const Text('検品完了＆共有'),
         backgroundColor: Colors.green[700],
         foregroundColor: Colors.white,
@@ -161,15 +158,14 @@ class MatchingResultPage extends StatelessWidget {
     }
   }
   
-  // ★ 検品完了＆共有ロジック
-  Future<void> _handleCompleteAndShare(BuildContext context, List<String> headers, List<Map<String, dynamic>> data) async {
+  // ★ 共有機能のみのロジック (Snackbarの文言を修正)
+  Future<void> _handleSaveAndShare(BuildContext context, List<String> headers, List<Map<String, dynamic>> data) async {
     if (!context.mounted) return;
     
     // 1. Loading表示
     showCustomSnackBar(context, '検品完了データを保存中...', showAtTop: true);
 
     // 2. プロジェクトデータ (JSON) の保存
-    // saveProjectActionはJSONファイルのフルパスを返すようにlib/pages/home_actions.dartで変更済み
     final String? jsonFilePath = await saveProjectAction(
       context,
       projectFolderPath,
@@ -213,11 +209,8 @@ class MatchingResultPage extends StatelessWidget {
     }
     
     if (context.mounted) {
-       // ★ 修正箇所: Future.delayed を挟んで、OSのレジューム処理が完了するのを待つ ★
-       // これにより、画面暗転の問題を防ぎ、安定したナビゲーションを実現します。
-       await Future.delayed(Duration.zero);
-       // 5. HomePageに「検品完了」ステータスを返して遷移
-       Navigator.pop(context, 'COMPLETED'); 
+       // 画面暗転回避のため、手動で戻ることを推奨するSnackbarを出す
+       showCustomSnackBar(context, '共有が完了しました。左上の矢印でホーム画面に戻ってください。', durationSeconds: 5, showAtTop: true);
     }
   }
 }

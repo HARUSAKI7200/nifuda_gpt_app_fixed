@@ -372,9 +372,10 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       appBar: AppBar(title: Text('シンコー府中輸出課 荷札照合アプリ - $_projectTitle')),
-      // ★★★ 修正箇所 3: 画面右下にFABを配置し、タップ遮断を解消 ★★★
+      // ★★★ 修正箇所: 画面右下にFABを配置し、_isLoadingがtrueの場合は無効化する ★★★
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => showPhotoGuide(context),
+        // ★ 修正点: _isLoadingがtrueの場合は onPressed を null にして無効化する
+        onPressed: _isLoading ? null : () => showPhotoGuide(context),
         icon: const Icon(Icons.info_outline),
         label: const Text('撮影の仕方'),
         backgroundColor: Colors.indigo[600],
