@@ -53,6 +53,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
   bool _isProcessingImage = false;
 
   final List<Future<Map<String, dynamic>?>> _aiResultFutures = [];
+  final List<Uint8List> _capturedImageBytes = []; // ★★★ 追加: 撮影された画像データを格納するリスト
   int _requestedImageCount = 0;
   int _respondedImageCount = 0;
   OverlayEntry? _flashOverlay;
@@ -223,20 +224,29 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
 
       if(mounted) setState(() => _requestedImageCount++);
 
-      // AIへの送信処理を開始
-      final aiFuture = widget.aiService(
-        bytesForProcessing,
-        isProductList: widget.isProductListOcr,
-        company: widget.isProductListOcr ? (widget.companyForGpt ?? 'none') : 'none',
-      ).then<Map<String, dynamic>?>((result) {
-        if (mounted) setState(() => _respondedImageCount++);
-        return result;
-      }).catchError((error) {
-        if (mounted) setState(() => _respondedImageCount++);
-        debugPrint("AI処理エラー: $error");
-        return null;
-      });
-      _aiResultFutures.add(aiFuture);
+      if (widget.isProductListOcr) { // ★★★ 変更: 製品リストの場合はAI送信せず、バイトを保存し、ダミーのFutureを追加
+        _capturedImageBytes.add(bytesForProcessing);
+        // ダミーのFutureを追加して、UIのカウントアップを機能させる
+        _aiResultFutures.add(Future.value({}).then((result) {
+          if (mounted) setState(() => _respondedImageCount++);
+          return null; // ダミーなので常にnullを返す
+        }));
+      } else {
+        // AIへの送信処理を開始 (荷札の場合: 既存ロジック)
+        final aiFuture = widget.aiService(
+          bytesForProcessing,
+          isProductList: widget.isProductListOcr,
+          company: widget.isProductListOcr ? (widget.companyForGpt ?? 'none') : 'none',
+        ).then<Map<String, dynamic>?>((result) {
+          if (mounted) setState(() => _respondedImageCount++);
+          return result;
+        }).catchError((error) {
+          if (mounted) setState(() => _respondedImageCount++);
+          debugPrint("AI処理エラー: $error");
+          return null;
+        });
+        _aiResultFutures.add(aiFuture);
+      }
       
       final String fileName = 'nifuda_cropped_${DateTime.now().millisecondsSinceEpoch}.jpg';
       unawaited(_saveCroppedImage(bytesForProcessing, fileName));
@@ -252,7 +262,8 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
 
   Future<void> _finishCapturingAndPop() async {
     if (_requestedImageCount == 0) {
-        Navigator.pop(context, <Map<String, dynamic>>[]);
+        // 製品リストの場合はList<Uint8List>を返すため、空リストを返す
+        Navigator.pop(context, widget.isProductListOcr ? <Uint8List>[] : <Map<String, dynamic>>[]); 
         return;
     }
     if (_requestedImageCount != _respondedImageCount) {
@@ -269,16 +280,27 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       );
       if(proceed != true) return;
     }
-    if (mounted) setState(() => _isProcessingImage = true);
-    List<Map<String, dynamic>> validResults = [];
-    final allRawResults = await Future.wait(_aiResultFutures);
-    for (final result in allRawResults) {
-        if (result != null) {
-            validResults.add(result);
-        }
-    }
-    if (mounted) {
-      Navigator.pop(context, validResults);
+    
+    if (widget.isProductListOcr) { // ★★★ 変更: 製品リストの場合はraw bytesを返す
+      if (mounted) setState(() => _isProcessingImage = true);
+      // ダミーFutureの完了を待つ (これにより_respondedImageCountが_requestedImageCountと一致するのを待つ)
+      await Future.wait(_aiResultFutures); 
+      if (mounted) {
+        // List<Uint8List>を返す
+        Navigator.pop(context, _capturedImageBytes); 
+      }
+    } else { // 荷札の場合はAI結果を返す (既存ロジック)
+      if (mounted) setState(() => _isProcessingImage = true);
+      List<Map<String, dynamic>> validResults = [];
+      final allRawResults = await Future.wait(_aiResultFutures);
+      for (final result in allRawResults) {
+          if (result != null) {
+              validResults.add(result);
+          }
+      }
+      if (mounted) {
+        Navigator.pop(context, validResults);
+      }
     }
   }
 
@@ -384,6 +406,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
         );
         
         final actualOverlayWidth = _cameraPreviewAreaOnScreen.width * widget.overlayWidthRatio;
+        // ★★★ 修正: 製品リストの場合は縦長の枠にするため、HeightRatioを0.9に設定している
         final actualOverlayHeight = _cameraPreviewAreaOnScreen.height * widget.overlayHeightRatio;
 
         _overlayRectOnScreen = Rect.fromLTWH(

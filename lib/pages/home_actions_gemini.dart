@@ -10,10 +10,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img; // ★★★ 追加 ★★★
 
 import '../utils/gemini_service.dart';
 import '../utils/product_matcher.dart';
 import '../utils/excel_export.dart';
+import '../utils/ocr_masker.dart'; // ★★★ 追加 ★★★
 import 'camera_capture_page.dart';
 import 'nifuda_ocr_confirm_page.dart';
 import 'product_list_ocr_confirm_page.dart';
@@ -157,37 +159,33 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
 }
 
 
-// ★★★ Geminiを利用する製品リストOCR処理 ★★★
-Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
+// ★★★ 変更: カメラ連続撮影による製品リストOCR処理 (Gemini版) ★★★
+// NOTE: productListPathの引数は不要になるため削除
+Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
   String projectFolderPath,
-  String productListPath, // ★★★ 追加：フォルダパスを受け取る引数
 ) async {
-  // ★★★ 変更点：ハードコーディングされたパスを引数で受け取ったものに置き換え ★★★
-  final String targetDirectory = productListPath;
-  
-  if (!await Directory(targetDirectory).exists()) {
-    if(context.mounted) _showErrorDialog(context, 'フォルダ未検出', '指定されたフォルダが見つかりません:\n$targetDirectory');
-    return null;
-  }
-
-  final List<String>? pickedFilePaths = await Navigator.push<List<String>>(
+  // 1. カメラで連続撮影し、トリミングされた生の画像バイト列を取得
+  final List<Uint8List>? rawImageBytesList =
+      await Navigator.push<List<Uint8List>>( // ★★★ 修正: List<dynamic>からList<Uint8List>に変更
     context,
-    MaterialPageRoute(
-      builder: (_) => DirectoryImagePickerPage(rootDirectoryPath: targetDirectory),
-    ),
-  );
+    MaterialPageRoute(builder: (_) => CameraCapturePage(
+        overlayText: '製品リストを枠に合わせて撮影',
+        overlayHeightRatio: 0.9, // 製品リストは縦長なので枠を縦に広げる
+        isProductListOcr: true, // ★★★ trueに設定
+        projectFolderPath: projectFolderPath,
+        aiService: sendImageToGemini, // Geminiの関数を渡す（この時点ではダミーとして使用）
+    )),
+  ); // ★★★ 修正: ?.cast<Uint8List>()を削除
 
-  if (pickedFilePaths == null || pickedFilePaths.isEmpty) {
-    if (context.mounted) showCustomSnackBar(context, '製品リスト画像の選択がキャンセルされました。');
+  if (rawImageBytesList == null || rawImageBytesList.isEmpty) {
+    if (context.mounted) showCustomSnackBar(context, '製品リストの撮影がキャンセルされました。');
     return null;
   }
-  final List<XFile> pickedFiles = pickedFilePaths.map((path) => XFile(path)).toList();
 
-  List<Uint8List> finalImagesToSend = [];
-  
+  // 2. マスクテンプレートの決定
   String template;
   switch (selectedCompany) {
     case 'T社':
@@ -206,42 +204,53 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
       return null;
   }
 
-  try {
-    for (int i = 0; i < pickedFiles.length; i++) {
-      final file = pickedFiles[i];
-      if (!context.mounted) return null;
+  // 3. 1枚目のみマスクプレビュー/確定
+  final Uint8List firstImageBytes = rawImageBytesList.first;
+  
+  if (!context.mounted) return null;
+  _showLoadingDialog(context, 'プレビューを準備中...');
+  if(context.mounted) _hideLoadingDialog(context);
 
-      _showLoadingDialog(context, 'プレビューを準備中... (${i + 1}/${pickedFiles.length})');
-      final Uint8List previewImageBytes = (await FlutterImageCompress.compressWithFile(
-        file.path, minWidth: 1280, minHeight: 1280, quality: 80,
-      ))!;
-      if(context.mounted) _hideLoadingDialog(context);
-
-      final Uint8List? finalMaskedImageBytes =
-          await Navigator.push<Uint8List>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ProductListMaskPreviewPage(
-            previewImageBytes: previewImageBytes,
-            maskTemplate: template,
-            imageIndex: i + 1, totalImages: pickedFiles.length,
-          ),
-        ),
-      );
-      
-      if (finalMaskedImageBytes != null) {
-        finalImagesToSend.add(finalMaskedImageBytes);
-      }
-    }
-  } catch (e) {
-      if(context.mounted) {
-        _hideLoadingDialog(context);
-        _showErrorDialog(context, '画像処理エラー', e.toString());
-      }
+  final Uint8List? finalMaskedFirstImageBytes =
+      await Navigator.push<Uint8List>(
+    context,
+    MaterialPageRoute(
+      builder: (_) => ProductListMaskPreviewPage(
+        previewImageBytes: firstImageBytes,
+        maskTemplate: template,
+        imageIndex: 1, // 1枚目として表示
+        totalImages: rawImageBytesList.length,
+      ),
+    ),
+  );
+  
+  if (finalMaskedFirstImageBytes == null) {
+      if(context.mounted) showCustomSnackBar(context, 'マスク確認が破棄されたため、OCR処理を中断しました。');
       return null;
   }
+  
+  // 4. 全ての画像に確定したマスク処理を適用
+  List<Uint8List> finalImagesToSend = [];
+  finalImagesToSend.add(finalMaskedFirstImageBytes); // 1枚目はユーザーが確認したものを使用
+
+  for (int i = 1; i < rawImageBytesList.length; i++) {
+    if(context.mounted) _showLoadingDialog(context, '画像を準備中... (${i + 1}/${rawImageBytesList.length})');
+    final image = img.decodeImage(rawImageBytesList[i])!;
+    
+    // T社マスクは固定位置であるため、2枚目以降にも適用する
+    if (template == 't') {
+        final maskedImage = applyMaskToImage(image, template: 't');
+        finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
+    } 
+    // 動的マスクは1枚目のみに適用する（プレビュー画面で処理済み）ため、2枚目以降は適用しない（生の画像を使用）
+    else {
+        finalImagesToSend.add(rawImageBytesList[i]);
+    }
+  }
+  if(context.mounted) _hideLoadingDialog(context);
 
 
+  // 5. AIへの送信とOCR結果の取得 (既存のロジックを流用)
   if (finalImagesToSend.isEmpty) {
     if(context.mounted) showCustomSnackBar(context, '処理対象の画像がありませんでした。');
     return null;
@@ -308,6 +317,7 @@ Future<List<List<String>>?> pickProcessAndConfirmProductListActionWithGemini(
   }
   setLoading(false);
 
+  // 6. 確認画面へ
   if (allExtractedProductRows.isNotEmpty) {
       return await Navigator.push<List<List<String>>>(
         context,

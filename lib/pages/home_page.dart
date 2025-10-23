@@ -5,8 +5,8 @@ import '../widgets/home_widgets.dart';
 import '../widgets/custom_snackbar.dart';
 import 'dart:io'; 
 import 'package:path/path.dart' as p; 
-// ★★★ 追加：フォルダ選択パッケージのインポート ★★★
-import 'package:file_picker/file_picker.dart';
+// ★★★ 削除：フォルダ選択パッケージのインポートを削除 ★★★
+// import 'package:file_picker/file_picker.dart';
 
 import 'camera_capture_page.dart';
 import 'nifuda_ocr_confirm_page.dart';
@@ -40,7 +40,7 @@ class _HomePageState extends State<HomePage> {
   ];
   bool _isLoading = false;
   String? _currentProjectFolderPath;
-  String _productListPath = '/storage/emulated/0/DCIM/製品リスト原紙';
+  // String _productListPath = '/storage/emulated/0/DCIM/製品リスト原紙'; // ★★★ 削除 ★★★
   
   // ★★★ 追加: 進捗ステータス管理 ★★★
   String _inspectionStatus = STATUS_PENDING;
@@ -149,25 +149,25 @@ class _HomePageState extends State<HomePage> {
     }
   }
   
-  // ★★★ 変更点：テキスト入力からフォルダ選択ダイアログに変更 ★★★
-  Future<void> _handleChangeProductListPath() async {
-    // FilePickerを使用してユーザーにディレクトリを選択させる
-    String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: '製品リストのフォルダを選択してください',
-      initialDirectory: _productListPath,
-    );
+  // ★★★ 削除: _handleChangeProductListPath 関数全体を削除 ★★★
+  // Future<void> _handleChangeProductListPath() async {
+  //   // FilePickerを使用してユーザーにディレクトリを選択させる
+  //   String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
+  //     dialogTitle: '製品リストのフォルダを選択してください',
+  //     initialDirectory: _productListPath,
+  //   );
 
-    if (selectedDirectory != null) {
-      // ユーザーがディレクトリを選択した場合
-      setState(() {
-        _productListPath = selectedDirectory;
-      });
-      if(mounted) showCustomSnackBar(context, '読込先フォルダを変更しました: $selectedDirectory');
-    } else {
-      // ユーザーが選択をキャンセルした場合
-      if(mounted) showCustomSnackBar(context, 'フォルダ選択がキャンセルされました。');
-    }
-  }
+  //   if (selectedDirectory != null) {
+  //     // ユーザーがディレクトリを選択した場合
+  //     setState(() {
+  //       _productListPath = selectedDirectory;
+  //     });
+  //     if(mounted) showCustomSnackBar(context, '読込先フォルダを変更しました: $selectedDirectory');
+  //   } else {
+  //     // ユーザーが選択をキャンセルした場合
+  //     if(mounted) showCustomSnackBar(context, 'フォルダ選択がキャンセルされました。');
+  //   }
+  // }
 
   Future<void> _handleCaptureNifudaWithGpt() async {
     if (_isLoading) return;
@@ -242,6 +242,7 @@ class _HomePageState extends State<HomePage> {
     showAndExportNifudaListAction(context, _nifudaData, _projectTitle, _currentProjectFolderPath!);
   }
 
+  // ★★★ 変更: 製品リストをカメラで撮影してOCR (GPT版) ★★★
   Future<void> _handlePickProductListWithGpt() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
@@ -249,7 +250,8 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     _setLoading(true);
-    final List<List<String>>? confirmedRows = await pickProcessAndConfirmProductListAction(context, _selectedCompany, _setLoading, _currentProjectFolderPath!, _productListPath);
+    // productListPathを削除した新しい関数を呼び出す
+    final List<List<String>>? confirmedRows = await captureProcessAndConfirmProductListAction(context, _selectedCompany, _setLoading, _currentProjectFolderPath!);
     if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
       setState(() {
         if(_productListKariData.length == 1 && _productListKariData.first[0] != 'ORDER No.') {
@@ -267,6 +269,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ★★★ 変更: 製品リストをカメラで撮影してOCR (Gemini版) ★★★
   Future<void> _handlePickProductListWithGemini() async {
     if (_isLoading) return;
     if (_currentProjectFolderPath == null) {
@@ -274,7 +277,8 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     _setLoading(true);
-    final List<List<String>>? confirmedRows = await pickProcessAndConfirmProductListActionWithGemini(context, _selectedCompany, _setLoading, _currentProjectFolderPath!, _productListPath);
+    // productListPathを削除した新しい関数を呼び出す
+    final List<List<String>>? confirmedRows = await captureProcessAndConfirmProductListActionWithGemini(context, _selectedCompany, _setLoading, _currentProjectFolderPath!);
     if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
       setState(() {
         if(_productListKariData.length == 1 && _productListKariData.first[0] != 'ORDER No.') {
@@ -447,12 +451,13 @@ class _HomePageState extends State<HomePage> {
                           const SizedBox(height: 10),
                           _buildCompanySelector(),
                           const SizedBox(height: 10),
-                          // ★★★ ボタンのテキストを「...」で省略されるのを防ぐため調整 ★★★
-                          _buildActionButton(label: '読込先フォルダ変更', onPressed: _handleChangeProductListPath, icon: Icons.settings_applications),
+                          // ★★★ 削除: 読込先フォルダ変更ボタンを削除 ★★★
+                          // _buildActionButton(label: '読込先フォルダ変更', onPressed: _handleChangeProductListPath, icon: Icons.settings_applications),
+                          // const SizedBox(height: 10),
+                          // ★★★ 変更: ボタンのテキストを「製品リストを撮影して抽出」に変更 ★★★
+                          _buildActionButton(label: '製品リストを撮影して抽出 (GPT)', onPressed: _handlePickProductListWithGpt, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '製品リスト画像をOCR (GPT)', onPressed: _handlePickProductListWithGpt, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null),
-                          const SizedBox(height: 10),
-                          _buildActionButton(label: '製品リスト画像をOCR (Gemini)', onPressed: _handlePickProductListWithGemini, icon: Icons.flash_on, isEnabled: _currentProjectFolderPath != null, isEmphasized: true),
+                          _buildActionButton(label: '製品リストを撮影して抽出 (Gemini)', onPressed: _handlePickProductListWithGemini, icon: Icons.flash_on, isEnabled: _currentProjectFolderPath != null, isEmphasized: true),
                           const SizedBox(height: 10),
                           _buildActionButton(label: '製品リスト (${_productListKariData.length > 1 ? _productListKariData.length - 1 : 0}件)', onPressed: _handleShowProductList, icon: Icons.inventory_2_outlined, isEnabled: _productListKariData.length > 1 && _currentProjectFolderPath != null),
                           const SizedBox(height: 20),
