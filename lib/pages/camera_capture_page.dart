@@ -20,7 +20,6 @@ typedef AiServiceFunction = Future<Map<String, dynamic>?> Function(
   http.Client? client,
 });
 
-
 class CameraCapturePage extends StatefulWidget {
   final String overlayText;
   final double overlayWidthRatio;
@@ -53,7 +52,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
   bool _isProcessingImage = false;
 
   final List<Future<Map<String, dynamic>?>> _aiResultFutures = [];
-  final List<Uint8List> _capturedImageBytes = []; // ★★★ 追加: 撮影された画像データを格納するリスト
+  final List<Uint8List> _capturedImageBytes = []; // ★★★ Nifuda OCRでは使用されないが、ProductList OCRで使っていたため残す ★★★
   int _requestedImageCount = 0;
   int _respondedImageCount = 0;
   OverlayEntry? _flashOverlay;
@@ -102,9 +101,6 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       );
       _controller = CameraController(
         backCamera,
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ 変更点：解像度を veryHigh から high に変更し、処理負荷と速度のバランスを取る
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         ResolutionPreset.high,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
@@ -189,47 +185,56 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       
       final img.Image orientedImage = img.bakeOrientation(originalImage);
       
-      final int imgW = orientedImage.width;
-      final int imgH = orientedImage.height;
+      Uint8List bytesForProcessing;
 
-      final double scaleX = imgW / _cameraPreviewAreaOnScreen.width;
-      final double scaleY = imgH / _cameraPreviewAreaOnScreen.height;
+      if (widget.isProductListOcr) {
+        // ★★★ 製品リストOCRは外部スキャナを使用するため、このページはスキップされます。★★★
+        // 万が一到達した場合は、エラーまたはデータ破棄となるはずですが、ここでは従来の Product List の処理フローを定義します。
+        bytesForProcessing = Uint8List.fromList(img.encodeJpg(orientedImage, quality: 100));
+        
+      } else {
+        // ★★★ 荷札の場合: 従来の矩形クロップロジックを使用 (Nifuda OCR継続のため) ★★★
+        final int imgW = orientedImage.width;
+        final int imgH = orientedImage.height;
 
-      final double overlayLocalX = _overlayRectOnScreen.left - _cameraPreviewAreaOnScreen.left;
-      final double overlayLocalY = _overlayRectOnScreen.top - _cameraPreviewAreaOnScreen.top;
+        final double scaleX = imgW / _cameraPreviewAreaOnScreen.width;
+        final double scaleY = imgH / _cameraPreviewAreaOnScreen.height;
 
-      int cropX = (overlayLocalX * scaleX).round();
-      int cropY = (overlayLocalY * scaleY).round();
-      int cropW = (_overlayRectOnScreen.width * scaleX).round();
-      int cropH = (_overlayRectOnScreen.height * scaleY).round();
-      
-      final int finalCropX = cropX.clamp(0, imgW - cropW < 0 ? imgW : imgW - cropW).round();
-      final int finalCropY = cropY.clamp(0, imgH - cropH < 0 ? imgH : imgH - cropH).round();
-      final int finalCropW = cropW.clamp(1, imgW - finalCropX).round();
-      final int finalCropH = cropH.clamp(1, imgH - finalCropY).round();
+        final double overlayLocalX = _overlayRectOnScreen.left - _cameraPreviewAreaOnScreen.left;
+        final double overlayLocalY = _overlayRectOnScreen.top - _cameraPreviewAreaOnScreen.top;
 
-      if (finalCropW <= 0 || finalCropH <= 0) {
-        throw Exception("Invalid crop dimensions after clamp: W=$finalCropW, H=$finalCropH.");
+        int cropX = (overlayLocalX * scaleX).round();
+        int cropY = (overlayLocalY * scaleY).round();
+        int cropW = (_overlayRectOnScreen.width * scaleX).round();
+        int cropH = (_overlayRectOnScreen.height * scaleY).round();
+        
+        final int finalCropX = cropX.clamp(0, imgW - cropW < 0 ? imgW : imgW - cropW).round();
+        final int finalCropY = cropY.clamp(0, imgH - cropH < 0 ? imgH : imgH - cropH).round();
+        final int finalCropW = cropW.clamp(1, imgW - finalCropX).round();
+        final int finalCropH = cropH.clamp(1, imgH - finalCropY).round();
+
+        if (finalCropW <= 0 || finalCropH <= 0) {
+          throw Exception("Invalid crop dimensions after clamp: W=$finalCropW, H=$finalCropH.");
+        }
+        
+        final img.Image croppedImage = img.copyCrop(
+            orientedImage,
+            x: finalCropX,
+            y: finalCropY,
+            width: finalCropW,
+            height: finalCropH,
+        );
+        bytesForProcessing = Uint8List.fromList(img.encodeJpg(croppedImage, quality: 100));
       }
-      
-      final img.Image croppedImage = img.copyCrop(
-          orientedImage,
-          x: finalCropX,
-          y: finalCropY,
-          width: finalCropW,
-          height: finalCropH,
-      );
-      
-      final Uint8List bytesForProcessing = Uint8List.fromList(img.encodeJpg(croppedImage, quality: 100));
 
       if(mounted) setState(() => _requestedImageCount++);
 
-      if (widget.isProductListOcr) { // ★★★ 変更: 製品リストの場合はAI送信せず、バイトを保存し、ダミーのFutureを追加
+      if (widget.isProductListOcr) { 
+        // Product List OCRは外部スキャナに置き換えられたため、このパスは無効です。
         _capturedImageBytes.add(bytesForProcessing);
-        // ダミーのFutureを追加して、UIのカウントアップを機能させる
         _aiResultFutures.add(Future.value({}).then((result) {
           if (mounted) setState(() => _respondedImageCount++);
-          return null; // ダミーなので常にnullを返す
+          return null; 
         }));
       } else {
         // AIへの送信処理を開始 (荷札の場合: 既存ロジック)
@@ -262,7 +267,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
 
   Future<void> _finishCapturingAndPop() async {
     if (_requestedImageCount == 0) {
-        // 製品リストの場合はList<Uint8List>を返すため、空リストを返す
+        // 荷札: <Map<String, dynamic>>[] 製品リスト: <Uint8List>[]
         Navigator.pop(context, widget.isProductListOcr ? <Uint8List>[] : <Map<String, dynamic>>[]); 
         return;
     }
@@ -271,7 +276,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
         context: context,
         builder: (_) => AlertDialog(
           title: const Text('処理が完了していません'),
-          content: Text('$_requestedImageCount件中、$_respondedImageCount件の処理のみ完了しています。このまま終了しますか？'),
+          content: Text('$_respondedImageCount件中、$_requestedImageCount件の処理のみ完了しています。このまま終了しますか？'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('待機')),
             TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('終了')),
@@ -281,12 +286,10 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
       if(proceed != true) return;
     }
     
-    if (widget.isProductListOcr) { // ★★★ 変更: 製品リストの場合はraw bytesを返す
+    if (widget.isProductListOcr) { // 製品リストのパスは action filesで置き換えられたため、ここには到達しないはずですが、安全のために戻り値を定義します
       if (mounted) setState(() => _isProcessingImage = true);
-      // ダミーFutureの完了を待つ (これにより_respondedImageCountが_requestedImageCountと一致するのを待つ)
       await Future.wait(_aiResultFutures); 
       if (mounted) {
-        // List<Uint8List>を返す
         Navigator.pop(context, _capturedImageBytes); 
       }
     } else { // 荷札の場合はAI結果を返す (既存ロジック)
@@ -406,7 +409,6 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
         );
         
         final actualOverlayWidth = _cameraPreviewAreaOnScreen.width * widget.overlayWidthRatio;
-        // ★★★ 修正: 製品リストの場合は縦長の枠にするため、HeightRatioを0.9に設定している
         final actualOverlayHeight = _cameraPreviewAreaOnScreen.height * widget.overlayHeightRatio;
 
         _overlayRectOnScreen = Rect.fromLTWH(

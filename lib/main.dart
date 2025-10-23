@@ -1,11 +1,18 @@
 // lib/main.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // ★ 追加
 import 'pages/home_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MyApp());
+  // ★ 縦向き（ポートレート）に固定する処理を追加
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp, // 縦向き（上）
+    DeviceOrientation.portraitDown, // 縦向き（下）
+  ]).then((_) {
+    runApp(const MyApp());
+  });
 }
 
 class MyApp extends StatelessWidget {

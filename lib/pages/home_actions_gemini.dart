@@ -10,12 +10,14 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:http/http.dart' as http;
-import 'package:image/image.dart' as img; // ★★★ 追加 ★★★
+import 'package:image/image.dart' as img; 
+// ★★★ 修正: Google ML Kit Document Scanner のインポートを追加 ★★★
+import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 
 import '../utils/gemini_service.dart';
 import '../utils/product_matcher.dart';
 import '../utils/excel_export.dart';
-import '../utils/ocr_masker.dart'; // ★★★ 追加 ★★★
+import '../utils/ocr_masker.dart'; 
 import 'camera_capture_page.dart';
 import 'nifuda_ocr_confirm_page.dart';
 import 'product_list_ocr_confirm_page.dart';
@@ -159,33 +161,53 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
 }
 
 
-// ★★★ 変更: カメラ連続撮影による製品リストOCR処理 (Gemini版) ★★★
-// NOTE: productListPathの引数は不要になるため削除
+// ★★★ 変更: カメラ連続撮影による製品リストOCR処理 (Gemini版) - ML Kit Document Scannerを使用 ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
   String projectFolderPath,
 ) async {
-  // 1. カメラで連続撮影し、トリミングされた生の画像バイト列を取得
-  final List<Uint8List>? rawImageBytesList =
-      await Navigator.push<List<Uint8List>>( // ★★★ 修正: List<dynamic>からList<Uint8List>に変更
-    context,
-    MaterialPageRoute(builder: (_) => CameraCapturePage(
-        overlayText: '製品リストを枠に合わせて撮影',
-        overlayHeightRatio: 0.9, // 製品リストは縦長なので枠を縦に広げる
-        isProductListOcr: true, // ★★★ trueに設定
-        projectFolderPath: projectFolderPath,
-        aiService: sendImageToGemini, // Geminiの関数を渡す（この時点ではダミーとして使用）
-    )),
-  ); // ★★★ 修正: ?.cast<Uint8List>()を削除
+  // 1. ML Kit Document Scannerを起動して、補正済み画像のファイルパスリストを取得
+  List<String>? imageFilePaths;
+  try {
+    // ★★★ 修正: DocumentScannerOptionsとDocumentScannerのインスタンス化を修正 ★★★
+    final options = DocumentScannerOptions(
+      pageLimit: 100, // ページ数の制限なし（実質）
+      isGalleryImport: false, // ギャラリーからのインポートを許可しない
+      documentFormat: DocumentFormat.jpeg, // JPEG形式で結果を取得
+      mode: ScannerMode.full, // ★★★ 修正: scannerMode を mode に変更 ★★★
+    );
+    final docScanner = DocumentScanner(options: options); // instanceの代わりにコンストラクタを使用
+    
+    final result = await docScanner.scanDocument(); // インスタンスメソッドとして呼び出し
+    imageFilePaths = result?.images; // ★★★ 修正: scannedImages を images に変更 ★★★
+    
+  } catch (e) {
+    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Google ML Kit Document Scannerの起動に失敗しました: $e');
+    return null;
+  }
 
-  if (rawImageBytesList == null || rawImageBytesList.isEmpty) {
+
+  if (imageFilePaths == null || imageFilePaths.isEmpty) {
     if (context.mounted) showCustomSnackBar(context, '製品リストの撮影がキャンセルされました。');
     return null;
   }
 
-  // 2. マスクテンプレートの決定
+  // 2. 取得したファイルパスからUint8Listリストを作成 
+  List<Uint8List> rawImageBytesList = [];
+  try {
+    for (var path in imageFilePaths) {
+      final file = File(path);
+      // ML Kitの出力ファイルは一時的な場所にあるため、読み込み後に削除されることを前提とする
+      rawImageBytesList.add(await file.readAsBytes());
+    }
+  } catch (e) {
+    if (context.mounted) _showErrorDialog(context, 'ファイル読み込みエラー', 'スキャン済みファイルの読み込みに失敗しました: $e');
+    return null;
+  }
+  
+  // 3. マスクテンプレートの決定 (既存ロジック)
   String template;
   switch (selectedCompany) {
     case 'T社':
@@ -204,7 +226,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
       return null;
   }
 
-  // 3. 1枚目のみマスクプレビュー/確定
+  // 4. 1枚目のみマスクプレビュー/確定 (既存ロジック)
   final Uint8List firstImageBytes = rawImageBytesList.first;
   
   if (!context.mounted) return null;
@@ -229,7 +251,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
       return null;
   }
   
-  // 4. 全ての画像に確定したマスク処理を適用
+  // 5. 全ての画像に確定したマスク処理を適用 (既存ロジック)
   List<Uint8List> finalImagesToSend = [];
   finalImagesToSend.add(finalMaskedFirstImageBytes); // 1枚目はユーザーが確認したものを使用
 
@@ -250,7 +272,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
   if(context.mounted) _hideLoadingDialog(context);
 
 
-  // 5. AIへの送信とOCR結果の取得 (既存のロジックを流用)
+  // 6. AIへの送信とOCR結果の取得 (既存ロジック)
   if (finalImagesToSend.isEmpty) {
     if(context.mounted) showCustomSnackBar(context, '処理対象の画像がありませんでした。');
     return null;
