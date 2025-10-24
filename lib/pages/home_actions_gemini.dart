@@ -76,6 +76,27 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
+// ★★★ 修正: シャープニングフィルター適用ヘルパー関数 - divisorとoffsetを削除 ★★★
+img.Image _applySharpeningFilter(img.Image image) {
+  // シャープニングカーネル (一般的なもの)
+  // [0, -1, 0]
+  // [-1, 5, -1]
+  // [0, -1, 0]
+  final Float32List kernel = Float32List.fromList([
+    0, -1, 0,
+    -1, 5, -1,
+    0, -1, 0,
+  ]);
+  
+  // 3x3 のカーネルで畳み込みを適用
+  return img.convolution(
+    image, 
+    filter: kernel, // 'filter' named argumentを使用
+    // divisor: 1, // エラーのため削除
+    // offset: 0,  // エラーのため削除
+  );
+}
+
 
 // ★★★ 追加：Geminiで荷札OCRを行う新機能 ★★★
 Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(BuildContext context, String projectFolderPath) async {
@@ -194,17 +215,39 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
     return null;
   }
 
-  // 2. 取得したファイルパスからUint8Listリストを作成 
+  // 2. 取得したファイルパスからUint8Listリストを作成し、固定サイズにリサイズ（正規化）
   List<Uint8List> rawImageBytesList = [];
+  // ★★★ 修正: 1600px から 1920px に変更 ★★★
+  const int PERSPECTIVE_WIDTH = 1920; 
+  
   try {
     for (var path in imageFilePaths) {
       final file = File(path);
-      // ML Kitの出力ファイルは一時的な場所にあるため、読み込み後に削除されることを前提とする
-      rawImageBytesList.add(await file.readAsBytes());
+      final rawBytes = await file.readAsBytes();
+      final originalImage = img.decodeImage(rawBytes);
+
+      if (originalImage == null) continue;
+
+      // ★★★ 修正: 幅1920pxにリサイズし、高さは元の画像のアスペクト比を維持する ★★★
+      img.Image normalizedImage = img.copyResize(
+        originalImage,
+        width: PERSPECTIVE_WIDTH,
+        height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round(),
+      );
+
+      // ★★★ 追加: シャープニングフィルターを適用して文字のエッジを強調 ★★★
+      normalizedImage = _applySharpeningFilter(normalizedImage);
+      
+      rawImageBytesList.add(Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100)));
     }
   } catch (e) {
-    if (context.mounted) _showErrorDialog(context, 'ファイル読み込みエラー', 'スキャン済みファイルの読み込みに失敗しました: $e');
+    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはリサイズに失敗しました: $e');
     return null;
+  }
+  
+  if (rawImageBytesList.isEmpty) {
+      if(context.mounted) _showErrorDialog(context, '画像処理エラー', '有効な画像が読み込めませんでした。');
+      return null;
   }
   
   // 3. マスクテンプレートの決定 (既存ロジック)
