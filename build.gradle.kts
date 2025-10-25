@@ -21,7 +21,7 @@ val flutterVersionCode = localProperties().getProperty("flutter.versionCode")
 val flutterVersionName = localProperties().getProperty("flutter.versionName")
 
 android {
-    namespace = "com.example.nifuda_gpt_app_fixed"
+    namespace = "com.example.shogo_app"
     compileSdk = 35
 
     ndkVersion = "27.0.12077973"
