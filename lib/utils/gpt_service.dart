@@ -1,136 +1,125 @@
+// lib/utils/gpt_service.dart
+
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
-import 'package:flutter_logs/flutter_logs.dart'; // ★ 追加: flutter_logs
+import 'package:flutter_logs/flutter_logs.dart';
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ 変更点：http.Clientを引数で受け取れるようにする
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 Future<Map<String, dynamic>> sendImageToGPT(
   Uint8List imageBytes, {
   required bool isProductList,
   required String company,
-  http.Client? client, // http.Clientを引数として追加
+  http.Client? client,
 }) async {
   const apiKey = String.fromEnvironment('OPENAI_API_KEY');
   const modelName = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-5-mini');
 
   if (apiKey.isEmpty) {
-    // ★ 修正: message: -> logMessage:
     FlutterLogs.logThis(
-      tag: 'GPT_SERVICE', 
-      subTag: 'API_KEY_MISSING', 
-      logMessage: 'OpenAI API key is not configured.', // ★ 修正
-      type: LogLevel.SEVERE,
+      tag: 'GPT_SERVICE',
+      subTag: 'API_KEY_MISSING',
+      logMessage: 'OpenAI API key is not configured.',
+      level: LogLevel.SEVERE,
     );
     throw Exception('OpenAI APIキーが設定されていません。');
   }
 
   final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
   final base64Image = base64Encode(imageBytes);
-
   final String mimeType = isProductList ? 'image/webp' : 'image/jpeg';
   final prompt = isProductList ? _buildProductListPrompt(company) : _buildNifudaPrompt();
-
-
   final body = jsonEncode({
     'model': modelName,
     'messages': [
-      {'role': 'system', 'content': prompt},
+      {'role': 'system', 'content': 'You are a world-class OCR + information extractor for Japanese industrial shipping documents.'},
       {
         'role': 'user',
         'content': [
-          {
-            'type': 'image_url',
-            'image_url': {
-              'url': 'data:$mimeType;base64,$base64Image',
-              'detail': 'high',
-            }
-          }
+          {'type': 'text', 'text': prompt},
+          {'type': 'input_image', 'image_url': {'url': 'data:$mimeType;base64,$base64Image'}},
         ]
       }
     ],
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    // ★ 変更点：エラーログに基づき 'max_tokens' を 'max_completion_tokens' に修正
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     'max_completion_tokens': 4096,
     'response_format': {'type': 'json_object'},
   });
-  
+
   FlutterLogs.logInfo('GPT_SERVICE', 'REQUEST_SENT', 'Sending image to GPT for ${isProductList ? "Product List" : "Nifuda"}');
 
   try {
-    // clientが提供されていればそれを使用し、なければ通常のhttp.postを使う
     final postRequest = (client != null)
         ? client.post(uri, headers: {'Authorization': 'Bearer $apiKey', 'Content-Type': 'application/json'}, body: body)
         : http.post(uri, headers: {'Authorization': 'Bearer $apiKey', 'Content-Type': 'application/json'}, body: body);
-
     final response = await postRequest.timeout(const Duration(seconds: 90));
 
     if (response.statusCode == 200) {
-      final jsonResponse = jsonDecode(utf8.decode(response.bodyBytes));
-      if (jsonResponse['choices'] != null && jsonResponse['choices'].isNotEmpty) {
-        final contentString = jsonResponse['choices'][0]['message']['content'];
-        if (contentString == null || contentString.isEmpty) {
-          final finishReason = jsonResponse['choices'][0]['finish_reason'];
-          // ★ 修正: message: -> logMessage:
-          FlutterLogs.logThis(
-            tag: 'GPT_SERVICE', 
-            subTag: 'EMPTY_RESPONSE', 
-            logMessage: 'GPT returned empty content. Reason: $finishReason', // ★ 修正
-            type: LogLevel.WARNING,
-          );
-          throw Exception('GPTからの応答が空です。Finish Reason: $finishReason');
-        }
-        
+      final jsonResponse = jsonDecode(response.body) as Map<String, dynamic>;
+      if (kDebugMode) {
+        FlutterLogs.logInfo('GPT_SERVICE', 'HTTP_OK', 'GPT response received.');
+      }
+
+      if (jsonResponse.containsKey('choices') && (jsonResponse['choices'] as List).isNotEmpty) {
         try {
-          if (kDebugMode) {
-            print('GPT Parsed Content String: $contentString');
+          final first = (jsonResponse['choices'] as List).first as Map<String, dynamic>;
+          final content = ((first['message'] ?? const {}) as Map<String, dynamic>)['content'] ?? '';
+          final contentString = content is String ? content : jsonEncode(content);
+          if (contentString.trim().isEmpty) {
+            final finishReason = first['finish_reason'] ?? '(unknown reason)';
+            FlutterLogs.logThis(
+              tag: 'GPT_SERVICE',
+              subTag: 'EMPTY_RESPONSE',
+              logMessage: 'GPT returned empty content. finish_reason: $finishReason',
+              level: LogLevel.WARNING,
+            );
+            throw Exception('GPTからの応答が空です。Finish Reason: $finishReason');
           }
+          if (kDebugMode) print('GPT Parsed Content String: $contentString');
           FlutterLogs.logInfo('GPT_SERVICE', 'PARSE_SUCCESS', 'Successfully parsed GPT JSON response.');
-          return jsonDecode(contentString);
+          return jsonDecode(contentString) as Map<String, dynamic>;
         } catch (e, s) {
-          // ★ 修正: logError のシグネチャ変更に対応 (exception: -> error:, stacktrace: -> stackTrace:)
-          FlutterLogs.logError(
-            'GPT_SERVICE', 
-            'JSON_PARSE_FAILED', 
-            'Failed to parse GPT JSON response: $contentString', 
-            error: (e is Exception) ? e : Exception(e.toString()), // ★ 修正
-            stackTrace: s, // ★ 修正
+          FlutterLogs.logThis(
+            tag: 'GPT_SERVICE',
+            subTag: 'JSON_PARSE_FAILED',
+            logMessage: 'Failed to parse GPT JSON response: $s',
+            exception: (e is Exception) ? e : Exception(e.toString()),
+            level: LogLevel.ERROR,
           );
-          throw Exception('GPTの応答JSON解析に失敗: $contentString');
+          throw Exception('GPTの応答JSON解析に失敗: $s');
         }
       } else {
-        FlutterLogs.logError('GPT_SERVICE', 'INVALID_CHOICES', 'GPT response is missing valid data in "choices" field.');
-        throw Exception('GPTからの応答に有効なデータがありません。');
+        FlutterLogs.logThis(
+          tag: 'GPT_SERVICE',
+          subTag: 'INVALID_STRUCTURE',
+          logMessage: 'Response is missing valid data in "choices" field.',
+          level: LogLevel.ERROR,
+        );
+        throw Exception('GPT応答に有効なデータがありません（choicesフィールド）。');
       }
     } else {
-      final errorBody = utf8.decode(response.bodyBytes);
-      // ★ 修正: logError のシグネチャ変更に対応 (exception: -> error:)
-      FlutterLogs.logError(
-        'GPT_SERVICE', 
-        'API_ERROR', 
-        'GPT API returned status ${response.statusCode}. Body: $errorBody', 
-        error: Exception(errorBody), // ★ 修正
+      final errorBody = response.body;
+      FlutterLogs.logThis(
+        tag: 'GPT_SERVICE',
+        subTag: 'HTTP_${/* status */''}${response.statusCode}',
+        logMessage: 'GPT API returned status ${response.statusCode}. Body: $errorBody',
+        level: LogLevel.ERROR,
       );
-      throw Exception('GPT APIエラー: ${response.statusCode}\n$errorBody');
+      throw Exception('HTTP ${response.statusCode}: $errorBody');
     }
   } catch (e, s) {
-    // ★ 修正: logError のシグネチャ変更に対応 (exception: -> error:, stacktrace: -> stackTrace:)
-    FlutterLogs.logError(
-      'GPT_SERVICE', 
-      'HTTP_REQUEST_FAILED', 
-      'GPT image submission failed.', 
-      error: (e is Exception) ? e : Exception(e.toString()), // ★ 修正
-      stackTrace: s, // ★ 修正
+    FlutterLogs.logThis(
+      tag: 'GPT_SERVICE',
+      subTag: 'HTTP_REQUEST_FAILED',
+      logMessage: 'GPT image submission failed.\n$s',
+      exception: (e is Exception) ? e : Exception(e.toString()),
+      level: LogLevel.ERROR,
     );
     debugPrint('GPTへの画像送信エラー: $e');
     rethrow;
   }
 }
 
-// _buildNifudaPrompt と _buildProductListPrompt は変更なし
+
 String _buildNifudaPrompt() {
   return '''
 あなたは、かすれたり不鮮明な荷札の画像を完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
@@ -178,13 +167,11 @@ String _buildNifudaPrompt() {
 }
 
 String _buildProductListPrompt(String company) {
-  final List<String> targetProductFields = [
-    "ITEM OF SPARE", "品名記号", "形格", "製品コード番号", "注文数", "記事", "備考"
-  ];
-  String fieldsForPrompt = targetProductFields.map((f) => "- $f").join("\n");
-
+  final fieldsForPrompt = (company == 'TMEIC')
+      ? '["ITEM OF SPARE", "品名記号", "形格", "製品コード番号", "注文数", "記事", "備考"]'
+      : '["品名記号", "形格", "製品コード番号", "数量", "備考"]';
   return '''
-あなたは「$company」の製品リストを完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳M-してください。
+あなたは「$company」の製品リストを完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
 
 ### 思考プロセス
 1.  **役割認識:** あなたは単なるOCRエンジンではありません。細部まで見逃さない、熟練のデジタルアーキビストです。

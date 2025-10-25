@@ -2,50 +2,49 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart'; // ★ 追加: riverpod
-import 'package:flutter_logs/flutter_logs.dart'; // ★ 追加: flutter_logs
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_logs/flutter_logs.dart';
 import 'pages/home_page.dart';
 
-// main関数をProviderScopeでラップし、ログハンドリングを設定
-Future<void> main() async { // Future<void> async に変更
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // ★ 縦向き（ポートレート）に固定する処理を追加
+
   await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp, // 縦向き（上）
-    DeviceOrientation.portraitDown, // 縦向き（下）
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
   ]);
-  
-  // ★★★ flutter_logs の初期化とエラーハンドリング設定 ★★★
+
+  // flutter_logs 初期化（timeStampFormat を必ず指定）
   await FlutterLogs.initLogs(
-    logLevelsEnabled: [
+    enabled: true,
+    isDebuggable: true,
+    logLevelsEnabled: const [
       LogLevel.INFO,
       LogLevel.WARNING,
       LogLevel.ERROR,
       LogLevel.SEVERE,
     ],
-    directoryStructure: DirectoryStructure.FOR_DATE, // ★ 修正: String -> Enum
-    logFileExtension: LogFileExtension.LOG, // ★ 修正: String -> Enum
-    logfileName: "APP_LOGS", // ★ 修正: logFileName -> logfileName
-    isAndroid: true, isIOS: false, // Androidのみを想定してiOSをfalseに
-    isDebuggable: true,
+    logTypesEnabled: const ["APP_LOGS"],
+    logsWriteDirectoryName: "AppLogs",
+    logsExportDirectoryName: "AppLogs/Exported",
+    directoryStructure: DirectoryStructure.FOR_DATE,
+    logFileExtension: LogFileExtension.LOG,
+    debugFileOperations: false,
+    timeStampFormat: TimeStampFormat.TIME_FORMAT_READABLE, // ★ 必須
   );
-  
-  // Flutterフレームワークのエラーハンドリング (キャッチされないエラーをログファイルに保存)
+
+  // 未捕捉Flutterエラーをファイル出力
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
-    // ★ 修正: message: -> logMessage:, stacktrace: -> stackTrace:
     FlutterLogs.logThis(
-      tag: 'APP_ERROR', 
-      subTag: 'Unhandled_Flutter_Error', 
-      logMessage: details.exceptionAsString(), // ★ 修正
-      stackTrace: details.stack, // ★ 修正: (camelCase)
-      type: LogLevel.SEVERE,
+      tag: 'APP_ERROR',
+      subTag: 'Unhandled_Flutter_Error',
+      logMessage: '${details.exceptionAsString()}\n${details.stack}',
+      level: LogLevel.SEVERE,
     );
   };
-  
-  // riverpodのProviderScopeでラップしてアプリケーションを起動
-  runApp(const ProviderScope(child: MyApp())); 
+
+  runApp(const ProviderScope(child: MyApp()));
 }
 
 class MyApp extends StatelessWidget {
@@ -57,8 +56,7 @@ class MyApp extends StatelessWidget {
       title: 'シンコー府中輸出課 荷札照合アプリ',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // ★ NotoSansJPフォントをアプリ全体に適用
-        fontFamily: 'NotoSerifJP', // 👈 ここをNotoSerifJPに変更します
+        fontFamily: 'NotoSerifJP',
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
         appBarTheme: AppBarTheme(
@@ -68,21 +66,15 @@ class MyApp extends StatelessWidget {
           titleTextStyle: const TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
-            fontFamily: 'NotoSerifJP', // AppBarにも明示的に適用します
           ),
         ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            minimumSize: const Size(150, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            textStyle: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              fontFamily: 'NotoSerifJP', // ボタンにも明示的に適用します
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
+        snackBarTheme: SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.black87,
+          contentTextStyle: const TextStyle(color: Colors.white),
+          actionTextColor: Colors.amber[200],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
           ),
         ),
         floatingActionButtonTheme: FloatingActionButtonThemeData(

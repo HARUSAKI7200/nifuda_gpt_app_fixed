@@ -18,7 +18,7 @@ class HomePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) { // WidgetRefを追加
     final projectState = ref.watch(projectProvider);
-    final projectNotifier = ref.read(projectProvider.notifier);
+    final projectNotifier = ref.read(projectProvider.notifier); // <- ProjectNotifier
 
     final String _projectTitle = projectState.projectTitle;
     final String _selectedCompany = projectState.selectedCompany;
@@ -488,7 +488,7 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  Widget _buildMatchingPatternSelector(ProjectState state, ProjectNotifier notifier, List<String> matchingPatterns, bool isLoading) {
+  Widget _buildMatchingPatternSelector(ProjectState state, ProjectNotifier notifier, List<String> patterns, bool isLoading) {
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 12.0),
@@ -500,7 +500,8 @@ class HomePage extends ConsumerWidget {
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: state.selectedMatchingPattern,
-          items: matchingPatterns.map((String pattern) {
+          // ★ 修正ポイント：未定義の matchingPatterns ではなく、引数 patterns を使用
+          items: patterns.map((String pattern) {
             return DropdownMenuItem<String>(
               value: pattern,
               child: Text(
