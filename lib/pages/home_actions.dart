@@ -238,6 +238,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
         overlayText: '荷札を枠に合わせて撮影',
         isProductListOcr: false,
         projectFolderPath: projectFolderPath,
+        // 修正後の sendImageToGPT のシグネチャ (Map? 戻り値と client 引数) に対応
         aiService: sendImageToGPT,
     )),
   );
@@ -416,15 +417,16 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   if (!context.mounted) return null;
   showCustomSnackBar(context, '${finalImagesToSend.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...');
   FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_START', '${finalImagesToSend.length} images sent to GPT.');
-  final client = http.Client();
+  
   List<Future<Map<String, dynamic>?>> gptResultFutures = [];
   for (final imageBytes in finalImagesToSend) {
-    final gptFuture = sendImageToGPT(imageBytes, isProductList: true, company: selectedCompany, client: client)
+    // 修正: client 引数を削除（sendImageToGPTのシグネチャに合わせるため）
+    final gptFuture = sendImageToGPT(imageBytes, isProductList: true, company: selectedCompany)
         .catchError((e, s) { _logError('GPT_API', 'GPT API call failed', e, s); return null; });
     gptResultFutures.add(gptFuture);
   }
   final List<Map<String, dynamic>?> allGptRawResults = await Future.wait(gptResultFutures);
-  client.close();
+  
   List<Map<String, String>> allExtractedProductRows = [];
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
   for(final gptResponse in allGptRawResults){

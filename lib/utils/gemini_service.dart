@@ -2,116 +2,114 @@
 
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_logs/flutter_logs.dart';
+import 'package:http/http.dart' as http; 
+import 'package:google_generative_ai/google_generative_ai.dart'; 
 
-Future<Map<String, dynamic>> sendImageToGemini(
+
+Future<Map<String, dynamic>?> sendImageToGemini( 
   Uint8List imageBytes, {
   required bool isProductList,
   required String company,
-  http.Client? client,
+  http.Client? client, // 互換性維持のため残す
 }) async {
-  const apiKey = String.fromEnvironment('GOOGLE_API_KEY');
-  const modelName = 'gemini-1.5-flash-latest';
+  const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
+  const modelName = 'gemini-2.5-flash';
 
-  if (apiKey.isEmpty) {
+  if (geminiApiKey.isEmpty) {
     FlutterLogs.logThis(
       tag: 'GEMINI_SERVICE',
       subTag: 'API_KEY_MISSING',
-      logMessage: 'Google AI APIキーが設定されていません。--dart-define=GOOGLE_API_KEY=YOUR_KEY の形式で実行してください。',
+      logMessage: 'Google AI APIキーが設定されていません。--dart-define=GEMINI_API_KEY=YOUR_KEY の形式で実行してください。',
       level: LogLevel.SEVERE,
     );
-    throw Exception('Google AI APIキーが設定されていません。--dart-define=GOOGLE_API_KEY=YOUR_KEY の形式で実行してください。');
+    throw Exception('Google AI APIキーが設定されていません。--dart-define=GEMINI_API_KEY=YOUR_KEY の形式で実行してください。');
   }
 
-  final uri = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey');
-  final base64Image = base64Encode(imageBytes);
-  const String mimeType = 'image/jpeg';
+  // 1. モデルクライアントの初期化 (APIキーを使用)
+  final model = GenerativeModel(
+    model: modelName, 
+    apiKey: geminiApiKey,
+  );
+  
+  // 2. プロンプトの構築
   final prompt = isProductList ? _buildProductListPrompt(company) : _buildNifudaPrompt();
-  final body = jsonEncode({
-    "contents": [
-      {"parts": [{"text": prompt}, {"inline_data": {"mime_type": mimeType, "data": base64Image}}]}
-    ],
-    "generationConfig": {"response_mime_type": "application/json"},
-  });
+  
+  // 3. コンテンツの構築 
+  final imagePart = DataPart('image/jpeg', imageBytes);
+  final textPart = TextPart(prompt);
+  
+  // 修正: Content(parts: ...) を使用
+  final contents = [
+    Content(parts: [
+      textPart,
+      imagePart,
+    ]),
+  ];
+
+  // 修正: GenerationConfig を使用
+  final config = GenerationConfig(
+    responseMimeType: 'application/json',
+  );
 
   FlutterLogs.logInfo('GEMINI_SERVICE', 'REQUEST_SENT', 'Sending image to Gemini for ${isProductList ? "Product List" : "Nifuda"}');
 
   try {
-    final postRequest = (client != null)
-        ? client.post(uri, headers: {'Content-Type': 'application/json'}, body: body)
-        : http.post(uri, headers: {'Content-Type': 'application/json'}, body: body);
-    final response = await postRequest.timeout(const Duration(seconds: 90));
+    // 5. APIリクエストの実行
+    final response = await model.generateContent(
+      contents, 
+      config: config, 
+    );
 
-    if (response.statusCode == 200) {
-      final jsonResponse = jsonDecode(response.body) as Map<String, dynamic>;
-      if (kDebugMode) {
-        FlutterLogs.logInfo('GEMINI_SERVICE', 'HTTP_OK', 'Gemini response received.');
-      }
+    // 6. 応答の検証と解析
+    final contentString = response.text;
 
-      // Geminiの content[0].parts[0].text にJSON文字列が入る想定
-      if (jsonResponse.containsKey('candidates') && (jsonResponse['candidates'] as List).isNotEmpty) {
-        final cand0 = (jsonResponse['candidates'] as List).first as Map<String, dynamic>;
-        final content = (cand0['content'] ?? const {}) as Map<String, dynamic>;
-        final parts = (content['parts'] ?? const []) as List<dynamic>;
-        final part0 = parts.isNotEmpty ? parts.first as Map<String, dynamic> : const {};
-        final contentString = (part0['text'] ?? '').toString();
-
-        if (contentString.trim().isEmpty) {
-          final finishReason = cand0['finishReason'] ?? '(unknown)';
-          FlutterLogs.logThis(
-            tag: 'GEMINI_SERVICE',
-            subTag: 'EMPTY_RESPONSE',
-            logMessage: 'Gemini returned empty content. finishReason: $finishReason',
-            level: LogLevel.WARNING,
-          );
-          throw Exception('Geminiからの応答が空です。Finish Reason: $finishReason');
-        }
-        try {
-          if (kDebugMode) print('Gemini Parsed Content String: $contentString');
-          FlutterLogs.logInfo('GEMINI_SERVICE', 'PARSE_SUCCESS', 'Successfully parsed Gemini JSON response.');
-          return jsonDecode(contentString) as Map<String, dynamic>;
-        } catch (e, s) {
-          FlutterLogs.logThis(
-            tag: 'GEMINI_SERVICE',
-            subTag: 'JSON_PARSE_FAILED',
-            logMessage: 'Failed to parse Gemini JSON response: $contentString\n$s',
-            exception: (e is Exception) ? e : Exception(e.toString()),
-            level: LogLevel.ERROR,
-          );
-          throw Exception('Geminiの応答JSON解析に失敗: $contentString');
-        }
-      } else {
-        final errorDetails = jsonResponse.containsKey('error') ? jsonEncode(jsonResponse['error']) : 'Invalid response structure';
-        FlutterLogs.logThis(
-          tag: 'GEMINI_SERVICE',
-          subTag: 'INVALID_STRUCTURE',
-          logMessage: 'Gemini response payload is missing valid data: $errorDetails',
-          level: LogLevel.ERROR,
-        );
-        throw Exception('Gemini応答に有効なデータがありません。');
-      }
-    } else {
-      final errorBody = response.body;
+    if (contentString == null || contentString.trim().isEmpty) {
       FlutterLogs.logThis(
         tag: 'GEMINI_SERVICE',
-        subTag: 'HTTP_${/* status */''}${response.statusCode}',
-        logMessage: 'Gemini API returned status ${response.statusCode}. Body: $errorBody',
+        subTag: 'EMPTY_RESPONSE',
+        logMessage: 'Gemini returned empty content.',
+        level: LogLevel.WARNING,
+      );
+      return null;
+    }
+
+    // JSONデコード
+    try {
+      if (kDebugMode) print('Gemini Parsed Content String: $contentString');
+      FlutterLogs.logInfo('GEMINI_SERVICE', 'PARSE_SUCCESS', 'Successfully parsed Gemini JSON response.');
+      return jsonDecode(contentString) as Map<String, dynamic>;
+    } catch (e, s) {
+      FlutterLogs.logThis(
+        tag: 'GEMINI_SERVICE',
+        subTag: 'JSON_PARSE_FAILED',
+        logMessage: 'Failed to parse Gemini JSON response: $contentString\n$s',
+        exception: (e is Exception) ? e : Exception(e.toString()),
         level: LogLevel.ERROR,
       );
-      throw Exception('HTTP ${response.statusCode}: $errorBody');
+      return null;
     }
+  } on GenerativeAIException catch (e, s) {
+    FlutterLogs.logThis(
+      tag: 'GEMINI_SERVICE',
+      subTag: 'API_REQUEST_FAILED',
+      logMessage: 'Gemini API request failed: ${e.message}\n$s',
+      exception: Exception(e.message),
+      level: LogLevel.ERROR,
+    );
+    debugPrint('Geminiへの画像送信エラー: ${e.message}');
+    return null;
   } catch (e, s) {
     FlutterLogs.logThis(
       tag: 'GEMINI_SERVICE',
-      subTag: 'HTTP_REQUEST_FAILED',
+      subTag: 'UNEXPECTED_ERROR',
       logMessage: 'Gemini image submission failed.\n$s',
       exception: (e is Exception) ? e : Exception(e.toString()),
       level: LogLevel.ERROR,
     );
     debugPrint('Geminiへの画像送信エラー: $e');
-    rethrow;
+    return null;
   }
 }
 
@@ -124,7 +122,7 @@ String _buildNifudaPrompt() {
 2.  **一文字ずつの検証:** 文字列を読み取る際は、決して単語や文脈で推測せず、一文字ずつ丁寧になぞり、形状を特定します。
 3.  **類似文字の徹底的な判別:**
     - `O` (オー) と `0` (ゼロ): `0`は縦長で、`O`はより円形に近いことを意識します。
-    - `Q` と `0`: **最重要項目です。`Q`には必ず右下に短い棒（セリフやテール）があります。この棒が少しでも視認できる場合は、絶対に`Q`と判断してください。逆に、完全に閉じた円または楕円の場合は`0`とします。例えば、「4FBFQ902P001」のような文字列で、この違いを絶対に見逃さないでください。**
+    - `Q` と `0`: 最重要項目です。`Q`には必ず右下に短い棒（セリフやテール）があります。この棒が少しでも視認できる場合は、絶対に`Q`と判断してください。逆に、完全に閉じた円または楕円の場合は`0`とします。例えば、「4FBFQ902P001」のような文字列で、この違いを絶対に見逃さないでください。
     - `1`と`l`、`S`と`5`、`B`と`8`なども同様に、字形のわずかな違いから判断します。
     - **かっこ類の判別:**
       - 始めかっこ『(』の直後に続く文字（I, l, 1など）を、終わりかっこ『)』と誤認識するケースが多く報告されています。
@@ -173,7 +171,7 @@ String _buildProductListPrompt(String company) {
 2.  **一文字ずつの検証:** 「製品コード番号」などの文字列を読み取る際は、決して単語や文脈で推測せず、一文字ずつ丁寧になぞり、形状を特定します。
 3.  **類似文字の徹底的な判別:**
     - `O` (オー) と `0` (ゼロ): `0`は縦長で、`O`はより円形に近いことを意識します。
-    - `Q` と `0`: **最重要項目です。`Q`には必ず右下に短い棒（セリフやテール）があります。この棒が少しでも視認できる場合は、絶対に`Q`と判断してください。逆に、完全に閉じた円または楕円の場合は`0`とします。例えば、「4FBFQ902P001」のような文字列で、この違いを絶対に見逃さないでください。**
+    - `Q` と `0`: 最重要項目です。`Q`には必ず右下に短い棒（セリフやテール）があります。この棒が少しでも視認できる場合は、絶対に`Q`と判断してください。逆に、完全に閉じた円または楕円の場合は`0`とします。例えば、「4FBFQ902P001」のような文字列で、この違いを絶対に見逃さないでください。
     - `1`と`l`、`S`と`5`、`B`と`8`なども同様に、字形のわずかな違いから判断します。
     - **かっこ類の判別:**
       - 始めかっこ『(』の直後に続く文字（I, l, 1など）を、終わりかっこ『)』と誤認識するケースが多く報告されています。

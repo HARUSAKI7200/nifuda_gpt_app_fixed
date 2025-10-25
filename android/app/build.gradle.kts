@@ -24,7 +24,7 @@ val flutterVersionName = localProperties().getProperty("flutter.versionName")
 
 android {
     namespace = "com.example.nifuda_gpt_app_fixed" // ソースコードのパッケージ名と一致
-    compileSdk = 35
+    compileSdk = 36
 
     ndkVersion = "27.0.12077973"
 
@@ -45,7 +45,7 @@ android {
 
 defaultConfig {
         applicationId = "com.example.shogo_app" // アプリの最終的なID
-        minSdk = 21
+        minSdk = flutter.minSdkVersion
         targetSdk = 35
         versionCode = flutterVersionCode?.toInt() ?: 1
         versionName = flutterVersionName

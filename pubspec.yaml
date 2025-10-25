@@ -32,6 +32,8 @@ dependencies:
   isar_flutter_libs: ^3.1.0+1
   shimmer: ^3.0.0                # ローディング時のUX向上
   flutter_logs: ^2.2.1            # ローカルファイルベースのロギング
+  google_generative_ai: ^0.4.7
+  openai_dart: ^0.6.0+1
   
   # --- UI & User Input ---
   camera: ^0.11.0+1

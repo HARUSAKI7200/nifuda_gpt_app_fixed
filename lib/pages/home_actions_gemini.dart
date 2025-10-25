@@ -120,6 +120,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
         overlayText: '荷札を枠に合わせて撮影',
         isProductListOcr: false,
         projectFolderPath: projectFolderPath,
+        // sendImageToGemini のシグネチャと一致
         aiService: sendImageToGemini,
     )),
   );
@@ -276,15 +277,20 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
   if (!context.mounted) return null;
   showCustomSnackBar(context, '${finalImagesToSend.length} 枚の画像をGeminiへ送信依頼しました...');
   FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_GEMINI_START', '${finalImagesToSend.length} images sent to Gemini.');
-  final client = http.Client();
+  
+  // 修正: SDKを使用するため、ローカルの http.Client の初期化とクローズを削除します。
+  // final client = http.Client(); // 削除
+  
   List<Future<Map<String, dynamic>?>> aiResultFutures = [];
   for (final imageBytes in finalImagesToSend) {
-    final future = sendImageToGemini(imageBytes, isProductList: true, company: selectedCompany, client: client)
+    // 修正: client: client 引数を削除します。
+    final future = sendImageToGemini(imageBytes, isProductList: true, company: selectedCompany)
         .catchError((e, s) { _logError('GEMINI_API', 'Gemini API call failed', e, s); return null; });
     aiResultFutures.add(future);
   }
   final List<Map<String, dynamic>?> allAiRawResults = await Future.wait(aiResultFutures);
-  client.close();
+  // client.close(); // 削除
+  
   List<Map<String, String>> allExtractedProductRows = [];
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
   for(final result in allAiRawResults){
