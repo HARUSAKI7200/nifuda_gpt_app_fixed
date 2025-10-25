@@ -28,8 +28,8 @@ dependencies:
 
   # ★★★ 追加パッケージ ★★★
   flutter_riverpod: ^2.5.1       # 状態管理
-  isar: ^3.1.0+1                 # ローカルDB
-  isar_flutter_libs: ^3.1.0+1    # ローカルDB (プラットフォーム固有ライブラリ)
+  # isar: ^3.1.0+1                 # Git Override に移行するためコメントアウト
+  # isar_flutter_libs: ^3.1.0+1    # Git Override に移行するためコメントアウト
   shimmer: ^3.0.0                # ローディング時のUX向上
   flutter_logs: ^2.2.1            # ローカルファイルベースのロギング
   
@@ -47,7 +47,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^3.0.0
   # ★★★ 追加パッケージ (開発環境用) ★★★
-  isar_generator: ^3.1.0+1      # ローカルDBのコード生成
+  # isar_generator: ^3.1.0+1      # Git Override に移行するためコメントアウト
   # ★ 修正: isar_generatorとの競合を解消するため、build_runnerをダウングレード
   build_runner: ^2.4.13          # ビルドランナー 
 
@@ -70,6 +70,17 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/icon/app_icon.png"
 
-# ★★★ 追記: 競合を解決するためにバージョンを強制的に上書きする ★★★
+# ★★★ 修正点: Isar関連3パッケージの "path" に "packages/" を再度追加 ★★★
 dependency_overrides:
-  isar_flutter_libs: ^3.1.0+1
+  isar_flutter_libs:
+    git:
+      url: https://github.com/isar/isar.git
+      path: packages/isar_flutter_libs # 正しいパス
+  isar:
+    git:
+      url: https://github.com/isar/isar.git
+      path: packages/isar # 正しいパス
+  isar_generator:
+    git:
+      url: https://github.com/isar/isar.git
+      path: packages/isar_generator # 正しいパス

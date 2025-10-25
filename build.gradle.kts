@@ -1,3 +1,5 @@
+// harusaki7200/nifuda_gpt_app_fixed/nifuda_gpt_app_fixed-1cd7e649a3c8ce313da9e203cf977ff070f2ae20/build.gradle.kts (アプリレベル)
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -21,7 +23,7 @@ val flutterVersionCode = localProperties().getProperty("flutter.versionCode")
 val flutterVersionName = localProperties().getProperty("flutter.versionName")
 
 android {
-    namespace = "com.example.shogo_app"
+    namespace = "com.example.nifuda_gpt_app_fixed" // ソースコードのパッケージ名と一致
     compileSdk = 35
 
     ndkVersion = "27.0.12077973"
@@ -41,11 +43,10 @@ android {
         }
     }
 
-    defaultConfig {
-        applicationId = "com.example.shogo_app"
+defaultConfig {
+        applicationId = "com.example.shogo_app" // アプリの最終的なID
         minSdk = 21
         targetSdk = 35
-        // プロパティがNullでないことを確認
         versionCode = flutterVersionCode?.toInt() ?: 1
         versionName = flutterVersionName
     }
