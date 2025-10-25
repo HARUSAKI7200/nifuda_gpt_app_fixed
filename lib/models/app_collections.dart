@@ -1,6 +1,7 @@
 // lib/models/app_collections.dart
 import 'package:isar/isar.dart';
 
+part 'app_collections.g.dart'; // ★★★ この行を追加 ★★★
 // ★★★ 重要: このファイルを作成後、ビルドコマンドを実行すると 'app_collections.g.dart' が生成されます ★★★
 
 

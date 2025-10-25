@@ -289,7 +289,8 @@ class HomePage extends ConsumerWidget {
                       children: [
                         SizedBox(
                           width: actionColumnWidth,
-                          child: _buildActionButton(label: '新規作成', onPressed: _handleNewProject, icon: Icons.create_new_folder, _isLoading),
+                          // ★ 修正: _isLoading -> isLoading: _isLoading
+                          child: _buildActionButton(label: '新規作成', onPressed: _handleNewProject, icon: Icons.create_new_folder, isLoading: _isLoading),
                         ),
                         
                         const SizedBox(width: 16),
@@ -304,21 +305,23 @@ class HomePage extends ConsumerWidget {
                       child: Row(
                         children: [
                           Expanded(
+                            // ★ 修正: _isLoading -> isLoading: _isLoading
                             child: _buildActionButton(
                               label: '保存',
                               onPressed: _handleSaveProject,
                               icon: Icons.save,
                               isEnabled: _currentProjectFolderPath != null,
-                              _isLoading,
+                              isLoading: _isLoading,
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
+                            // ★ 修正: _isLoading -> isLoading: _isLoading
                             child: _buildActionButton(
                               label: '読み込み',
                               onPressed: _handleLoadProject,
                               icon: Icons.folder_open,
-                              _isLoading,
+                              isLoading: _isLoading,
                             ),
                           ),
                         ],
@@ -330,23 +333,30 @@ class HomePage extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: <Widget>[
-                          _buildActionButton(label: '荷札を撮影して抽出 (GPT)', onPressed: _handleCaptureNifudaWithGpt, icon: Icons.camera_alt_outlined, isEnabled: _currentProjectFolderPath != null, _isLoading),
+                          // ★ 修正: _isLoading -> isLoading: _isLoading
+                          _buildActionButton(label: '荷札を撮影して抽出 (GPT)', onPressed: _handleCaptureNifudaWithGpt, icon: Icons.camera_alt_outlined, isEnabled: _currentProjectFolderPath != null, isLoading: _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '荷札を撮影して抽出 (Gemini)', onPressed: _handleCaptureNifudaWithGemini, icon: Icons.camera, isEnabled: _currentProjectFolderPath != null, isEmphasized: true, _isLoading),
+                          // ★ 修正: _isLoading -> isLoading: _isLoading
+                          _buildActionButton(label: '荷札を撮影して抽出 (Gemini)', onPressed: _handleCaptureNifudaWithGemini, icon: Icons.camera, isEnabled: _currentProjectFolderPath != null, isEmphasized: true, isLoading: _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '荷札リスト (${_nifudaData.length > 1 ? _nifudaData.length - 1 : 0}件)', onPressed: _handleShowNifudaList, icon: Icons.list_alt_rounded, isEnabled: _nifudaData.length > 1 && _currentProjectFolderPath != null, _isLoading),
+                          // ★ 修正: _isLoading -> isLoading: _isLoading
+                          _buildActionButton(label: '荷札リスト (${_nifudaData.length > 1 ? _nifudaData.length - 1 : 0}件)', onPressed: _handleShowNifudaList, icon: Icons.list_alt_rounded, isEnabled: _nifudaData.length > 1 && _currentProjectFolderPath != null, isLoading: _isLoading),
                           const SizedBox(height: 10),
                           _buildCompanySelector(projectState, projectNotifier, _companies, _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '製品リストを撮影して抽出 (GPT)', onPressed: _handlePickProductListWithGpt, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null, _isLoading),
+                          // ★ 修正: _isLoading -> isLoading: _isLoading
+                          _buildActionButton(label: '製品リストを撮影して抽出 (GPT)', onPressed: _handlePickProductListWithGpt, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null, isLoading: _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '製品リストを撮影して抽出 (Gemini)', onPressed: _handlePickProductListWithGemini, icon: Icons.flash_on, isEnabled: _currentProjectFolderPath != null, isEmphasized: true, _isLoading),
+                          // ★ 修正: _isLoading -> isLoading: _isLoading
+                          _buildActionButton(label: '製品リストを撮影して抽出 (Gemini)', onPressed: _handlePickProductListWithGemini, icon: Icons.flash_on, isEnabled: _currentProjectFolderPath != null, isEmphasized: true, isLoading: _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '製品リスト (${_productListKariData.length > 1 ? _productListKariData.length - 1 : 0}件)', onPressed: _handleShowProductList, icon: Icons.inventory_2_outlined, isEnabled: _productListKariData.length > 1 && _currentProjectFolderPath != null, _isLoading),
+                          // ★ 修正: _isLoading -> isLoading: _isLoading
+                          _buildActionButton(label: '製品リスト (${_productListKariData.length > 1 ? _productListKariData.length - 1 : 0}件)', onPressed: _handleShowProductList, icon: Icons.inventory_2_outlined, isEnabled: _productListKariData.length > 1 && _currentProjectFolderPath != null, isLoading: _isLoading),
                           const SizedBox(height: 20),
                           _buildMatchingPatternSelector(projectState, projectNotifier, _matchingPatterns, _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '照合を開始する', onPressed: _handleStartMatching, icon: Icons.compare_arrows_rounded, isEnabled: _nifudaData.length > 1 && _productListKariData.length > 1 && _currentProjectFolderPath != null, isEmphasized: true, _isLoading),
+                          // ★ 修正: _isLoading -> isLoading: _isLoading
+                          _buildActionButton(label: '照合を開始する', onPressed: _handleStartMatching, icon: Icons.compare_arrows_rounded, isEnabled: _nifudaData.length > 1 && _productListKariData.length > 1 && _currentProjectFolderPath != null, isEmphasized: true, isLoading: _isLoading),
                         ],
                       ),
                     ),
@@ -421,7 +431,7 @@ class HomePage extends ConsumerWidget {
     required String label,
     required IconData icon,
     required VoidCallback? onPressed,
-    required bool isLoading,
+    required bool isLoading, // ★ 修正: この引数は必須
     bool isEnabled = true,
     bool isEmphasized = false,
   }) {

@@ -79,12 +79,13 @@ void _showErrorDialog(BuildContext context, String title, String message) {
 
 // ★★★ 追加: エラーロギングヘルパー関数 ★★★
 void _logError(String tag, String message, dynamic error, StackTrace? stack) {
+  // ★ 修正: logError のシグネチャ変更に対応 (exception: -> error:, stacktrace: -> stackTrace:)
   FlutterLogs.logError(
     tag,
     'ACTION_ERROR',
     message,
-    error: error,
-    stackTrace: stack,
+    error: (error is Exception) ? error : Exception(error.toString()), // ★ 修正
+    stackTrace: stack, // ★ 修正
     timestamp: DateTime.now(),
   );
   debugPrint('[$tag] $message: $error');
@@ -273,7 +274,13 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
   if (allGptResults == null || allGptResults.isEmpty) {
     if (context.mounted) {
       showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
-      FlutterLogs.logWarning('OCR_ACTION', 'NIFUDA_CANCEL', 'Nifuda OCR was cancelled by user.');
+      // ★ 修正: message: -> logMessage:
+      FlutterLogs.logThis(
+        tag: 'OCR_ACTION', 
+        subTag: 'NIFUDA_CANCEL', 
+        logMessage: 'Nifuda OCR was cancelled by user.', // ★ 修正
+        type: LogLevel.WARNING,
+      );
     }
     return null;
   }
@@ -322,7 +329,13 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
                 ));
         if (proceed != true) {
            if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
-           FlutterLogs.logWarning('OCR_ACTION', 'NIFUDA_CONFIRM_INTERRUPTED', 'Nifuda confirmation interrupted after $imageIndex images.');
+           // ★ 修正: message: -> logMessage:
+           FlutterLogs.logThis(
+             tag: 'OCR_ACTION', 
+             subTag: 'NIFUDA_CONFIRM_INTERRUPTED', 
+             logMessage: 'Nifuda confirmation interrupted after $imageIndex images.', // ★ 修正
+             type: LogLevel.WARNING,
+           );
            return allConfirmedNifudaRows.isNotEmpty ? allConfirmedNifudaRows : null;
         }
       } else {
@@ -554,7 +567,13 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
         }
       } else {
         // ★ ログ追加
-        FlutterLogs.logWarning('OCR_ACTION', 'PRODUCT_LIST_PARSE_FAIL', 'GPT response structure unexpected.');
+        // ★ 修正: message: -> logMessage:
+        FlutterLogs.logThis(
+          tag: 'OCR_ACTION', 
+          subTag: 'PRODUCT_LIST_PARSE_FAIL', 
+          logMessage: 'GPT response structure unexpected.', // ★ 修正
+          type: LogLevel.WARNING,
+        );
         debugPrint('製品リストの解析に失敗した応答がありました (予期せぬ形式)。');
       }
   }
@@ -616,7 +635,13 @@ Future<String?> startMatchingAndShowResultsAction(
 ) async {
   if (nifudaData.length <= 1 || productListData.length <= 1) {
     _showErrorDialog(context, 'データ不足', '照合するには荷札と製品リストの両方のデータが必要です。');
-    FlutterLogs.logWarning('MATCHING_ACTION', 'DATA_INSUFFICIENT', 'Matching attempted with insufficient data.');
+    // ★ 修正: message: -> logMessage:
+    FlutterLogs.logThis(
+      tag: 'MATCHING_ACTION', 
+      subTag: 'DATA_INSUFFICIENT', 
+      logMessage: 'Matching attempted with insufficient data.', // ★ 修正
+      type: LogLevel.WARNING,
+    );
     return null; // データ不足の場合は null を返す
   }
 
@@ -633,7 +658,13 @@ Future<String?> startMatchingAndShowResultsAction(
   
   if (nifudaMapList.isEmpty || productMapList.isEmpty) {
      _showErrorDialog(context, 'データ不足', '荷札または製品リストの有効なデータがありません。');
-     FlutterLogs.logWarning('MATCHING_ACTION', 'DATA_EMPTY', 'Matching failed due to empty map lists.');
+     // ★ 修正: message: -> logMessage:
+     FlutterLogs.logThis(
+       tag: 'MATCHING_ACTION', 
+       subTag: 'DATA_EMPTY', 
+       logMessage: 'Matching failed due to empty map lists.', // ★ 修正
+       type: LogLevel.WARNING,
+     );
     return null; // データ不足の場合は null を返す
   }
   

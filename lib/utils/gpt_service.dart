@@ -17,7 +17,13 @@ Future<Map<String, dynamic>> sendImageToGPT(
   const modelName = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-5-mini');
 
   if (apiKey.isEmpty) {
-    FlutterLogs.logFatal('GPT_SERVICE', 'API_KEY_MISSING', 'OpenAI API key is not configured.');
+    // ★ 修正: message: -> logMessage:
+    FlutterLogs.logThis(
+      tag: 'GPT_SERVICE', 
+      subTag: 'API_KEY_MISSING', 
+      logMessage: 'OpenAI API key is not configured.', // ★ 修正
+      type: LogLevel.SEVERE,
+    );
     throw Exception('OpenAI APIキーが設定されていません。');
   }
 
@@ -68,7 +74,13 @@ Future<Map<String, dynamic>> sendImageToGPT(
         final contentString = jsonResponse['choices'][0]['message']['content'];
         if (contentString == null || contentString.isEmpty) {
           final finishReason = jsonResponse['choices'][0]['finish_reason'];
-          FlutterLogs.logWarning('GPT_SERVICE', 'EMPTY_RESPONSE', 'GPT returned empty content. Reason: $finishReason');
+          // ★ 修正: message: -> logMessage:
+          FlutterLogs.logThis(
+            tag: 'GPT_SERVICE', 
+            subTag: 'EMPTY_RESPONSE', 
+            logMessage: 'GPT returned empty content. Reason: $finishReason', // ★ 修正
+            type: LogLevel.WARNING,
+          );
           throw Exception('GPTからの応答が空です。Finish Reason: $finishReason');
         }
         
@@ -79,7 +91,14 @@ Future<Map<String, dynamic>> sendImageToGPT(
           FlutterLogs.logInfo('GPT_SERVICE', 'PARSE_SUCCESS', 'Successfully parsed GPT JSON response.');
           return jsonDecode(contentString);
         } catch (e, s) {
-          FlutterLogs.logError('GPT_SERVICE', 'JSON_PARSE_FAILED', 'Failed to parse GPT JSON response: $contentString', error: e, stackTrace: s);
+          // ★ 修正: logError のシグネチャ変更に対応 (exception: -> error:, stacktrace: -> stackTrace:)
+          FlutterLogs.logError(
+            'GPT_SERVICE', 
+            'JSON_PARSE_FAILED', 
+            'Failed to parse GPT JSON response: $contentString', 
+            error: (e is Exception) ? e : Exception(e.toString()), // ★ 修正
+            stackTrace: s, // ★ 修正
+          );
           throw Exception('GPTの応答JSON解析に失敗: $contentString');
         }
       } else {
@@ -88,11 +107,24 @@ Future<Map<String, dynamic>> sendImageToGPT(
       }
     } else {
       final errorBody = utf8.decode(response.bodyBytes);
-      FlutterLogs.logError('GPT_SERVICE', 'API_ERROR', 'GPT API returned status ${response.statusCode}. Body: $errorBody', error: errorBody);
+      // ★ 修正: logError のシグネチャ変更に対応 (exception: -> error:)
+      FlutterLogs.logError(
+        'GPT_SERVICE', 
+        'API_ERROR', 
+        'GPT API returned status ${response.statusCode}. Body: $errorBody', 
+        error: Exception(errorBody), // ★ 修正
+      );
       throw Exception('GPT APIエラー: ${response.statusCode}\n$errorBody');
     }
   } catch (e, s) {
-    FlutterLogs.logError('GPT_SERVICE', 'HTTP_REQUEST_FAILED', 'GPT image submission failed.', error: e, stackTrace: s);
+    // ★ 修正: logError のシグネチャ変更に対応 (exception: -> error:, stacktrace: -> stackTrace:)
+    FlutterLogs.logError(
+      'GPT_SERVICE', 
+      'HTTP_REQUEST_FAILED', 
+      'GPT image submission failed.', 
+      error: (e is Exception) ? e : Exception(e.toString()), // ★ 修正
+      stackTrace: s, // ★ 修正
+    );
     debugPrint('GPTへの画像送信エラー: $e');
     rethrow;
   }
@@ -152,7 +184,7 @@ String _buildProductListPrompt(String company) {
   String fieldsForPrompt = targetProductFields.map((f) => "- $f").join("\n");
 
   return '''
-あなたは「$company」の製品リストを完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
+あなたは「$company」の製品リストを完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳M-してください。
 
 ### 思考プロセス
 1.  **役割認識:** あなたは単なるOCRエンジンではありません。細部まで見逃さない、熟練のデジタルアーキビストです。

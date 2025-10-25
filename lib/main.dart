@@ -23,11 +23,10 @@ Future<void> main() async { // Future<void> async に変更
       LogLevel.WARNING,
       LogLevel.ERROR,
       LogLevel.SEVERE,
-      LogLevel.FATAL,
     ],
-    directoryStructure: DirectoryStructure.FOR_DATE, // 日付ごとのディレクトリ構造
-    logFileExtension: LogFileExtension.LOG,
-    logFileName: "APP_LOGS",
+    directoryStructure: DirectoryStructure.FOR_DATE, // ★ 修正: String -> Enum
+    logFileExtension: LogFileExtension.LOG, // ★ 修正: String -> Enum
+    logfileName: "APP_LOGS", // ★ 修正: logFileName -> logfileName
     isAndroid: true, isIOS: false, // Androidのみを想定してiOSをfalseに
     isDebuggable: true,
   );
@@ -35,11 +34,13 @@ Future<void> main() async { // Future<void> async に変更
   // Flutterフレームワークのエラーハンドリング (キャッチされないエラーをログファイルに保存)
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
-    FlutterLogs.logFatal(
-      'APP_ERROR', 
-      'Unhandled_Flutter_Error', 
-      details.exceptionAsString(),
-      stackTrace: details.stack,
+    // ★ 修正: message: -> logMessage:, stacktrace: -> stackTrace:
+    FlutterLogs.logThis(
+      tag: 'APP_ERROR', 
+      subTag: 'Unhandled_Flutter_Error', 
+      logMessage: details.exceptionAsString(), // ★ 修正
+      stackTrace: details.stack, // ★ 修正: (camelCase)
+      type: LogLevel.SEVERE,
     );
   };
   

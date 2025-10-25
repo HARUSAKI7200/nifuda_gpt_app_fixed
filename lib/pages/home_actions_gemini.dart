@@ -79,12 +79,13 @@ void _showErrorDialog(BuildContext context, String title, String message) {
 
 // ★★★ 追加: エラーロギングヘルパー関数 (home_actions.dartから流用) ★★★
 void _logError(String tag, String message, dynamic error, StackTrace? stack) {
+  // ★ 修正: logError のシグネチャ変更に対応 (exception: -> error:, stacktrace: -> stackTrace:)
   FlutterLogs.logError(
     tag,
     'ACTION_ERROR',
     message,
-    error: error,
-    stackTrace: stack,
+    error: (error is Exception) ? error : Exception(error.toString()), // ★ 修正
+    stackTrace: stack, // ★ 修正
     timestamp: DateTime.now(),
   );
   debugPrint('[$tag] $message: $error');
@@ -129,7 +130,13 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
   if (allAiResults == null || allAiResults.isEmpty) {
     if (context.mounted) {
       showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
-      FlutterLogs.logWarning('OCR_ACTION', 'NIFUDA_GEMINI_CANCEL', 'Nifuda Gemini OCR was cancelled by user.');
+      // ★ 修正: message: -> logMessage:
+      FlutterLogs.logThis(
+        tag: 'OCR_ACTION', 
+        subTag: 'NIFUDA_GEMINI_CANCEL', 
+        logMessage: 'Nifuda Gemini OCR was cancelled by user.', // ★ 修正
+        type: LogLevel.WARNING,
+      );
     }
     return null;
   }
@@ -178,7 +185,13 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
                 ));
         if (proceed != true) {
            if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
-           FlutterLogs.logWarning('OCR_ACTION', 'NIFUDA_GEMINI_CONFIRM_INTERRUPTED', 'Nifuda Gemini confirmation interrupted after $imageIndex images.');
+           // ★ 修正: message: -> logMessage:
+           FlutterLogs.logThis(
+             tag: 'OCR_ACTION', 
+             subTag: 'NIFUDA_GEMINI_CONFIRM_INTERRUPTED', 
+             logMessage: 'Nifuda Gemini confirmation interrupted after $imageIndex images.', // ★ 修正
+             type: LogLevel.WARNING,
+           );
            return allConfirmedNifudaRows.isNotEmpty ? allConfirmedNifudaRows : null;
         }
       } else {
@@ -392,7 +405,13 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
           }
         }
       } else {
-        FlutterLogs.logWarning('OCR_ACTION', 'PRODUCT_LIST_GEMINI_PARSE_FAIL', 'Gemini response structure unexpected.');
+        // ★ 修正: message: -> logMessage:
+        FlutterLogs.logThis(
+          tag: 'OCR_ACTION', 
+          subTag: 'PRODUCT_LIST_GEMINI_PARSE_FAIL', 
+          logMessage: 'Gemini response structure unexpected.', // ★ 修正
+          type: LogLevel.WARNING,
+        );
         debugPrint('製品リストの解析に失敗した応答がありました (予期せぬ形式)。');
       }
   }

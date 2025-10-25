@@ -5,8 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter_logs/flutter_logs.dart';
 import '../models/app_collections.dart';
 // ★ 追加: 生成されたスキーマ
-// (ビルド前は存在しないが、ここでは定義を続ける)
-// ignore: unused_import
+import '../models/app_collections.g.dart'; // ★ 修正: Isarスキーマをインポート
 
 
 // ★★★ 定数定義: 進捗ステータス (home_page.dartから移動) ★★★
@@ -84,7 +83,13 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     final dbPath = dir.path;
     
     if (Isar.instanceNames.contains('default')) {
-      FlutterLogs.logWarning('ISAR_INIT', 'REDUNDANT_CALL', 'Isar instance already open, closing...');
+      // ★ 修正: message: -> logMessage:
+      FlutterLogs.logThis(
+        tag: 'ISAR_INIT', 
+        subTag: 'REDUNDANT_CALL', 
+        logMessage: 'Isar instance already open, closing...', // ★ 修正
+        type: LogLevel.WARNING,
+      );
       // 既に開いている場合は閉じてから開く（開発中のホットリロード対策）
       await Isar.getInstance('default')?.close();
     }
@@ -94,7 +99,7 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     try {
         // Isarを正しいSchemaで開く
         final isar = await Isar.open(
-          // ★ 修正: 生成されたスキーマを使用
+          // ★ 修正: インポートしたスキーマを使用
           [ProjectSchema, NifudaRowSchema, ProductListRowSchema], 
           directory: dbPath,
           name: 'default', // インスタンス名
@@ -102,7 +107,14 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         FlutterLogs.logInfo('ISAR_INIT', 'DB_SUCCESS', 'Isar DB initialized successfully.');
         return isar;
     } catch (e, s) {
-        FlutterLogs.logFatal('ISAR_INIT', 'DB_FAILED', 'Isar DB initialization failed: $e', stackTrace: s);
+        // ★ 修正: message: -> logMessage:, stacktrace: -> stackTrace:
+        FlutterLogs.logThis(
+          tag: 'ISAR_INIT', 
+          subTag: 'DB_FAILED', 
+          logMessage: 'Isar DB initialization failed: $e', // ★ 修正
+          stackTrace: s, // ★ 修正
+          type: LogLevel.SEVERE,
+        );
         rethrow; // 失敗したらアプリの起動を停止する
     }
   }
@@ -121,7 +133,7 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
   }) {
     state = state.copyWith(
       projectTitle: projectTitle,
-      projectFolderPath: projectFolderPath,
+      // projectFolderPath: projectFolderPath, // ★ 修正: 重複しているため削除
       nifudaData: nifudaData,
       productListKariData: productListKariData,
       inspectionStatus: inspectionStatus,
