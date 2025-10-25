@@ -1,1 +1,0 @@
-# nifuda_gpt_app_fixed
