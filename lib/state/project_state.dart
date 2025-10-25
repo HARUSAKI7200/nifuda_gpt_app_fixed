@@ -7,7 +7,7 @@ import '../models/app_collections.dart';
 // ★ 追加: 生成されたスキーマ
 // (ビルド前は存在しないが、ここでは定義を続ける)
 // ignore: unused_import
-import '../models/app_collections.g.dart'; 
+
 
 // ★★★ 定数定義: 進捗ステータス (home_page.dartから移動) ★★★
 const String STATUS_PENDING = '検品前';

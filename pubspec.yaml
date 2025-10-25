@@ -28,15 +28,14 @@ dependencies:
 
   # ★★★ 追加パッケージ ★★★
   flutter_riverpod: ^2.5.1       # 状態管理
-  # isar: ^3.1.0+1                 # Git Override に移行するためコメントアウト
-  # isar_flutter_libs: ^3.1.0+1    # Git Override に移行するためコメントアウト
+  isar: ^3.1.0
+  isar_flutter_libs: ^3.1.0
   shimmer: ^3.0.0                # ローディング時のUX向上
   flutter_logs: ^2.2.1            # ローカルファイルベースのロギング
   
   # --- UI & User Input ---
   camera: ^0.11.0+1
   image_picker: ^1.1.2
-  # ★★★ 修正: cunning_document_scanner を削除し、Google ML Kit Document Scanner を追加 ★★★
   google_mlkit_document_scanner: ^0.4.0
   
   # --- App Icon Generation ---
@@ -46,9 +45,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
-  # ★★★ 追加パッケージ (開発環境用) ★★★
-  # isar_generator: ^3.1.0+1      # Git Override に移行するためコメントアウト
-  # ★ 修正: isar_generatorとの競合を解消するため、build_runnerをダウングレード
+  isar_generator: ^3.0.0
   build_runner: ^2.4.13          # ビルドランナー 
 
 flutter:
@@ -69,18 +66,3 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icon/app_icon.png"
-
-# ★★★ 修正点: Isar関連3パッケージの "path" に "packages/" を再度追加 ★★★
-dependency_overrides:
-  isar_flutter_libs:
-    git:
-      url: https://github.com/isar/isar.git
-      path: packages/isar_flutter_libs # 正しいパス
-  isar:
-    git:
-      url: https://github.com/isar/isar.git
-      path: packages/isar # 正しいパス
-  isar_generator:
-    git:
-      url: https://github.com/isar/isar.git
-      path: packages/isar_generator # 正しいパス

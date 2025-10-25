@@ -2,7 +2,7 @@
 import 'package:isar/isar.dart';
 
 // ★★★ 重要: このファイルを作成後、ビルドコマンドを実行すると 'app_collections.g.dart' が生成されます ★★★
-part 'app_collections.g.dart'; 
+
 
 // ★ 1. プロジェクト全体を管理するコレクション
 @collection
