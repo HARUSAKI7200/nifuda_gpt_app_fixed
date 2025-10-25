@@ -12,7 +12,7 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img; 
-// ★★★ 修正: Google ML Kit Document Scanner のインポートを追加 ★★★
+import 'package:flutter_logs/flutter_logs.dart'; // ★ 追加: flutter_logs
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 
 import '../utils/gpt_service.dart';
@@ -27,7 +27,6 @@ import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
 import 'directory_image_picker_page.dart';
-
 
 
 // --- (ヘルパー関数は変更なし) ---
@@ -78,6 +77,20 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
+// ★★★ 追加: エラーロギングヘルパー関数 ★★★
+void _logError(String tag, String message, dynamic error, StackTrace? stack) {
+  FlutterLogs.logError(
+    tag,
+    'ACTION_ERROR',
+    message,
+    error: error,
+    stackTrace: stack,
+    timestamp: DateTime.now(),
+  );
+  debugPrint('[$tag] $message: $error');
+}
+
+
 // ★★★ 修正: シャープニングフィルター適用ヘルパー関数 - divisorとoffsetを削除 ★★★
 img.Image _applySharpeningFilter(img.Image image) {
   // シャープニングカーネル (一般的なもの)
@@ -122,12 +135,17 @@ Future<String?> saveProjectAction(
     final file = File(filePath);
     await file.writeAsString(jsonString);
 
+    // ★ ログ追加
+    FlutterLogs.logInfo('PROJECT_ACTION', 'SAVE_SUCCESS', 'Project $projectTitle saved to $filePath');
+
     if (context.mounted) {
       _hideLoadingDialog(context);
       showCustomSnackBar(context, 'プロジェクト「$projectTitle」を保存しました。');
     }
     return filePath; // 保存したファイルのパスを返す
-  } catch (e) {
+  } catch (e, s) {
+    // ★ ログ追加
+    _logError('PROJECT_ACTION', 'SAVE_FAIL', e, s);
     if (context.mounted) {
       _hideLoadingDialog(context);
       _showErrorDialog(context, '保存エラー', 'プロジェクトの保存に失敗しました: $e');
@@ -218,13 +236,18 @@ Future<Map<String, dynamic>?> loadProjectAction(BuildContext context) async {
       'nifudaData': nifudaData,
       'productListKariData': productListKariData,
     };
+    
+    // ★ ログ追加
+    FlutterLogs.logInfo('PROJECT_ACTION', 'LOAD_SUCCESS', 'Project ${loadedData['projectTitle']} loaded.');
 
     if (context.mounted) {
       _hideLoadingDialog(context);
       showCustomSnackBar(context, 'プロジェクト「${loadedData['projectTitle']}」を読み込みました。');
     }
     return loadedData;
-  } catch (e) {
+  } catch (e, s) {
+    // ★ ログ追加
+    _logError('PROJECT_ACTION', 'LOAD_FAIL', e, s);
     if (context.mounted) {
       _hideLoadingDialog(context);
       _showErrorDialog(context, '読み込みエラー', 'プロジェクトの読み込みに失敗しました: $e');
@@ -246,10 +269,11 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
         aiService: sendImageToGPT, // GPTの関数を渡す
     )),
   );
-
+  
   if (allGptResults == null || allGptResults.isEmpty) {
     if (context.mounted) {
       showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
+      FlutterLogs.logWarning('OCR_ACTION', 'NIFUDA_CANCEL', 'Nifuda OCR was cancelled by user.');
     }
     return null;
   }
@@ -298,6 +322,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
                 ));
         if (proceed != true) {
            if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
+           FlutterLogs.logWarning('OCR_ACTION', 'NIFUDA_CONFIRM_INTERRUPTED', 'Nifuda confirmation interrupted after $imageIndex images.');
            return allConfirmedNifudaRows.isNotEmpty ? allConfirmedNifudaRows : null;
         }
       } else {
@@ -305,9 +330,10 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
       }
     }
   }
-
+  
   if (allConfirmedNifudaRows.isNotEmpty) {
-    return allConfirmedNifudaRows;
+     FlutterLogs.logInfo('OCR_ACTION', 'NIFUDA_CONFIRM_SUCCESS', '${allConfirmedNifudaRows.length} Nifuda rows confirmed.');
+     return allConfirmedNifudaRows;
   } else {
     if (context.mounted) {
         showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。');
@@ -338,29 +364,29 @@ void showAndExportNifudaListAction(
   );
 }
 
-// ★★★ 変更: カメラ連続撮影による製品リストOCR処理 (GPT版) - ML Kit Document Scannerを使用 ★★★
+// ★★★ 変更: カメラ連続撮影による製品リストOCR処理 (GPT版) - setloading削除とログ追加 ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
-  void Function(bool) setLoading,
+  void Function(bool) setLoading, // <--- このコールバックは使用しないが、引数は残す
   String projectFolderPath,
 ) async {
   // 1. ML Kit Document Scannerを起動して、補正済み画像のファイルパスリストを取得
   List<String>? imageFilePaths;
   try {
-    // ★★★ 修正: DocumentScannerOptionsとDocumentScannerのインスタンス化を修正 ★★★
     final options = DocumentScannerOptions(
       pageLimit: 100, // ページ数の制限なし（実質）
       isGalleryImport: false, // ギャラリーからのインポートを許可しない
       documentFormat: DocumentFormat.jpeg, // JPEG形式で結果を取得
-      mode: ScannerMode.full, // ★★★ 修正: scannerMode を mode に変更 ★★★
+      mode: ScannerMode.full,
     );
-    final docScanner = DocumentScanner(options: options); // instanceの代わりにコンストラクタを使用
+    final docScanner = DocumentScanner(options: options); 
     
-    final result = await docScanner.scanDocument(); // インスタンスメソッドとして呼び出し
-    imageFilePaths = result?.images; // ★★★ 修正: scannedImages を images に変更 ★★★
+    final result = await docScanner.scanDocument();
+    imageFilePaths = result?.images;
     
-  } catch (e) {
+  } catch (e, s) {
+    _logError('DOC_SCANNER', 'Scanner launch error', e, s);
     if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Google ML Kit Document Scannerの起動に失敗しました: $e');
     return null;
   }
@@ -372,7 +398,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   // 2. 取得したファイルパスからUint8Listリストを作成し、固定サイズにリサイズ（正規化）
   List<Uint8List> rawImageBytesList = [];
-  // ★★★ 修正: 1600px から 1920px に変更 ★★★
   const int PERSPECTIVE_WIDTH = 1920; 
   
   try {
@@ -383,19 +408,18 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
       if (originalImage == null) continue;
 
-      // ★★★ 修正: 幅1920pxにリサイズし、高さは元の画像のアスペクト比を維持する ★★★
       img.Image normalizedImage = img.copyResize(
         originalImage,
         width: PERSPECTIVE_WIDTH,
         height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round(),
       );
       
-      // ★★★ 追加: シャープニングフィルターを適用して文字のエッジを強調 ★★★
       normalizedImage = _applySharpeningFilter(normalizedImage);
 
       rawImageBytesList.add(Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100)));
     }
-  } catch (e) {
+  } catch (e, s) {
+    _logError('IMAGE_PROC', 'Image read/resize error', e, s);
     if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはリサイズに失敗しました: $e');
     return null;
   }
@@ -477,8 +501,9 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   }
 
   if (!context.mounted) return null;
-  setLoading(true);
+  // setLoading(true); // ★ 削除
   showCustomSnackBar(context, '${finalImagesToSend.length} 枚の画像をGPTへ送信依頼しました。結果を待っています...');
+  FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_START', '${finalImagesToSend.length} images sent to GPT.');
 
   final client = http.Client();
   List<Future<Map<String, dynamic>?>> gptResultFutures = [];
@@ -489,8 +514,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       isProductList: true,
       company: selectedCompany,
       client: client,
-    ).catchError((e) {
-      debugPrint('GPT送信エラー: $e');
+    ).catchError((e, s) {
+      _logError('GPT_API', 'GPT API call failed', e, s);
       return null;
     });
     gptResultFutures.add(gptFuture);
@@ -528,17 +553,20 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
           }
         }
       } else {
+        // ★ ログ追加
+        FlutterLogs.logWarning('OCR_ACTION', 'PRODUCT_LIST_PARSE_FAIL', 'GPT response structure unexpected.');
         debugPrint('製品リストの解析に失敗した応答がありました (予期せぬ形式)。');
       }
   }
   
   if (!context.mounted) {
-    setLoading(false);
+    // setLoading(false); // ★ 削除
     return null;
   }
-  setLoading(false);
+  // setLoading(false); // ★ 削除
 
   if (allExtractedProductRows.isNotEmpty) {
+      FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_CONFIRM', '${allExtractedProductRows.length} rows extracted for confirmation.');
       final List<List<String>>? confirmedData = await Navigator.push<List<List<String>>>(
         context,
         MaterialPageRoute(
@@ -549,6 +577,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       );
       return confirmedData;
   } else {
+      _logError('OCR_ACTION', 'PRODUCT_LIST_NO_RESULT', 'No valid product list data extracted.', null);
       if (context.mounted) _showErrorDialog(context, 'OCR結果なし', '有効な製品リストデータが抽出されませんでした。');
       return null;
   }
@@ -587,9 +616,11 @@ Future<String?> startMatchingAndShowResultsAction(
 ) async {
   if (nifudaData.length <= 1 || productListData.length <= 1) {
     _showErrorDialog(context, 'データ不足', '照合するには荷札と製品リストの両方のデータが必要です。');
+    FlutterLogs.logWarning('MATCHING_ACTION', 'DATA_INSUFFICIENT', 'Matching attempted with insufficient data.');
     return null; // データ不足の場合は null を返す
   }
 
+  // ... 既存の照合ロジック（変更なし）...
   final nifudaHeaders = nifudaData.first;
   final nifudaMapList = nifudaData.sublist(1).map((row) {
     return { for (int i = 0; i < nifudaHeaders.length; i++) nifudaHeaders[i]: (i < row.length ? row[i] : '') };
@@ -602,12 +633,17 @@ Future<String?> startMatchingAndShowResultsAction(
   
   if (nifudaMapList.isEmpty || productMapList.isEmpty) {
      _showErrorDialog(context, 'データ不足', '荷札または製品リストの有効なデータがありません。');
+     FlutterLogs.logWarning('MATCHING_ACTION', 'DATA_EMPTY', 'Matching failed due to empty map lists.');
     return null; // データ不足の場合は null を返す
   }
   
   final matchingLogic = ProductMatcher();
 
   final Map<String, dynamic> rawResults = matchingLogic.match(nifudaMapList, productMapList, pattern: matchingPattern);
+
+  // ★ ログ追加
+  FlutterLogs.logInfo('MATCHING_ACTION', 'MATCHING_SUCCESS', 'Matching completed with pattern: $matchingPattern. Matched: ${(rawResults['matched'] as List).length}, Unmatched: ${(rawResults['unmatched'] as List).length}');
+
 
   // MatchingResultPageに生データとプロジェクト名を渡す
   final String? newStatus = await Navigator.push<String>(

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
+import 'package:flutter_logs/flutter_logs.dart'; // ★ 追加: flutter_logs
 
 // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 // ★ 変更点：http.Clientを引数で受け取れるようにする
@@ -16,6 +17,7 @@ Future<Map<String, dynamic>> sendImageToGPT(
   const modelName = String.fromEnvironment('OPENAI_MODEL', defaultValue: 'gpt-5-mini');
 
   if (apiKey.isEmpty) {
+    FlutterLogs.logFatal('GPT_SERVICE', 'API_KEY_MISSING', 'OpenAI API key is not configured.');
     throw Exception('OpenAI APIキーが設定されていません。');
   }
 
@@ -49,6 +51,8 @@ Future<Map<String, dynamic>> sendImageToGPT(
     'max_completion_tokens': 4096,
     'response_format': {'type': 'json_object'},
   });
+  
+  FlutterLogs.logInfo('GPT_SERVICE', 'REQUEST_SENT', 'Sending image to GPT for ${isProductList ? "Product List" : "Nifuda"}');
 
   try {
     // clientが提供されていればそれを使用し、なければ通常のhttp.postを使う
@@ -64,6 +68,7 @@ Future<Map<String, dynamic>> sendImageToGPT(
         final contentString = jsonResponse['choices'][0]['message']['content'];
         if (contentString == null || contentString.isEmpty) {
           final finishReason = jsonResponse['choices'][0]['finish_reason'];
+          FlutterLogs.logWarning('GPT_SERVICE', 'EMPTY_RESPONSE', 'GPT returned empty content. Reason: $finishReason');
           throw Exception('GPTからの応答が空です。Finish Reason: $finishReason');
         }
         
@@ -71,17 +76,23 @@ Future<Map<String, dynamic>> sendImageToGPT(
           if (kDebugMode) {
             print('GPT Parsed Content String: $contentString');
           }
+          FlutterLogs.logInfo('GPT_SERVICE', 'PARSE_SUCCESS', 'Successfully parsed GPT JSON response.');
           return jsonDecode(contentString);
-        } catch (e) {
+        } catch (e, s) {
+          FlutterLogs.logError('GPT_SERVICE', 'JSON_PARSE_FAILED', 'Failed to parse GPT JSON response: $contentString', error: e, stackTrace: s);
           throw Exception('GPTの応答JSON解析に失敗: $contentString');
         }
       } else {
+        FlutterLogs.logError('GPT_SERVICE', 'INVALID_CHOICES', 'GPT response is missing valid data in "choices" field.');
         throw Exception('GPTからの応答に有効なデータがありません。');
       }
     } else {
-      throw Exception('GPT APIエラー: ${response.statusCode}\n${utf8.decode(response.bodyBytes)}');
+      final errorBody = utf8.decode(response.bodyBytes);
+      FlutterLogs.logError('GPT_SERVICE', 'API_ERROR', 'GPT API returned status ${response.statusCode}. Body: $errorBody', error: errorBody);
+      throw Exception('GPT APIエラー: ${response.statusCode}\n$errorBody');
     }
-  } catch (e) {
+  } catch (e, s) {
+    FlutterLogs.logError('GPT_SERVICE', 'HTTP_REQUEST_FAILED', 'GPT image submission failed.', error: e, stackTrace: s);
     debugPrint('GPTへの画像送信エラー: $e');
     rethrow;
   }

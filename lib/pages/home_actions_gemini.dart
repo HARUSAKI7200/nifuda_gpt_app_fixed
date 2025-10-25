@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img; 
+import 'package:flutter_logs/flutter_logs.dart'; // ★ 追加: flutter_logs
 // ★★★ 修正: Google ML Kit Document Scanner のインポートを追加 ★★★
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 
@@ -76,6 +77,19 @@ void _showErrorDialog(BuildContext context, String title, String message) {
   );
 }
 
+// ★★★ 追加: エラーロギングヘルパー関数 (home_actions.dartから流用) ★★★
+void _logError(String tag, String message, dynamic error, StackTrace? stack) {
+  FlutterLogs.logError(
+    tag,
+    'ACTION_ERROR',
+    message,
+    error: error,
+    stackTrace: stack,
+    timestamp: DateTime.now(),
+  );
+  debugPrint('[$tag] $message: $error');
+}
+
 // ★★★ 修正: シャープニングフィルター適用ヘルパー関数 - divisorとoffsetを削除 ★★★
 img.Image _applySharpeningFilter(img.Image image) {
   // シャープニングカーネル (一般的なもの)
@@ -115,6 +129,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
   if (allAiResults == null || allAiResults.isEmpty) {
     if (context.mounted) {
       showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
+      FlutterLogs.logWarning('OCR_ACTION', 'NIFUDA_GEMINI_CANCEL', 'Nifuda Gemini OCR was cancelled by user.');
     }
     return null;
   }
@@ -163,6 +178,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
                 ));
         if (proceed != true) {
            if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
+           FlutterLogs.logWarning('OCR_ACTION', 'NIFUDA_GEMINI_CONFIRM_INTERRUPTED', 'Nifuda Gemini confirmation interrupted after $imageIndex images.');
            return allConfirmedNifudaRows.isNotEmpty ? allConfirmedNifudaRows : null;
         }
       } else {
@@ -172,6 +188,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
   }
 
   if (allConfirmedNifudaRows.isNotEmpty) {
+    FlutterLogs.logInfo('OCR_ACTION', 'NIFUDA_GEMINI_CONFIRM_SUCCESS', '${allConfirmedNifudaRows.length} Nifuda rows confirmed by Gemini.');
     return allConfirmedNifudaRows;
   } else {
     if (context.mounted) {
@@ -182,11 +199,11 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
 }
 
 
-// ★★★ 変更: カメラ連続撮影による製品リストOCR処理 (Gemini版) - ML Kit Document Scannerを使用 ★★★
+// ★★★ 変更: カメラ連続撮影による製品リストOCR処理 (Gemini版) - setloading削除とログ追加 ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
   BuildContext context,
   String selectedCompany,
-  void Function(bool) setLoading,
+  void Function(bool) setLoading, // <--- このコールバックは使用しないが、引数は残す
   String projectFolderPath,
 ) async {
   // 1. ML Kit Document Scannerを起動して、補正済み画像のファイルパスリストを取得
@@ -204,7 +221,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
     final result = await docScanner.scanDocument(); // インスタンスメソッドとして呼び出し
     imageFilePaths = result?.images; // ★★★ 修正: scannedImages を images に変更 ★★★
     
-  } catch (e) {
+  } catch (e, s) {
+    _logError('DOC_SCANNER', 'Scanner launch error (Gemini)', e, s);
     if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Google ML Kit Document Scannerの起動に失敗しました: $e');
     return null;
   }
@@ -240,7 +258,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
       
       rawImageBytesList.add(Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100)));
     }
-  } catch (e) {
+  } catch (e, s) {
+    _logError('IMAGE_PROC', 'Image read/resize error (Gemini)', e, s);
     if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはリサイズに失敗しました: $e');
     return null;
   }
@@ -322,8 +341,9 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
   }
 
   if (!context.mounted) return null;
-  setLoading(true);
+  // setLoading(true); // ★ 削除
   showCustomSnackBar(context, '${finalImagesToSend.length} 枚の画像をGeminiへ送信依頼しました...');
+  FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_GEMINI_START', '${finalImagesToSend.length} images sent to Gemini.');
 
   final client = http.Client();
   
@@ -334,8 +354,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
       isProductList: true,
       company: selectedCompany,
       client: client,
-    ).catchError((e) {
-      debugPrint('Gemini送信エラー: $e');
+    ).catchError((e, s) {
+      _logError('GEMINI_API', 'Gemini API call failed', e, s);
       return null;
     });
     aiResultFutures.add(future);
@@ -372,18 +392,20 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
           }
         }
       } else {
+        FlutterLogs.logWarning('OCR_ACTION', 'PRODUCT_LIST_GEMINI_PARSE_FAIL', 'Gemini response structure unexpected.');
         debugPrint('製品リストの解析に失敗した応答がありました (予期せぬ形式)。');
       }
   }
   
   if (!context.mounted) {
-    setLoading(false);
+    // setLoading(false); // ★ 削除
     return null;
   }
-  setLoading(false);
+  // setLoading(false); // ★ 削除
 
   // 6. 確認画面へ
   if (allExtractedProductRows.isNotEmpty) {
+      FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_GEMINI_CONFIRM', '${allExtractedProductRows.length} rows extracted by Gemini for confirmation.');
       return await Navigator.push<List<List<String>>>(
         context,
         MaterialPageRoute(
@@ -391,6 +413,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
         ),
       );
   } else {
+      _logError('OCR_ACTION', 'PRODUCT_LIST_GEMINI_NO_RESULT', 'No valid product list data extracted by Gemini.', null);
       if (context.mounted) _showErrorDialog(context, 'OCR結果なし', '有効な製品リストデータが抽出されませんでした。');
       return null;
   }

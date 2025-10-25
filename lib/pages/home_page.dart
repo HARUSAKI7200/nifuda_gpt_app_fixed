@@ -1,384 +1,273 @@
 // lib/pages/home_page.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart'; // ★ 追加
+import 'package:shimmer/shimmer.dart'; // ★ 追加: Shimmer
+import 'package:flutter_logs/flutter_logs.dart'; // ★ 追加
+import '../state/project_state.dart'; // ★ 追加: 状態管理
 import 'home_actions.dart';
 import '../widgets/home_widgets.dart';
 import '../widgets/custom_snackbar.dart';
 import 'dart:io'; 
 import 'package:path/path.dart' as p; 
-// ★★★ 削除：フォルダ選択パッケージのインポートを削除 ★★★
-// import 'package:file_picker/file_picker.dart';
-
-import 'camera_capture_page.dart';
-import 'nifuda_ocr_confirm_page.dart';
 import 'home_actions_gemini.dart'; 
 
-// ★★★ 定数定義: 進捗ステータス ★★★
-const String STATUS_PENDING = '検品前';
-const String STATUS_IN_PROGRESS = '検品中';
-const String STATUS_COMPLETED = '検品完了';
-
-class HomePage extends StatefulWidget {
+// ★★★ StatefulWidget から ConsumerWidget に変更 ★★★
+class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
-}
+  Widget build(BuildContext context, WidgetRef ref) { // WidgetRefを追加
+    final projectState = ref.watch(projectProvider);
+    final projectNotifier = ref.read(projectProvider.notifier);
 
-class _HomePageState extends State<HomePage> {
-  String _projectTitle = '(新規プロジェクト)';
-  String _selectedCompany = 'T社';
-  final List<String> _companies = ['T社', 'マスク処理なし', '動的マスク処理'];
+    final String _projectTitle = projectState.projectTitle;
+    final String _selectedCompany = projectState.selectedCompany;
+    final String _selectedMatchingPattern = projectState.selectedMatchingPattern;
+    final List<List<String>> _nifudaData = projectState.nifudaData;
+    final List<List<String>> _productListKariData = projectState.productListKariData;
+    final bool _isLoading = projectState.isLoading;
+    final String? _currentProjectFolderPath = projectState.projectFolderPath;
+    final String _inspectionStatus = projectState.inspectionStatus;
 
-  String _selectedMatchingPattern = 'T社（製番・項目番号）';
-  final List<String> _matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）'];
+    final List<String> _companies = ['T社', 'マスク処理なし', '動的マスク処理'];
+    final List<String> _matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）'];
 
-  List<List<String>> _nifudaData = [
-    ['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード'],
-  ];
-  List<List<String>> _productListKariData = [
-    ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考'],
-  ];
-  bool _isLoading = false;
-  String? _currentProjectFolderPath;
-  // String _productListPath = '/storage/emulated/0/DCIM/製品リスト原紙'; // ★★★ 削除 ★★★
-  
-  // ★★★ 追加: 進捗ステータス管理 ★★★
-  String _inspectionStatus = STATUS_PENDING;
-  
-  @override
-  void initState() {
-    super.initState();
-    // 初期状態のステータスを設定
-    _updateStatus();
-  }
-  
-  void _updateStatus([String? status]) {
-    setState(() {
-      if (status != null) {
-        _inspectionStatus = status;
-      } else if (_currentProjectFolderPath == null) {
-        _inspectionStatus = STATUS_PENDING;
-      } else if (_nifudaData.length > 1 || _productListKariData.length > 1) {
-        // データが存在する場合は、完了していない限り「検品中」
-        if (_inspectionStatus != STATUS_COMPLETED) {
-           _inspectionStatus = STATUS_IN_PROGRESS;
+    // --- アクションのラッパー関数 ---
+    
+    // プロジェクト作成
+    Future<void> _handleNewProject() async {
+      if (_isLoading) return;
+      
+      final String? projectCode = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) {
+          String? inputCode;
+          return AlertDialog(
+            title: const Text('新規プロジェクト作成'),
+            content: TextField(
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '製番を入力してください (例: QZ83941)',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) {
+                inputCode = value.trim();
+              },
+              onSubmitted: (value) {
+                Navigator.of(dialogContext).pop(inputCode);
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(null),
+                child: const Text('キャンセル'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(dialogContext).pop(inputCode),
+                child: const Text('作成'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (projectCode != null && projectCode.isNotEmpty) {
+        projectNotifier.setLoading(true); // ★ Notifierでローディングを設定
+        try {
+          const String baseDcimPath = "/storage/emulated/0/DCIM";
+          final String inspectionRelatedPath = p.join(baseDcimPath, "検品関係");
+          final String projectFolderPath = p.join(inspectionRelatedPath, projectCode);
+
+          final Directory projectDir = Directory(projectFolderPath);
+          if (!await projectDir.exists()) {
+            await projectDir.create(recursive: true);
+          }
+          
+          if (context.mounted) {
+            // ★ Notifierで状態を一括更新
+            projectNotifier.updateProjectData(
+              projectTitle: projectCode,
+              projectFolderPath: projectFolderPath,
+              nifudaData: [['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード']],
+              productListKariData: [['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']],
+              inspectionStatus: STATUS_IN_PROGRESS, 
+            );
+            showCustomSnackBar(context, 'プロジェクト「$projectCode」が作成されました。');
+            FlutterLogs.logInfo('PROJECT_ACTION', 'CREATE', 'Project $projectCode created at $projectFolderPath');
+          }
+        } catch (e) {
+          FlutterLogs.logError('PROJECT_ACTION', 'CREATE_ERROR', 'Project folder creation failed: $e');
+          if (context.mounted) {
+            showCustomSnackBar(context, 'プロジェクトフォルダの作成に失敗しました: $e', isError: true);
+          }
+        } finally {
+          projectNotifier.setLoading(false); // ★ Notifierでローディングを解除
         }
       } else {
-        // プロジェクトフォルダがあるがデータがない場合
-        _inspectionStatus = STATUS_IN_PROGRESS;
-      }
-    });
-  }
-
-
-  void _setLoading(bool loading) {
-    if (mounted) setState(() => _isLoading = loading);
-  }
-
-  Future<void> _handleNewProject() async {
-    if (_isLoading) return;
-
-    final String? projectCode = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) {
-        String? inputCode;
-        return AlertDialog(
-          title: const Text('新規プロジェクト作成'),
-          content: TextField(
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: '製番を入力してください (例: QZ83941)',
-              border: OutlineInputBorder(),
-            ),
-            onChanged: (value) {
-              inputCode = value.trim();
-            },
-            onSubmitted: (value) {
-              Navigator.of(dialogContext).pop(inputCode);
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(null),
-              child: const Text('キャンセル'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(dialogContext).pop(inputCode),
-              child: const Text('作成'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (projectCode != null && projectCode.isNotEmpty) {
-      _setLoading(true);
-      try {
-        const String baseDcimPath = "/storage/emulated/0/DCIM";
-        final String inspectionRelatedPath = p.join(baseDcimPath, "検品関係");
-        final String projectFolderPath = p.join(inspectionRelatedPath, projectCode);
-
-        final Directory projectDir = Directory(projectFolderPath);
-        if (!await projectDir.exists()) {
-          await projectDir.create(recursive: true);
+        if (context.mounted) {
+          showCustomSnackBar(context, 'プロジェクト作成がキャンセルされました。');
         }
-
-        if (mounted) {
-          setState(() {
-            _projectTitle = projectCode;
-            _currentProjectFolderPath = projectFolderPath;
-            _nifudaData = [['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード']];
-            _productListKariData = [['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']];
-            _inspectionStatus = STATUS_IN_PROGRESS; // ★ ステータスを検品中に設定
-          });
-          showCustomSnackBar(context, 'プロジェクト「$projectCode」が作成されました。');
-        }
-      } catch (e) {
-        debugPrint('プロジェクトフォルダ作成エラー: $e');
-        if (mounted) {
-          showCustomSnackBar(context, 'プロジェクトフォルダの作成に失敗しました: $e', isError: true);
-        }
-      } finally {
-        _setLoading(false);
-      }
-    } else {
-      if (mounted) {
-        showCustomSnackBar(context, 'プロジェクト作成がキャンセルされました。');
       }
     }
-  }
-  
-  // ★★★ 削除: _handleChangeProductListPath 関数全体を削除 ★★★
-  // Future<void> _handleChangeProductListPath() async {
-  //   // FilePickerを使用してユーザーにディレクトリを選択させる
-  //   String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
-  //     dialogTitle: '製品リストのフォルダを選択してください',
-  //     initialDirectory: _productListPath,
-  //   );
 
-  //   if (selectedDirectory != null) {
-  //     // ユーザーがディレクトリを選択した場合
-  //     setState(() {
-  //       _productListPath = selectedDirectory;
-  //     });
-  //     if(mounted) showCustomSnackBar(context, '読込先フォルダを変更しました: $selectedDirectory');
-  //   } else {
-  //     // ユーザーが選択をキャンセルした場合
-  //     if(mounted) showCustomSnackBar(context, 'フォルダ選択がキャンセルされました。');
-  //   }
-  // }
+    Future<void> _handleCaptureNifudaWithGpt() async {
+      if (_isLoading || _currentProjectFolderPath == null) {
+        if (_currentProjectFolderPath == null) showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+        return;
+      }
+      projectNotifier.setLoading(true);
+      // captureProcessAndConfirmNifudaAction のロジックを修正しない限り、この関数内で状態を更新する必要がある
+      final List<List<String>>? confirmedRows = await captureProcessAndConfirmNifudaAction(context, _currentProjectFolderPath);
+      projectNotifier.setLoading(false);
 
-  Future<void> _handleCaptureNifudaWithGpt() async {
-    if (_isLoading) return;
-    if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
-      return;
-    }
-    _setLoading(true);
-    final List<List<String>>? confirmedRows = await captureProcessAndConfirmNifudaAction(context, _currentProjectFolderPath!);
-    _setLoading(false);
-
-    if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
-      setState(() {
-        _nifudaData.addAll(confirmedRows);
-        _updateStatus(); // ステータスを更新
-      });
-      showCustomSnackBar(context, '${confirmedRows.length}件の荷札データがGPTで追加されました。');
-    }
-  }
-
-  Future<void> _handleCaptureNifudaWithGemini() async {
-    if (_isLoading) return;
-    if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
-      return;
-    }
-    _setLoading(true);
-    final List<List<String>>? confirmedRows = await captureProcessAndConfirmNifudaActionWithGemini(context, _currentProjectFolderPath!);
-    _setLoading(false);
-
-    if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
-      setState(() {
-        _nifudaData.addAll(confirmedRows);
-        _updateStatus(); // ステータスを更新
-      });
-      showCustomSnackBar(context, '${confirmedRows.length}件の荷札データがGeminiで追加されました。');
-    }
-  }
-  
-  void _showLoadingDialog(BuildContext context, String message) {
-    if (!context.mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          content: Row(
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(width: 20),
-              Text(message),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _hideLoadingDialog(BuildContext context) {
-    final navigator = Navigator.of(context, rootNavigator: true);
-    if (navigator.canPop()) {
-      navigator.pop();
-    }
-  }
-
-  void _handleShowNifudaList() {
-    if (_isLoading) return;
-    if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
-      return;
-    }
-    showAndExportNifudaListAction(context, _nifudaData, _projectTitle, _currentProjectFolderPath!);
-  }
-
-  // ★★★ 変更: 製品リストをカメラで撮影してOCR (GPT版) ★★★
-  Future<void> _handlePickProductListWithGpt() async {
-    if (_isLoading) return;
-    if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
-      return;
-    }
-    _setLoading(true);
-    // productListPathを削除した新しい関数を呼び出す
-    final List<List<String>>? confirmedRows = await captureProcessAndConfirmProductListAction(context, _selectedCompany, _setLoading, _currentProjectFolderPath!);
-    if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
-      setState(() {
-        if(_productListKariData.length == 1 && _productListKariData.first[0] != 'ORDER No.') {
-           _productListKariData = [
-              ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考'],
-           ];
-        }
-        _productListKariData.addAll(confirmedRows);
-        _updateStatus(); // ステータスを更新
-      });
-      showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータが追加されました。');
-    }
-    if (mounted && _isLoading) {
-      _setLoading(false);
-    }
-  }
-
-  // ★★★ 変更: 製品リストをカメラで撮影してOCR (Gemini版) ★★★
-  Future<void> _handlePickProductListWithGemini() async {
-    if (_isLoading) return;
-    if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
-      return;
-    }
-    _setLoading(true);
-    // productListPathを削除した新しい関数を呼び出す
-    final List<List<String>>? confirmedRows = await captureProcessAndConfirmProductListActionWithGemini(context, _selectedCompany, _setLoading, _currentProjectFolderPath!);
-    if (mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
-      setState(() {
-        if(_productListKariData.length == 1 && _productListKariData.first[0] != 'ORDER No.') {
-          _productListKariData = [
-              ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考'],
-          ];
-        }
-        _productListKariData.addAll(confirmedRows);
-        _updateStatus(); // ステータスを更新
-      });
-      showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータが追加されました。');
-    }
-    if (mounted && _isLoading) {
-      _setLoading(false);
-    }
-  }
-
-  void _handleShowProductList() {
-    if (_isLoading) return;
-    if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
-      return;
-    }
-    showAndExportProductListAction(context, _productListKariData, _currentProjectFolderPath!);
-  }
-
-  // ★★★ 変更点: startMatchingAndShowResultsActionをawaitで呼び出し、戻り値のステータスを処理する ★★★
-  Future<void> _handleStartMatching() async {
-    if (_isLoading) return;
-    if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
-      return;
+      if (context.mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
+        final newNifudaData = List<List<String>>.from(_nifudaData)..addAll(confirmedRows);
+        projectNotifier.updateProjectData(nifudaData: newNifudaData, inspectionStatus: STATUS_IN_PROGRESS);
+        showCustomSnackBar(context, '${confirmedRows.length}件の荷札データがGPTで追加されました。');
+      }
     }
     
-    // home_actions.dart の startMatchingAndShowResultsAction を await で呼び出し
-    final String? newStatus = await startMatchingAndShowResultsAction(
-      context, 
-      _nifudaData, 
-      _productListKariData, 
-      _selectedMatchingPattern,
-      _projectTitle, // projectTitleを追加
-      _currentProjectFolderPath!,
-    );
+    Future<void> _handleCaptureNifudaWithGemini() async {
+      if (_isLoading || _currentProjectFolderPath == null) {
+         if (_currentProjectFolderPath == null) showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+         return;
+      }
+      projectNotifier.setLoading(true);
+      final List<List<String>>? confirmedRows = await captureProcessAndConfirmNifudaActionWithGemini(context, _currentProjectFolderPath);
+      projectNotifier.setLoading(false);
+
+      if (context.mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
+        final newNifudaData = List<List<String>>.from(_nifudaData)..addAll(confirmedRows);
+        projectNotifier.updateProjectData(nifudaData: newNifudaData, inspectionStatus: STATUS_IN_PROGRESS);
+        showCustomSnackBar(context, '${confirmedRows.length}件の荷札データがGeminiで追加されました。');
+      }
+    }
     
-    if (mounted && newStatus == STATUS_COMPLETED) { // STATUS_COMPLETED を使用
-      setState(() {
-        _inspectionStatus = STATUS_COMPLETED;
-      });
-      showCustomSnackBar(context, 'プロジェクト「$_projectTitle」の検品を完了しました！', durationSeconds: 5);
+    void _handleShowNifudaList() {
+      if (_isLoading || _currentProjectFolderPath == null) {
+        if (_currentProjectFolderPath == null) showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+        return;
+      }
+      showAndExportNifudaListAction(context, _nifudaData, _projectTitle, _currentProjectFolderPath);
     }
-  }
-  
-  Future<void> _handleSaveProject() async {
-    if (_isLoading) return;
-    if (_currentProjectFolderPath == null) {
-      showCustomSnackBar(context, '保存するプロジェクトがありません。', isError: true);
-      return;
-    }
-    // saveProjectActionはJSONパスを返すように変更したが、ここでは戻り値は無視
-    await saveProjectAction(
-      context,
-      _currentProjectFolderPath!,
-      _projectTitle,
-      _nifudaData,
-      _productListKariData,
-    );
-  }
+    
+    Future<void> _handlePickProductListWithGpt() async {
+      if (_isLoading || _currentProjectFolderPath == null) {
+        if (_currentProjectFolderPath == null) showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+        return;
+      }
+      // setLoadingコールバックは home_actions.dart の中で使用されていないため、ダミー関数を渡す
+      final List<List<String>>? confirmedRows = await captureProcessAndConfirmProductListAction(context, _selectedCompany, (_) {}, _currentProjectFolderPath);
+      
+      if (context.mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
+        List<List<String>> baseList = _productListKariData;
+        if(baseList.length == 1 && baseList.first[0] != 'ORDER No.') {
+           baseList = [['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']];
+        }
+        final newProductListData = List<List<String>>.from(baseList)..addAll(confirmedRows);
 
-  Future<void> _handleLoadProject() async {
-    if (_isLoading) return;
-    final loadedData = await loadProjectAction(context);
-    if (loadedData != null && mounted) {
-      setState(() {
-        _projectTitle = loadedData['projectTitle'] as String;
-        _currentProjectFolderPath = loadedData['currentProjectFolderPath'] as String;
-        _nifudaData = loadedData['nifudaData'] as List<List<String>>;
-        _productListKariData = loadedData['productListKariData'] as List<List<String>>;
-        // 読み込み完了後、未完了であれば「検品中」
-        _inspectionStatus = STATUS_IN_PROGRESS; 
-      });
+        projectNotifier.updateProjectData(productListKariData: newProductListData, inspectionStatus: STATUS_IN_PROGRESS);
+        showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータがGPTで追加されました。');
+      }
+      if (context.mounted && _isLoading) {
+        projectNotifier.setLoading(false);
+      }
     }
-  }
+    
+    Future<void> _handlePickProductListWithGemini() async {
+      if (_isLoading || _currentProjectFolderPath == null) {
+        if (_currentProjectFolderPath == null) showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+        return;
+      }
+      // setLoadingコールバックは home_actions_gemini.dart の中で使用されていないため、ダミー関数を渡す
+      final List<List<String>>? confirmedRows = await captureProcessAndConfirmProductListActionWithGemini(context, _selectedCompany, (_) {}, _currentProjectFolderPath);
+      
+      if (context.mounted && confirmedRows != null && confirmedRows.isNotEmpty) {
+        List<List<String>> baseList = _productListKariData;
+        if(baseList.length == 1 && baseList.first[0] != 'ORDER No.') {
+          baseList = [['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考']];
+        }
+        final newProductListData = List<List<String>>.from(baseList)..addAll(confirmedRows);
 
-  @override
-  Widget build(BuildContext context) {
-    // ボタンカラムの幅を計算し、画面全体を効率的に使う
+        projectNotifier.updateProjectData(productListKariData: newProductListData, inspectionStatus: STATUS_IN_PROGRESS);
+        showCustomSnackBar(context, '${confirmedRows.length}件の製品リストデータがGeminiで追加されました。');
+      }
+      if (context.mounted && _isLoading) {
+        projectNotifier.setLoading(false);
+      }
+    }
+    
+    void _handleShowProductList() {
+      if (_isLoading || _currentProjectFolderPath == null) {
+        if (_currentProjectFolderPath == null) showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+        return;
+      }
+      showAndExportProductListAction(context, _productListKariData, _currentProjectFolderPath);
+    }
+    
+    Future<void> _handleStartMatching() async {
+      if (_isLoading || _currentProjectFolderPath == null) {
+        if (_currentProjectFolderPath == null) showCustomSnackBar(context, 'まず「新規作成」でプロジェクトを作成してください。', isError: true);
+        return;
+      }
+      
+      final String? newStatus = await startMatchingAndShowResultsAction(
+        context, 
+        _nifudaData, 
+        _productListKariData, 
+        _selectedMatchingPattern,
+        _projectTitle,
+        _currentProjectFolderPath,
+      );
+      
+      if (context.mounted && newStatus == STATUS_COMPLETED) {
+        projectNotifier.updateStatus(STATUS_COMPLETED);
+        showCustomSnackBar(context, 'プロジェクト「$_projectTitle」の検品を完了しました！', durationSeconds: 5);
+      }
+    }
+    
+    Future<void> _handleSaveProject() async {
+      if (_isLoading || _currentProjectFolderPath == null) {
+        if (_currentProjectFolderPath == null) showCustomSnackBar(context, '保存するプロジェクトがありません。', isError: true);
+        return;
+      }
+      projectNotifier.setLoading(true);
+      // saveProjectActionはJSONパスを返すように変更したが、ここでは戻り値は無視
+      await saveProjectAction(
+        context,
+        _currentProjectFolderPath,
+        _projectTitle,
+        _nifudaData,
+        _productListKariData,
+      );
+      projectNotifier.setLoading(false);
+    }
+    
+    Future<void> _handleLoadProject() async {
+      if (_isLoading) return;
+      projectNotifier.setLoading(true);
+      final loadedData = await loadProjectAction(context);
+      if (loadedData != null && context.mounted) {
+        projectNotifier.updateProjectData(
+          projectTitle: loadedData['projectTitle'] as String,
+          projectFolderPath: loadedData['currentProjectFolderPath'] as String,
+          nifudaData: loadedData['nifudaData'] as List<List<String>>,
+          productListKariData: loadedData['productListKariData'] as List<List<String>>,
+          inspectionStatus: STATUS_IN_PROGRESS, 
+        );
+      }
+      projectNotifier.setLoading(false);
+    }
+
+
+    // --- UI構築 ---
     final screenWidth = MediaQuery.of(context).size.width;
-    // 右側の撮影の仕方ボタンとステータスチップの領域を考慮して、ボタンカラムの最大幅を画面幅から引く
-    final statusChipWidth = 120.0; // チップの概算幅
-    final infoButtonWidth = 150.0; // 撮影の仕方ボタンの幅
-    final maxContentWidth = screenWidth - 32.0; // 左右Paddingを除いた幅
-
-    // 新規作成ボタンの幅は、画面左側にある他のアクションボタンと揃える
-    final actionColumnWidth = (maxContentWidth * 0.5).clamp(280.0, 450.0);
+    final actionColumnWidth = (screenWidth - 32.0 * 2).clamp(280.0, 450.0);
 
     return Scaffold(
       appBar: AppBar(title: Text('シンコー府中輸出課 荷札照合アプリ - $_projectTitle')),
-      // ★★★ 修正箇所: 画面右下にFABを配置し、_isLoadingがtrueの場合は無効化する ★★★
       floatingActionButton: FloatingActionButton.extended(
-        // ★ 修正点: _isLoadingがtrueの場合は onPressed を null にして無効化する
         onPressed: _isLoading ? null : () => showPhotoGuide(context),
         icon: const Icon(Icons.info_outline),
         label: const Text('撮影の仕方'),
@@ -390,30 +279,26 @@ class _HomePageState extends State<HomePage> {
           children: [
             Padding(
               padding: const EdgeInsets.all(16.0),
-              child: SingleChildScrollView( // ★★★ 全体をスクロール可能にする
+              child: SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ★★★ 修正箇所 1: Row内に新規作成ボタンとステータスチップを配置 ★★★
                     Row(
                       mainAxisAlignment: MainAxisAlignment.start, 
-                      crossAxisAlignment: CrossAxisAlignment.center, // 垂直方向中央揃え
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // 新規作成ボタンの幅を固定
                         SizedBox(
                           width: actionColumnWidth,
-                          child: _buildActionButton(label: '新規作成', onPressed: _handleNewProject, icon: Icons.create_new_folder),
+                          child: _buildActionButton(label: '新規作成', onPressed: _handleNewProject, icon: Icons.create_new_folder, _isLoading),
                         ),
                         
-                        const SizedBox(width: 16), // 間隔
+                        const SizedBox(width: 16),
                         const Spacer(), 
-                        // ステータスチップを右端に配置
-                        _buildStatusChip(),
+                        _buildStatusChip(_inspectionStatus),
                       ],
                     ),
                     const SizedBox(height: 10),
                     
-                    // ★★★ 修正箇所 2: ボタンカラムの幅を actionColumnWidth に統一 ★★★
                     SizedBox(
                       width: actionColumnWidth,
                       child: Row(
@@ -424,6 +309,7 @@ class _HomePageState extends State<HomePage> {
                               onPressed: _handleSaveProject,
                               icon: Icons.save,
                               isEnabled: _currentProjectFolderPath != null,
+                              _isLoading,
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -432,6 +318,7 @@ class _HomePageState extends State<HomePage> {
                               label: '読み込み',
                               onPressed: _handleLoadProject,
                               icon: Icons.folder_open,
+                              _isLoading,
                             ),
                           ),
                         ],
@@ -443,27 +330,23 @@ class _HomePageState extends State<HomePage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: <Widget>[
-                          _buildActionButton(label: '荷札を撮影して抽出 (GPT)', onPressed: _handleCaptureNifudaWithGpt, icon: Icons.camera_alt_outlined, isEnabled: _currentProjectFolderPath != null),
+                          _buildActionButton(label: '荷札を撮影して抽出 (GPT)', onPressed: _handleCaptureNifudaWithGpt, icon: Icons.camera_alt_outlined, isEnabled: _currentProjectFolderPath != null, _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '荷札を撮影して抽出 (Gemini)', onPressed: _handleCaptureNifudaWithGemini, icon: Icons.camera, isEnabled: _currentProjectFolderPath != null, isEmphasized: true),
+                          _buildActionButton(label: '荷札を撮影して抽出 (Gemini)', onPressed: _handleCaptureNifudaWithGemini, icon: Icons.camera, isEnabled: _currentProjectFolderPath != null, isEmphasized: true, _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '荷札リスト (${_nifudaData.length > 1 ? _nifudaData.length - 1 : 0}件)', onPressed: _handleShowNifudaList, icon: Icons.list_alt_rounded, isEnabled: _nifudaData.length > 1 && _currentProjectFolderPath != null),
+                          _buildActionButton(label: '荷札リスト (${_nifudaData.length > 1 ? _nifudaData.length - 1 : 0}件)', onPressed: _handleShowNifudaList, icon: Icons.list_alt_rounded, isEnabled: _nifudaData.length > 1 && _currentProjectFolderPath != null, _isLoading),
                           const SizedBox(height: 10),
-                          _buildCompanySelector(),
+                          _buildCompanySelector(projectState, projectNotifier, _companies, _isLoading),
                           const SizedBox(height: 10),
-                          // ★★★ 削除: 読込先フォルダ変更ボタンを削除 ★★★
-                          // _buildActionButton(label: '読込先フォルダ変更', onPressed: _handleChangeProductListPath, icon: Icons.settings_applications),
-                          // const SizedBox(height: 10),
-                          // ★★★ 変更: ボタンのテキストを「製品リストを撮影して抽出」に変更 ★★★
-                          _buildActionButton(label: '製品リストを撮影して抽出 (GPT)', onPressed: _handlePickProductListWithGpt, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null),
+                          _buildActionButton(label: '製品リストを撮影して抽出 (GPT)', onPressed: _handlePickProductListWithGpt, icon: Icons.image_search_rounded, isEnabled: _currentProjectFolderPath != null, _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '製品リストを撮影して抽出 (Gemini)', onPressed: _handlePickProductListWithGemini, icon: Icons.flash_on, isEnabled: _currentProjectFolderPath != null, isEmphasized: true),
+                          _buildActionButton(label: '製品リストを撮影して抽出 (Gemini)', onPressed: _handlePickProductListWithGemini, icon: Icons.flash_on, isEnabled: _currentProjectFolderPath != null, isEmphasized: true, _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '製品リスト (${_productListKariData.length > 1 ? _productListKariData.length - 1 : 0}件)', onPressed: _handleShowProductList, icon: Icons.inventory_2_outlined, isEnabled: _productListKariData.length > 1 && _currentProjectFolderPath != null),
+                          _buildActionButton(label: '製品リスト (${_productListKariData.length > 1 ? _productListKariData.length - 1 : 0}件)', onPressed: _handleShowProductList, icon: Icons.inventory_2_outlined, isEnabled: _productListKariData.length > 1 && _currentProjectFolderPath != null, _isLoading),
                           const SizedBox(height: 20),
-                          _buildMatchingPatternSelector(),
+                          _buildMatchingPatternSelector(projectState, projectNotifier, _matchingPatterns, _isLoading),
                           const SizedBox(height: 10),
-                          _buildActionButton(label: '照合を開始する', onPressed: _handleStartMatching, icon: Icons.compare_arrows_rounded, isEnabled: _nifudaData.length > 1 && _productListKariData.length > 1 && _currentProjectFolderPath != null, isEmphasized: true),
+                          _buildActionButton(label: '照合を開始する', onPressed: _handleStartMatching, icon: Icons.compare_arrows_rounded, isEnabled: _nifudaData.length > 1 && _productListKariData.length > 1 && _currentProjectFolderPath != null, isEmphasized: true, _isLoading),
                         ],
                       ),
                     ),
@@ -472,17 +355,22 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             
+            // ★★★ ShimmerによるローディングUIに変更 ★★★
             if (_isLoading)
               Container(
                 color: Colors.black.withOpacity(0.5),
-                child: const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(color: Colors.white),
-                      SizedBox(height: 16),
-                      Text('処理中です...', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                    ],
+                child: Center(
+                  child: Shimmer.fromColors(
+                    baseColor: Colors.white.withOpacity(0.7),
+                    highlightColor: Colors.white,
+                    child: const Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.flash_on, size: 50, color: Colors.white),
+                        SizedBox(height: 16),
+                        Text('AIが処理中です...', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
                   )
                 )
               ),
@@ -492,11 +380,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // ★★★ 追加: ステータス表示用のChipウィジェット ★★★
-  Widget _buildStatusChip() {
+  // --- UIヘルパー関数はConsumerWidgetのメソッドとして保持 ---
+  
+  Widget _buildStatusChip(String status) {
     Color color;
     IconData icon;
-    switch (_inspectionStatus) {
+    switch (status) {
       case STATUS_COMPLETED:
         color = Colors.green;
         icon = Icons.check_circle_outline;
@@ -514,8 +403,8 @@ class _HomePageState extends State<HomePage> {
 
     return Chip(
       label: Text(
-        _inspectionStatus,
-        style: TextStyle(
+        status,
+        style: const TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.bold,
           fontSize: 14,
@@ -527,10 +416,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildActionButton({
+  Widget _buildActionButton(
+    {
     required String label,
     required IconData icon,
     required VoidCallback? onPressed,
+    required bool isLoading,
     bool isEnabled = true,
     bool isEmphasized = false,
   }) {
@@ -549,14 +440,14 @@ class _HomePageState extends State<HomePage> {
     return ElevatedButton.icon(
       icon: Icon(icon, size: 18),
       label: Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 14.5), overflow: TextOverflow.ellipsis),
-      onPressed: (_isLoading) ? null : (isEnabled ? onPressed : null),
+      onPressed: (isLoading) ? null : (isEnabled ? onPressed : null),
       style: style.copyWith(
         minimumSize: MaterialStateProperty.all(const Size(double.infinity, 48)),
       ),
     );
   }
   
-  Widget _buildCompanySelector() {
+  Widget _buildCompanySelector(ProjectState state, ProjectNotifier notifier, List<String> companies, bool isLoading) {
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 12.0),
@@ -567,8 +458,8 @@ class _HomePageState extends State<HomePage> {
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: _selectedCompany,
-          items: _companies.map((String company) {
+          value: state.selectedCompany,
+          items: companies.map((String company) {
             return DropdownMenuItem<String>(
               value: company, 
               child: Text(
@@ -578,7 +469,7 @@ class _HomePageState extends State<HomePage> {
               )
             );
           }).toList(),
-          onChanged: _isLoading ? null : (String? newValue) => setState(() => _selectedCompany = newValue ?? _selectedCompany),
+          onChanged: isLoading ? null : (String? newValue) => notifier.updateSelection(company: newValue),
           icon: Icon(Icons.arrow_drop_down_rounded, color: Colors.indigo[700]),
           isDense: true,
           isExpanded: true,
@@ -587,7 +478,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildMatchingPatternSelector() {
+  Widget _buildMatchingPatternSelector(ProjectState state, ProjectNotifier notifier, List<String> matchingPatterns, bool isLoading) {
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 12.0),
@@ -598,8 +489,8 @@ class _HomePageState extends State<HomePage> {
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: _selectedMatchingPattern,
-          items: _matchingPatterns.map((String pattern) {
+          value: state.selectedMatchingPattern,
+          items: matchingPatterns.map((String pattern) {
             return DropdownMenuItem<String>(
               value: pattern,
               child: Text(
@@ -609,7 +500,7 @@ class _HomePageState extends State<HomePage> {
               )
             );
           }).toList(),
-          onChanged: _isLoading ? null : (String? newValue) => setState(() => _selectedMatchingPattern = newValue ?? _selectedMatchingPattern),
+          onChanged: isLoading ? null : (String? newValue) => notifier.updateSelection(matchingPattern: newValue),
           icon: Icon(Icons.arrow_drop_down_rounded, color: Colors.green[700]),
           isDense: true,
           isExpanded: true,
