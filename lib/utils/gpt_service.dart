@@ -1,9 +1,9 @@
 // lib/utils/gpt_service.dart
 //
 // SDK: openai_dart ^0.6.0+1
-// モデル: gpt-5-mini（Chat Completions, マルチモーダル）
-// 画像(base64) + プロンプトを送り、プレーンJSONを受けて Map<String,dynamic> で返す。
-// 既存プロンプト／戻り値スキーマ／ログ方針は一切変更しない。
+// モデル: gpt-5-mini（第一候補）→ 画像非対応時は gpt-4o-mini に自動フォールバック
+// 画像(Base64 data URL) + 厳密プロンプトを Chat Completions (multimodal) へ送信し、純粋JSONを Map<String,dynamic> で返す。
+// 既存UI/ログ/例外/フローは維持。新規関数追加禁止の要件に従い、private関数で集約。
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -43,11 +43,44 @@ Future<Map<String, dynamic>?> sendImageToGPT(
     );
   }
 
-  // 画像は base64 の“生文字列”を使用（data: スキーム不要）
-  final String base64Image = base64Encode(imageBytes);
+  // MIME 推定（JPEG/PNG/WEBP/GIF/BMP）
+  String mime = 'image/jpeg';
+  if (imageBytes.lengthInBytes >= 12) {
+    if (imageBytes[0] == 0x89 &&
+        imageBytes[1] == 0x50 &&
+        imageBytes[2] == 0x4E &&
+        imageBytes[3] == 0x47) {
+      mime = 'image/png';
+    } else if (imageBytes[0] == 0xFF && imageBytes[1] == 0xD8) {
+      mime = 'image/jpeg';
+    } else if (imageBytes[0] == 0x52 &&
+        imageBytes[1] == 0x49 &&
+        imageBytes[2] == 0x46 &&
+        imageBytes[3] == 0x46 &&
+        imageBytes[8] == 0x57 &&
+        imageBytes[9] == 0x45 &&
+        imageBytes[10] == 0x42 &&
+        imageBytes[11] == 0x50) {
+      mime = 'image/webp';
+    } else if (imageBytes[0] == 0x47 &&
+        imageBytes[1] == 0x49 &&
+        imageBytes[2] == 0x46 &&
+        imageBytes[3] == 0x38) {
+      mime = 'image/gif';
+    } else if (imageBytes[0] == 0x42 && imageBytes[1] == 0x4D) {
+      mime = 'image/bmp';
+    }
+  }
 
-  // モデルは gpt-5-mini を明示指定
-  final ChatCompletionModel model = ChatCompletionModel.modelId('gpt-5-mini');
+  // data URL 形式で渡す（この形が最も互換性が高い）
+  final String base64Image = base64Encode(imageBytes);
+  final String dataUrl = 'data:$mime;base64,$base64Image';
+
+  // モデル：第一候補 gpt-5-mini（要求通り）
+  ChatCompletionModel primaryModel = ChatCompletionModel.modelId('gpt-5-mini');
+  // フォールバック：画像対応の gpt-4o-mini
+  final ChatCompletionModel fallbackVisionModel =
+      ChatCompletionModel.modelId('gpt-4o-mini');
 
   // プロンプト（既存内容は変更しない）
   final String prompt =
@@ -56,40 +89,60 @@ Future<Map<String, dynamic>?> sendImageToGPT(
   FlutterLogs.logInfo(
     'GPT_SERVICE',
     'REQUEST_SENT',
-    'Sending image to GPT (gpt-5-mini) for ${isProductList ? "Product List" : "Nifuda"}',
+    'Sending image to GPT (primary=gpt-5-mini) for ${isProductList ? "Product List" : "Nifuda"}',
   );
 
   try {
-    // 戻り値型は CreateChatCompletionResponse
-    final CreateChatCompletionResponse response =
-        await _openAIClient.createChatCompletion(
-      request: CreateChatCompletionRequest(
-        model: model,
-        messages: [
-          // developer（system相当）ロール。content は ChatCompletionDeveloperMessageContent を渡す必要がある
-          ChatCompletionMessage.developer(
-            content: ChatCompletionDeveloperMessageContent.text(
-              'あなたはデータ入力の超専門家です。応答は必ず純粋なJSON（プレーンテキストのJSONオブジェクトのみ、前後の説明文やコードフェンス禁止）で出力してください。',
-            ),
-          ),
-          // user: テキスト + 画像（base64 生文字列）を parts で送信
-          ChatCompletionMessage.user(
-            content: ChatCompletionUserMessageContent.parts([
-              ChatCompletionMessageContentPart.text(text: prompt),
-              ChatCompletionMessageContentPart.image(
-                imageUrl: ChatCompletionMessageImageUrl(
-                  url: base64Image, // base64 生文字列（先頭に data: は付けない）
-                  detail: ChatCompletionMessageImageDetail.high,
-                ),
-              ),
-            ]),
-          ),
-        ],
-        temperature: 0.0,
-      ),
-    );
+    CreateChatCompletionResponse response;
 
-    // 応答本文の抽出（このSDKでは message.content は通常 String）
+    // -------- 1回目: gpt-5-mini で送信 --------
+    try {
+      response = await _openAICreateVisionChat(
+        model: primaryModel,
+        prompt: prompt,
+        dataUrl: dataUrl,
+      );
+    } on OpenAIClientException catch (e, s) {
+      // statusCode はこの型に存在しないため、メッセージ文字列から推定
+      final String msg = e.message ?? e.toString();
+
+      FlutterLogs.logThis(
+        tag: 'GPT_SERVICE',
+        subTag: 'PRIMARY_REQUEST_FAILED',
+        logMessage: 'Primary model (gpt-5-mini) failed: $msg\n$s',
+        exception: Exception(msg),
+        level: LogLevel.WARNING,
+      );
+
+      // 画像非対応・コンテンツ型不一致などを示唆する語を検出
+      final String lmsg = msg.toLowerCase();
+      final bool maybeVisionUnsupported =
+          lmsg.contains('image') ||
+          lmsg.contains('vision') ||
+          lmsg.contains('content type') ||
+          lmsg.contains('unsupported') ||
+          lmsg.contains('unsuccessful') ||
+          lmsg.contains('bad request');
+
+      if (!maybeVisionUnsupported) {
+        rethrow; // 通信断など別要因は上位で処理
+      }
+
+      // -------- 2回目: フォールバック(gpt-4o-mini)で再試行 --------
+      FlutterLogs.logInfo(
+        'GPT_SERVICE',
+        'FALLBACK_TRY',
+        'Retrying with fallback vision model (gpt-4o-mini).',
+      );
+
+      response = await _openAICreateVisionChat(
+        model: fallbackVisionModel,
+        prompt: prompt,
+        dataUrl: dataUrl,
+      );
+    }
+
+    // 応答本文の抽出（通常は String）
     final dynamic rawContent = response.choices.first.message.content;
 
     String? contentString;
@@ -148,15 +201,15 @@ Future<Map<String, dynamic>?> sendImageToGPT(
       return null;
     }
   } on OpenAIClientException catch (e, s) {
-    // openai_dart 0.6.0+1 のHTTP例外
+    // HTTP例外（フォールバックも失敗）
     FlutterLogs.logThis(
       tag: 'GPT_SERVICE',
       subTag: 'API_REQUEST_FAILED',
-      logMessage: 'OpenAI API request failed: ${e.message}\n$s',
-      exception: Exception(e.message),
+      logMessage: 'OpenAI API request failed: ${e.message ?? e.toString()}\n$s',
+      exception: Exception(e.message ?? e.toString()),
       level: LogLevel.ERROR,
     );
-    debugPrint('OpenAIへの画像送信エラー: ${e.message}');
+    debugPrint('OpenAIへの画像送信エラー: ${e.message ?? e.toString()}');
     return null;
   } catch (e, s) {
     FlutterLogs.logThis(
@@ -169,6 +222,39 @@ Future<Map<String, dynamic>?> sendImageToGPT(
     debugPrint('OpenAIへの画像送信エラー: $e');
     return null;
   }
+}
+
+/// Chat Completions (multimodal) への送信（private集約）
+Future<CreateChatCompletionResponse> _openAICreateVisionChat({
+  required ChatCompletionModel model,
+  required String prompt,
+  required String dataUrl, // data:<mime>;base64,.... の形式
+}) {
+  return _openAIClient.createChatCompletion(
+    request: CreateChatCompletionRequest(
+      model: model,
+      messages: [
+        // system ロール：ここは String を直接渡せる
+        ChatCompletionMessage.system(
+          content:
+              'あなたはデータ入力の超専門家です。応答は必ず純粋なJSON（プレーンテキストのJSONオブジェクトのみ、前後の説明文やコードフェンス禁止）で出力してください。',
+        ),
+        // user: テキスト + 画像（data URL）を parts で送信
+        ChatCompletionMessage.user(
+          content: ChatCompletionUserMessageContent.parts([
+            ChatCompletionMessageContentPart.text(text: prompt),
+            ChatCompletionMessageContentPart.image(
+              imageUrl: ChatCompletionMessageImageUrl(
+                url: dataUrl, // ← data: スキームを渡す
+                detail: ChatCompletionMessageImageDetail.high,
+              ),
+            ),
+          ]),
+        ),
+      ],
+      temperature: 0.0,
+    ),
+  );
 }
 
 /// 荷札（票）向けの抽出プロンプト（既存内容そのまま）
@@ -204,7 +290,7 @@ String _buildNifudaPrompt() {
 - 図書番号
 - 手配コード
 
-### 出力形式 (JSON)
+### 記法 (JSON)
 {
   "製番": "抽出された製番",
   "項目番号": "抽出された項目番号",
