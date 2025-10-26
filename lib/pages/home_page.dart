@@ -4,7 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart'; // ★ 追加
 import 'package:shimmer/shimmer.dart'; // ★ 追加: Shimmer
 import 'package:flutter_logs/flutter_logs.dart'; // ★ 追加
 import '../state/project_state.dart'; // ★ 追加: 状態管理
-import 'home_actions.dart';
+// ★ 修正: 定数名の衝突を避けるため、ステータス定数をhide
+import 'home_actions.dart' hide STATUS_PENDING, STATUS_IN_PROGRESS, STATUS_COMPLETED, BASE_PROJECT_DIR;
 import '../widgets/home_widgets.dart';
 import '../widgets/custom_snackbar.dart';
 import 'dart:io'; 
@@ -396,14 +397,17 @@ class HomePage extends ConsumerWidget {
     Color color;
     IconData icon;
     switch (status) {
+      // ★ 修正: project_state.dartから定数を参照
       case STATUS_COMPLETED:
         color = Colors.green;
         icon = Icons.check_circle_outline;
         break;
+      // ★ 修正: project_state.dartから定数を参照
       case STATUS_IN_PROGRESS:
         color = Colors.orange;
         icon = Icons.pending_actions;
         break;
+      // ★ 修正: project_state.dartから定数を参照
       case STATUS_PENDING:
       default:
         color = Colors.blueGrey;

@@ -26,6 +26,10 @@ class ProductListMaskPreviewPage extends StatefulWidget {
       _ProductListMaskPreviewPageState();
 }
 
+// 戻り値の型定義: 1枚目の画像バイトと、適用された動的マスクのリスト
+typedef MaskPreviewResult = ({Uint8List imageBytes, List<Rect> dynamicMasks});
+
+
 class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage> {
   late img.Image _editableImage;
   late Uint8List _displayImageBytes;
@@ -34,6 +38,9 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   bool _isLoading = false;
   final List<img.Image> _undoStack = [];
   img.Image? _initialImageState;
+  
+  // ★ 修正点: 動的マスクのRect情報を保持するリスト
+  final List<Rect> _dynamicMaskRects = [];
 
   @override
   void initState() {
@@ -45,7 +52,8 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     setState(() => _isLoading = true);
     try {
       final decodedImage = img.decodeImage(widget.previewImageBytes)!;
-      _initialImageState = img.Image.from(decodedImage); // Undo用に初期状態を保存
+      // Undo用に初期状態を保存
+      _initialImageState = img.Image.from(decodedImage); 
       _editableImage = decodedImage;
 
       if (widget.maskTemplate == 't') {
@@ -69,6 +77,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   void _onPanStart(DragStartDetails details) {
     if (widget.maskTemplate != 'dynamic') return;
     setState(() {
+      // ローカル座標で描画開始
       _currentDrawingRect = Rect.fromPoints(details.localPosition, details.localPosition);
     });
   }
@@ -84,6 +93,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   void _onPanEnd(DragEndDetails details) {
     if (widget.maskTemplate != 'dynamic' || _currentDrawingRect == null) return;
 
+    // 描画が小さすぎる場合はキャンセル
     if (_currentDrawingRect!.width.abs() < 5 || _currentDrawingRect!.height.abs() < 5) {
       setState(() => _currentDrawingRect = null);
       return;
@@ -96,6 +106,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     final Size containerSize = containerBox.size;
     final Size imagePixelSize = Size(_editableImage.width.toDouble(), _editableImage.height.toDouble());
 
+    // 表示サイズ計算
     final FittedSizes fittedSizes = applyBoxFit(BoxFit.contain, imagePixelSize, containerSize);
     final Size imageDisplaySize = fittedSizes.destination;
     final Rect imageDisplayRect = Rect.fromLTWH(
@@ -105,6 +116,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       imageDisplaySize.height,
     );
 
+    // 描画されたRectと表示領域の共通部分を取得
     final Rect intersection = _currentDrawingRect!.intersect(imageDisplayRect);
 
     if (intersection.width <= 0 || intersection.height <= 0) {
@@ -112,17 +124,22 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       return;
     }
 
+    // スクリーン座標から画像ピクセル座標へのスケールとオフセット
     final double scaleX = imagePixelSize.width / imageDisplaySize.width;
     final double scaleY = imagePixelSize.height / imageDisplaySize.height;
 
+    // 画像ピクセル座標でのRectを計算
     final Rect rectOnImage = Rect.fromLTRB(
       (intersection.left - imageDisplayRect.left) * scaleX,
       (intersection.top - imageDisplayRect.top) * scaleY,
       (intersection.right - imageDisplayRect.left) * scaleX,
       (intersection.bottom - imageDisplayRect.top) * scaleY,
     );
-
+    
+    // Undoスタックに現在の状態を保存
     _undoStack.add(img.Image.from(_editableImage));
+    
+    // 画像にマスクを適用
     img.fillRect(
       _editableImage,
       x1: rectOnImage.left.toInt(),
@@ -131,6 +148,9 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       y2: rectOnImage.bottom.toInt(),
       color: img.ColorRgb8(0, 0, 0),
     );
+    
+    // ★ 修正点: 適用したRectをリストに追加 (後の画像にも適用するため)
+    _dynamicMaskRects.add(rectOnImage);
 
     setState(() {
       _currentDrawingRect = null;
@@ -142,6 +162,10 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     if (_undoStack.isEmpty) return;
     setState(() {
       _editableImage = _undoStack.removeLast();
+      // ★ 修正点: Rectリストからも末尾を削除
+      if(_dynamicMaskRects.isNotEmpty) {
+        _dynamicMaskRects.removeLast();
+      }
       _updateDisplayImage();
     });
   }
@@ -149,6 +173,8 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   void _reset() {
     setState(() {
       _undoStack.clear();
+      // ★ 修正点: Rectリストをクリア
+      _dynamicMaskRects.clear(); 
       if (_initialImageState != null) {
          _editableImage = img.Image.from(_initialImageState!);
          if (widget.maskTemplate == 't') {
@@ -160,15 +186,13 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   }
 
   void _confirmAndPop() {
-    Navigator.pop(context, _displayImageBytes);
+    // ★ 修正点: 戻り値の型を変更
+    Navigator.pop(context, (imageBytes: _displayImageBytes, dynamicMasks: _dynamicMaskRects));
   }
 
   Widget _buildEditor() {
     return Container(
       key: _imageContainerKey,
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-      // ★ 修正点：画像の余白部分の背景色を白に変更
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
       color: Colors.white,
       child: Stack(
         fit: StackFit.expand,
@@ -179,6 +203,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
             gaplessPlayback: true,
           ),
           CustomPaint(
+            // ユーザーがドラッグ中のRectを表示
             painter: MaskPainter(currentDrawingRect: _currentDrawingRect),
           ),
           GestureDetector(
@@ -195,11 +220,13 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   @override
   Widget build(BuildContext context) {
     bool hasChanges = _undoStack.isNotEmpty;
+    // T社・マスクなしの場合は編集不可
+    bool isEditable = widget.maskTemplate == 'dynamic';
 
     return Scaffold(
       appBar: AppBar(
         title: Text('マスクプレビュー (${widget.imageIndex} / ${widget.totalImages})'),
-        actions: widget.maskTemplate == 'dynamic'
+        actions: isEditable
             ? [
                 IconButton(
                   icon: const Icon(Icons.undo),
@@ -233,6 +260,7 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.cancel_outlined),
                       label: const Text('この画像を破棄'),
+                      // ★ 修正点: 戻り値の型を変更 (nullを返す)
                       onPressed: () => Navigator.pop(context, null),
                       style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red[600],

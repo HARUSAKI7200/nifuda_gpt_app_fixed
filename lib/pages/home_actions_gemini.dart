@@ -26,6 +26,9 @@ import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
 import 'directory_image_picker_page.dart';
+import 'streaming_progress_dialog.dart';
+
+// --- Local Helper Functions (Duplicated for consistency) ---
 
 void _logError(String tag, String subTag, Object error, StackTrace? stack) {
   FlutterLogs.logThis(
@@ -48,7 +51,7 @@ void _showLoadingDialog(BuildContext context, String message) {
           children: [
             const CircularProgressIndicator(),
             const SizedBox(width: 20),
-            Text(message),
+            Flexible(child: Text(message)),
           ],
         ),
       );
@@ -112,6 +115,8 @@ img.Image _applySharpeningFilter(img.Image image) {
   );
 }
 
+// --- Nifuda Action (No change in flow) ---
+
 Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(BuildContext context, String projectFolderPath) async {
   final List<Map<String, dynamic>>? allAiResults =
       await Navigator.push<List<Map<String, dynamic>>>(
@@ -127,12 +132,11 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
   if (allAiResults == null || allAiResults.isEmpty) {
     if (context.mounted) {
       showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
-      // ★ 再修正: type -> type (そのまま)
       FlutterLogs.logThis(
         tag: 'OCR_ACTION',
         subTag: 'NIFUDA_GEMINI_CANCEL',
         logMessage: 'Nifuda Gemini OCR was cancelled by user.',
-        level: LogLevel.WARNING, // ★ 正: type
+        level: LogLevel.WARNING,
       );
     }
     return null;
@@ -175,12 +179,11 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
                 ));
         if (proceed != true) {
            if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
-           // ★ 再修正: type -> type (そのまま)
            FlutterLogs.logThis(
              tag: 'OCR_ACTION',
              subTag: 'NIFUDA_GEMINI_CONFIRM_INTERRUPTED',
              logMessage: 'Nifuda Gemini confirmation interrupted after $imageIndex images.',
-             level: LogLevel.WARNING, // ★ 正: type
+             level: LogLevel.WARNING,
            );
            return allConfirmedNifudaRows.isNotEmpty ? allConfirmedNifudaRows : null;
         }
@@ -197,6 +200,8 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionWithGemini(Build
     return null;
   }
 }
+
+// --- Product List Action (Streaming & Dynamic Masking Implemented) ---
 
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
   BuildContext context,
@@ -219,6 +224,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
     if (context.mounted) showCustomSnackBar(context, '製品リストの撮影がキャンセルされました。');
     return null;
   }
+
+  // 1. 画像の読み込みと前処理 (リサイズ/シャープネス)
   List<Uint8List> rawImageBytesList = [];
   const int PERSPECTIVE_WIDTH = 1920;
   try {
@@ -240,6 +247,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
       if(context.mounted) _showErrorDialog(context, '画像処理エラー', '有効な画像が読み込めませんでした。');
       return null;
   }
+
+  // 2. マスクテンプレートの決定
   String template;
   switch (selectedCompany) {
     case 'T社': template = 't'; break;
@@ -247,61 +256,129 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
     case '動的マスク処理': template = 'dynamic'; break;
     default: if(context.mounted) _showErrorDialog(context, 'テンプレートエラー', '無効な会社名が選択されました。'); return null;
   }
+  
+  // 3. マスクプレビューと動的マスク情報の取得
   final Uint8List firstImageBytes = rawImageBytesList.first;
   if (!context.mounted) return null;
   _showLoadingDialog(context, 'プレビューを準備中...');
-  if(context.mounted) _hideLoadingDialog(context);
-  final Uint8List? finalMaskedFirstImageBytes = await Navigator.push<Uint8List>(
-    context, MaterialPageRoute(builder: (_) => ProductListMaskPreviewPage(previewImageBytes: firstImageBytes, maskTemplate: template, imageIndex: 1, totalImages: rawImageBytesList.length)),
+  _hideLoadingDialog(context);
+
+  // ★ 修正: 戻り値の型を変更
+  final MaskPreviewResult? previewResult = await Navigator.push<MaskPreviewResult>(
+    context, MaterialPageRoute(builder: (_) => ProductListMaskPreviewPage(
+      previewImageBytes: firstImageBytes, 
+      maskTemplate: template, 
+      imageIndex: 1, 
+      totalImages: rawImageBytesList.length
+    )),
   );
-  if (finalMaskedFirstImageBytes == null) {
+  
+  if (previewResult == null) {
       if(context.mounted) showCustomSnackBar(context, 'マスク確認が破棄されたため、OCR処理を中断しました。');
       return null;
   }
-  List<Uint8List> finalImagesToSend = [finalMaskedFirstImageBytes];
+
+  // ★ 修正: 動的マスクのRectリストを取得
+  final List<Rect> dynamicMasks = previewResult.dynamicMasks;
+  
+  // 4. AIへ送信する最終画像の準備
+  List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
+  
   for (int i = 1; i < rawImageBytesList.length; i++) {
     if(context.mounted) _showLoadingDialog(context, '画像を準備中... (${i + 1}/${rawImageBytesList.length})');
     final image = img.decodeImage(rawImageBytesList[i])!;
+    
+    img.Image maskedImage = image;
+    
     if (template == 't') {
-        final maskedImage = applyMaskToImage(image, template: 't');
-        finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
+        // T社固定マスクを適用
+        maskedImage = applyMaskToImage(image, template: 't');
+    } else if (template == 'dynamic' && dynamicMasks.isNotEmpty) {
+        // ★ 修正: 動的マスクを2枚目以降にも適用
+        maskedImage = applyMaskToImage(image, template: 'dynamic', dynamicMaskRects: dynamicMasks);
     } else {
-        finalImagesToSend.add(rawImageBytesList[i]);
+        maskedImage = image;
     }
+    
+    finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
   }
+  
   if(context.mounted) _hideLoadingDialog(context);
   if (finalImagesToSend.isEmpty) {
     if(context.mounted) showCustomSnackBar(context, '処理対象の画像がありませんでした。');
     return null;
   }
-  if (!context.mounted) return null;
-  showCustomSnackBar(context, '${finalImagesToSend.length} 枚の画像をGeminiへ送信依頼しました...');
-  FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_GEMINI_START', '${finalImagesToSend.length} images sent to Gemini.');
   
-  // 修正: SDKを使用するため、ローカルの http.Client の初期化とクローズを削除します。
-  // final client = http.Client(); // 削除
+  // 5. ストリーミングリクエストの実行
+  List<Map<String, dynamic>?> allAiRawResults = [];
   
-  List<Future<Map<String, dynamic>?>> aiResultFutures = [];
-  for (final imageBytes in finalImagesToSend) {
-    // 修正: client: client 引数を削除します。
-    final future = sendImageToGemini(imageBytes, isProductList: true, company: selectedCompany)
-        .catchError((e, s) { _logError('GEMINI_API', 'Gemini API call failed', e, s); return null; });
-    aiResultFutures.add(future);
+  for (int i = 0; i < finalImagesToSend.length; i++) {
+      if (!context.mounted) break;
+      final imageBytes = finalImagesToSend[i];
+      
+      // ★ 修正: ストリーミング関数を使用
+      final Stream<String> stream = sendImageToGeminiStream(imageBytes, company: selectedCompany);
+      
+      final String streamTitle = '製品リスト抽出中 (Gemini) (${i + 1} / ${finalImagesToSend.length})';
+      
+      // ★ 修正: ストリーミングダイアログを表示
+      final String? rawJsonResponse = await StreamingProgressDialog.show(
+        context: context, 
+        stream: stream, 
+        title: streamTitle, 
+        serviceTag: 'GEMINI_SERVICE'
+      );
+      
+      if (rawJsonResponse == null) {
+          _logError('OCR_ACTION', 'PRODUCT_LIST_GEMINI_STREAM_FAIL', 'Stream failed or cancelled for image ${i + 1}', null);
+          if (context.mounted) _showErrorDialog(context, '抽出エラー', '${i + 1}枚目の画像の抽出に失敗しました。処理を中断します。');
+          return allAiRawResults.isNotEmpty ? await _processRawProductResults(context, allAiRawResults) : null;
+      }
+      
+      // JSONのパース
+      String? stripped; // ★ 修正: strippedをtry/catch外で定義
+      try {
+          // Gemini service内の _stripCodeFences を再実装（ここでは一旦簡易的に）
+          stripped = rawJsonResponse.trim();
+          if (stripped.startsWith('```')) {
+            stripped = stripped
+                .replaceFirst(RegExp(r'^```(json)?', caseSensitive: false), '')
+                .replaceFirst(RegExp(r'```$'), '')
+                .trim();
+          }
+          final Map<String, dynamic> decoded = jsonDecode(stripped) as Map<String, dynamic>;
+          allAiRawResults.add(decoded);
+          FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_GEMINI_PARSE_OK', 'Successfully parsed response for image ${i + 1}');
+      } catch (e, s) {
+          // ★ 修正: strippedがnullでないことを確認してからログに出力
+          _logError('OCR_ACTION', 'PRODUCT_LIST_GEMINI_PARSE_FAIL', 'Failed to parse JSON for image ${i + 1}: ${stripped ?? rawJsonResponse}', s);
+          allAiRawResults.add(null);
+      }
   }
-  final List<Map<String, dynamic>?> allAiRawResults = await Future.wait(aiResultFutures);
-  // client.close(); // 削除
-  
+
+  // 6. 結果の統合と確認画面への遷移
+  if (!context.mounted) return null;
+  return _processRawProductResults(context, allAiRawResults);
+}
+
+// ★ 修正: 戻り値の型を Future に変更し、asyncを追加
+Future<List<List<String>>?> _processRawProductResults(BuildContext context, List<Map<String, dynamic>?> allAiRawResults) async {
   List<Map<String, String>> allExtractedProductRows = [];
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
+  
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {
         final List<dynamic> productListRaw = result['products'];
-        String commonOrderNo = result['commonOrderNo']?.toString() ?? '';
+        // T社リストの場合、commonOrderNoを取得
+        String commonOrderNo = result['commonOrderNo']?.toString() ?? ''; 
+        
         for (final item in productListRaw) {
           if (item is Map) {
             Map<String, String> row = {};
             final String remarks = item['備考']?.toString() ?? '';
             String finalOrderNo = commonOrderNo;
+            
+            // ORDER No. + 備考（T社特有のロジック）
             if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
               final lastSeparatorIndex = commonOrderNo.lastIndexOf(RegExp(r'[\s-]'));
               if (lastSeparatorIndex != -1) {
@@ -311,6 +388,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
                 finalOrderNo = '$commonOrderNo $remarks';
               }
             }
+            
             for (String field in expectedProductFields) {
               row[field] = (field == 'ORDER No.') ? finalOrderNo : item[field]?.toString() ?? '';
             }
@@ -318,20 +396,13 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
           }
         }
       } else {
-        // ★ 再修正: type -> type (そのまま)
-        FlutterLogs.logThis(
-          tag: 'OCR_ACTION',
-          subTag: 'PRODUCT_LIST_GEMINI_PARSE_FAIL',
-          logMessage: 'Gemini response structure unexpected.',
-          level: LogLevel.WARNING, // ★ 正: type
-        );
-        debugPrint('製品リストの解析に失敗した応答がありました (予期せぬ形式)。');
+        // パースエラーは既にログ済み
       }
   }
-  if (!context.mounted) return null;
+
   if (allExtractedProductRows.isNotEmpty) {
       FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_GEMINI_CONFIRM', '${allExtractedProductRows.length} rows extracted by Gemini for confirmation.');
-      return await Navigator.push<List<List<String>>>(
+      return Navigator.push<List<List<String>>>(
         context, MaterialPageRoute(builder: (_) => ProductListOcrConfirmPage(extractedProductRows: allExtractedProductRows)),
       );
   } else {

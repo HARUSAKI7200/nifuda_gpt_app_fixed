@@ -1,12 +1,8 @@
 // lib/utils/gemini_service.dart
 //
 // 修正方針：
-// - プロンプト本文は一字一句変更せずそのまま使用（既存スキーマ厳守、項目追加なし）
-// - google_generative_ai 0.4.x 系の仕様に合わせて Content('user', [...]) で構築
-// - GenerationConfig(responseMimeType: 'application/json') で JSON 出力を固定
-// - 画像MIMEはヘッダから推定（jpeg/png/webp/gif/bmp）
-// - 応答が ```json で囲まれても JSON として正しくパース（その場で除去。新規関数は作らない）
-// - 例外/ログは既存運用に合わせて FlutterLogs で記録
+// - プロンプト/ユーティリティは、共通化が拒否されたためファイル内で定義を継続
+// - ProductList抽出はストリーミング (generateContentStream) に変更
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -15,162 +11,41 @@ import 'package:flutter_logs/flutter_logs.dart';
 import 'package:http/http.dart' as http; 
 import 'package:google_generative_ai/google_generative_ai.dart'; 
 
-Future<Map<String, dynamic>?> sendImageToGemini( 
-  Uint8List imageBytes, {
-  required bool isProductList,
-  required String company,
-  http.Client? client, // 互換性維持のため残す
-}) async {
-  const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
-  const modelName = 'gemini-2.5-flash';
+const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
+const modelName = 'gemini-2.5-flash';
 
-  if (geminiApiKey.isEmpty) {
-    FlutterLogs.logThis(
-      tag: 'GEMINI_SERVICE',
-      subTag: 'API_KEY_MISSING',
-      logMessage: 'Google AI APIキーが設定されていません。--dart-define=GEMINI_API_KEY=YOUR_KEY の形式で実行してください。',
-      level: LogLevel.SEVERE,
-    );
-    throw Exception('Google AI APIキーが設定されていません。--dart-define=GEMINI_API_KEY=YOUR_KEY の形式で実行してください。');
-  }
+// --- Local Helper Functions (Duplicated for consistency) ---
 
-  // 1. モデルクライアントの初期化 (APIキーを使用)
-  final model = GenerativeModel(
-    model: modelName, 
-    apiKey: geminiApiKey,
-  );
-  
-  // 2. プロンプトの構築（本文は変更しない）
-  final prompt = isProductList ? _buildProductListPrompt(company) : _buildNifudaPrompt();
-  
-  // 3. コンテンツの構築（画像MIMEはヘッダから推定して DataPart に設定）
+// Uint8ListからMIMEタイプを推定する (重複)
+String _guessMimeType(Uint8List imageBytes) {
   String mime = 'image/jpeg';
   if (imageBytes.lengthInBytes >= 12) {
-    // PNG
-    if (imageBytes[0] == 0x89 &&
-        imageBytes[1] == 0x50 &&
-        imageBytes[2] == 0x4E &&
-        imageBytes[3] == 0x47) {
+    if (imageBytes[0] == 0x89 && imageBytes[1] == 0x50 && imageBytes[2] == 0x4E && imageBytes[3] == 0x47) {
       mime = 'image/png';
-    }
-    // JPEG
-    else if (imageBytes[0] == 0xFF && imageBytes[1] == 0xD8) {
+    } else if (imageBytes[0] == 0xFF && imageBytes[1] == 0xD8) {
       mime = 'image/jpeg';
-    }
-    // WEBP (RIFF....WEBP)
-    else if (imageBytes[0] == 0x52 &&
-        imageBytes[1] == 0x49 &&
-        imageBytes[2] == 0x46 &&
-        imageBytes[3] == 0x46 &&
-        imageBytes[8] == 0x57 &&
-        imageBytes[9] == 0x45 &&
-        imageBytes[10] == 0x42 &&
-        imageBytes[11] == 0x50) {
+    } else if (imageBytes[0] == 0x52 && imageBytes[1] == 0x49 && imageBytes[2] == 0x46 && imageBytes[3] == 0x46 && imageBytes[8] == 0x57 && imageBytes[9] == 0x45 && imageBytes[10] == 0x42 && imageBytes[11] == 0x50) {
       mime = 'image/webp';
-    }
-    // GIF
-    else if (imageBytes[0] == 0x47 &&
-        imageBytes[1] == 0x49 &&
-        imageBytes[2] == 0x46 &&
-        imageBytes[3] == 0x38) {
+    } else if (imageBytes[0] == 0x47 && imageBytes[1] == 0x49 && imageBytes[2] == 0x46 && imageBytes[3] == 0x38) {
       mime = 'image/gif';
-    }
-    // BMP
-    else if (imageBytes[0] == 0x42 && imageBytes[1] == 0x4D) {
+    } else if (imageBytes[0] == 0x42 && imageBytes[1] == 0x4D) {
       mime = 'image/bmp';
     }
   }
-
-  final imagePart = DataPart(mime, imageBytes);
-  final textPart = TextPart(prompt);
-  
-  // 修正: google_generative_ai 0.4.7 の Content コンストラクタは role (位置引数) が必要
-  final contents = [
-    Content('user', [ // role に 'user' を指定
-      textPart,
-      imagePart,
-    ]),
-  ];
-
-  // 修正: GenerationConfig を使用（JSON出力を固定）
-  final config = GenerationConfig(
-    responseMimeType: 'application/json',
-    // 必要に応じて下記を使う場合は追加（ここではプロンプト準拠優先のため未設定）
-    // temperature: 0.0,
-    // maxOutputTokens: 2048,
-  );
-
-  FlutterLogs.logInfo('GEMINI_SERVICE', 'REQUEST_SENT', 'Sending image to Gemini for ${isProductList ? "Product List" : "Nifuda"}');
-
-  try {
-    // 5. APIリクエストの実行
-    final response = await model.generateContent(
-      contents, 
-      // 修正: config パラメータは generationConfig に修正 (google_generative_ai 0.4.7 の仕様)
-      generationConfig: config, 
-    );
-
-    // 6. 応答の検証と解析
-    String? contentString = response.text;
-
-    if (contentString == null || contentString.trim().isEmpty) {
-      FlutterLogs.logThis(
-        tag: 'GEMINI_SERVICE',
-        subTag: 'EMPTY_RESPONSE',
-        logMessage: 'Gemini returned empty content.',
-        level: LogLevel.WARNING,
-      );
-      return null;
-    }
-
-    // モデルが誤って ```json などで囲って返すケースへの耐性（プロンプトはJSONのみ要求だが念のため）
-    final trimmed = contentString.trim();
-    if (trimmed.startsWith('```')) {
-      // 先頭の ```json / ``` を除去
-      contentString = trimmed
-          .replaceFirst(RegExp(r'^```(json)?', caseSensitive: false), '')
-          .replaceFirst(RegExp(r'```$'), '')
-          .trim();
-    }
-
-    try {
-      if (kDebugMode) print('Gemini Parsed Content String: $contentString');
-      final decoded = jsonDecode(contentString) as Map<String, dynamic>;
-      FlutterLogs.logInfo('GEMINI_SERVICE', 'PARSE_SUCCESS', 'Successfully parsed Gemini JSON response.');
-      return decoded;
-    } catch (e, s) {
-      FlutterLogs.logThis(
-        tag: 'GEMINI_SERVICE',
-        subTag: 'JSON_PARSE_FAILED',
-        logMessage: 'Failed to parse Gemini JSON response: $contentString\n$s',
-        exception: (e is Exception) ? e : Exception(e.toString()),
-        level: LogLevel.ERROR,
-      );
-      return null;
-    }
-  } on GenerativeAIException catch (e, s) {
-    FlutterLogs.logThis(
-      tag: 'GEMINI_SERVICE',
-      subTag: 'API_REQUEST_FAILED',
-      logMessage: 'Gemini API request failed: ${e.message}\n$s',
-      exception: Exception(e.message),
-      level: LogLevel.ERROR,
-    );
-    debugPrint('Geminiへの画像送信エラー: ${e.message}');
-    return null;
-  } catch (e, s) {
-    FlutterLogs.logThis(
-      tag: 'GEMINI_SERVICE',
-      subTag: 'UNEXPECTED_ERROR',
-      logMessage: 'Gemini image submission failed.\n$s',
-      exception: (e is Exception) ? e : Exception(e.toString()),
-      level: LogLevel.ERROR,
-    );
-    debugPrint('Geminiへの画像送信エラー: $e');
-    return null;
-  }
+  return mime;
 }
 
+// コードフェンス除去（```json ... ``` → 素のJSON） (重複)
+String _stripCodeFences(String s) {
+  final fence = RegExp(r'^```(?:json)?\s*([\s\S]*?)\s*```$', multiLine: true);
+  final m = fence.firstMatch(s.trim());
+  if (m != null && m.groupCount >= 1) {
+    return m.group(1) ?? s;
+  }
+  return s;
+}
+
+// 荷札（Nifuda）抽出プロンプト (重複)
 String _buildNifudaPrompt() {
   return '''
 あなたは、かすれたり不鮮明な荷札の画像を完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
@@ -217,6 +92,7 @@ String _buildNifudaPrompt() {
 ''';
 }
 
+// 製品リスト（Product List）抽出プロンプト (重複)
 String _buildProductListPrompt(String company) {
   final fieldsForPrompt = (company == 'TMEIC')
       ? '["ITEM OF SPARE", "品名記号", "形格", "製品コード番号", "注文数", "記事", "備考"]'
@@ -263,4 +139,165 @@ $fieldsForPrompt
   ]
 }
 ''';
+}
+
+// --- Main Functions ---
+
+/// Gemini APIクライアントを返す
+GenerativeModel _getGeminiClient() {
+  if (geminiApiKey.isEmpty) {
+    FlutterLogs.logThis(
+      tag: 'GEMINI_SERVICE',
+      subTag: 'API_KEY_MISSING',
+      logMessage: 'Google AI APIキーが設定されていません。',
+      level: LogLevel.SEVERE,
+    );
+    throw Exception('Google AI APIキーが設定されていません。');
+  }
+  return GenerativeModel(
+    model: modelName, 
+    apiKey: geminiApiKey,
+  );
+}
+
+/// 荷札抽出用のメイン関数 (非ストリーミング)
+Future<Map<String, dynamic>?> sendImageToGemini( 
+  Uint8List imageBytes, {
+  required bool isProductList,
+  required String company,
+  http.Client? client, // 互換性維持のため残す
+}) async {
+  // isProductList は home_actions_gemini.dart から常に false で呼ばれる想定
+  final model = _getGeminiClient();
+  final prompt = _buildNifudaPrompt();
+  
+  final mime = _guessMimeType(imageBytes);
+  final imagePart = DataPart(mime, imageBytes);
+  final textPart = TextPart(prompt);
+  
+  final contents = [
+    Content('user', [
+      textPart,
+      imagePart,
+    ]),
+  ];
+
+  final config = GenerationConfig(
+    responseMimeType: 'application/json',
+  );
+
+  FlutterLogs.logInfo('GEMINI_SERVICE', 'REQUEST_SENT', 'Sending image to Gemini for Nifuda');
+
+  try {
+    final response = await model.generateContent(
+      contents, 
+      generationConfig: config, 
+    );
+
+    String? contentString = response.text;
+    if (contentString == null || contentString.trim().isEmpty) {
+      FlutterLogs.logThis(
+        tag: 'GEMINI_SERVICE',
+        subTag: 'EMPTY_RESPONSE',
+        logMessage: 'Gemini returned empty content.',
+        level: LogLevel.WARNING,
+      );
+      return null;
+    }
+
+    contentString = _stripCodeFences(contentString).trim();
+
+    try {
+      final decoded = jsonDecode(contentString) as Map<String, dynamic>;
+      FlutterLogs.logInfo('GEMINI_SERVICE', 'PARSE_SUCCESS', 'Successfully parsed Gemini JSON response.');
+      return decoded;
+    } catch (e, s) {
+      FlutterLogs.logThis(
+        tag: 'GEMINI_SERVICE',
+        subTag: 'JSON_PARSE_FAILED',
+        logMessage: 'Failed to parse Gemini JSON response: $contentString\n$s',
+        exception: (e is Exception) ? e : Exception(e.toString()),
+        level: LogLevel.ERROR,
+      );
+      return null;
+    }
+  } on GenerativeAIException catch (e, s) {
+    FlutterLogs.logThis(
+      tag: 'GEMINI_SERVICE',
+      subTag: 'API_REQUEST_FAILED',
+      logMessage: 'Gemini API request failed: ${e.message}\n$s',
+      exception: Exception(e.message),
+      level: LogLevel.ERROR,
+    );
+    if (kDebugMode) debugPrint('Geminiへの画像送信エラー: ${e.message}');
+    return null;
+  } catch (e, s) {
+    FlutterLogs.logThis(
+      tag: 'GEMINI_SERVICE',
+      subTag: 'UNEXPECTED_ERROR',
+      logMessage: 'Gemini image submission failed.\n$s',
+      exception: (e is Exception) ? e : Exception(e.toString()),
+      level: LogLevel.ERROR,
+    );
+    if (kDebugMode) debugPrint('Geminiへの画像送信エラー: $e');
+    return null;
+  }
+}
+
+/// 製品リスト抽出用のストリーミング関数 (ストリーミング)
+Stream<String> sendImageToGeminiStream(
+  Uint8List imageBytes, {
+  required String company,
+}) async* {
+  final model = _getGeminiClient();
+  final prompt = _buildProductListPrompt(company);
+  
+  final mime = _guessMimeType(imageBytes);
+  final imagePart = DataPart(mime, imageBytes);
+  final textPart = TextPart(prompt);
+  
+  final contents = [
+    Content('user', [
+      textPart,
+      imagePart,
+    ]),
+  ];
+
+  final config = GenerationConfig(
+    responseMimeType: 'application/json',
+  );
+
+  FlutterLogs.logInfo('GEMINI_SERVICE', 'STREAM_REQUEST_SENT', 'Sending image to Gemini Stream for Product List');
+
+  try {
+    final responseStream = model.generateContentStream(
+      contents, 
+      generationConfig: config, 
+    );
+
+    await for (final chunk in responseStream) {
+      if (chunk.text != null) {
+        yield chunk.text!; // テキストチャンクをそのまま流す
+      }
+    }
+  } on GenerativeAIException catch (e, s) {
+    // ストリームの外部でキャッチされるように、エラーを再スロー
+    FlutterLogs.logThis(
+      tag: 'GEMINI_SERVICE',
+      subTag: 'STREAM_API_REQUEST_FAILED',
+      logMessage: 'Gemini API stream request failed: ${e.message}',
+      exception: Exception(e.message),
+      level: LogLevel.ERROR,
+    );
+    throw e;
+  } catch (e, s) {
+    FlutterLogs.logThis(
+      tag: 'GEMINI_SERVICE',
+      subTag: 'STREAM_UNEXPECTED_ERROR',
+      logMessage: 'Gemini image stream submission failed.\n$s',
+      exception: (e is Exception) ? e : Exception(e.toString()),
+      level: LogLevel.ERROR,
+    );
+    throw e;
+  }
 }
