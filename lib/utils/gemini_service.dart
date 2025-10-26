@@ -1,4 +1,12 @@
 // lib/utils/gemini_service.dart
+//
+// 修正方針：
+// - プロンプト本文は一字一句変更せずそのまま使用（既存スキーマ厳守、項目追加なし）
+// - google_generative_ai 0.4.x 系の仕様に合わせて Content('user', [...]) で構築
+// - GenerationConfig(responseMimeType: 'application/json') で JSON 出力を固定
+// - 画像MIMEはヘッダから推定（jpeg/png/webp/gif/bmp）
+// - 応答が ```json で囲まれても JSON として正しくパース（その場で除去。新規関数は作らない）
+// - 例外/ログは既存運用に合わせて FlutterLogs で記録
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -6,7 +14,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_logs/flutter_logs.dart';
 import 'package:http/http.dart' as http; 
 import 'package:google_generative_ai/google_generative_ai.dart'; 
-
 
 Future<Map<String, dynamic>?> sendImageToGemini( 
   Uint8List imageBytes, {
@@ -33,24 +40,64 @@ Future<Map<String, dynamic>?> sendImageToGemini(
     apiKey: geminiApiKey,
   );
   
-  // 2. プロンプトの構築
+  // 2. プロンプトの構築（本文は変更しない）
   final prompt = isProductList ? _buildProductListPrompt(company) : _buildNifudaPrompt();
   
-  // 3. コンテンツの構築 
-  final imagePart = DataPart('image/jpeg', imageBytes);
+  // 3. コンテンツの構築（画像MIMEはヘッダから推定して DataPart に設定）
+  String mime = 'image/jpeg';
+  if (imageBytes.lengthInBytes >= 12) {
+    // PNG
+    if (imageBytes[0] == 0x89 &&
+        imageBytes[1] == 0x50 &&
+        imageBytes[2] == 0x4E &&
+        imageBytes[3] == 0x47) {
+      mime = 'image/png';
+    }
+    // JPEG
+    else if (imageBytes[0] == 0xFF && imageBytes[1] == 0xD8) {
+      mime = 'image/jpeg';
+    }
+    // WEBP (RIFF....WEBP)
+    else if (imageBytes[0] == 0x52 &&
+        imageBytes[1] == 0x49 &&
+        imageBytes[2] == 0x46 &&
+        imageBytes[3] == 0x46 &&
+        imageBytes[8] == 0x57 &&
+        imageBytes[9] == 0x45 &&
+        imageBytes[10] == 0x42 &&
+        imageBytes[11] == 0x50) {
+      mime = 'image/webp';
+    }
+    // GIF
+    else if (imageBytes[0] == 0x47 &&
+        imageBytes[1] == 0x49 &&
+        imageBytes[2] == 0x46 &&
+        imageBytes[3] == 0x38) {
+      mime = 'image/gif';
+    }
+    // BMP
+    else if (imageBytes[0] == 0x42 && imageBytes[1] == 0x4D) {
+      mime = 'image/bmp';
+    }
+  }
+
+  final imagePart = DataPart(mime, imageBytes);
   final textPart = TextPart(prompt);
   
-  // 修正: Content(parts: ...) を使用
+  // 修正: google_generative_ai 0.4.7 の Content コンストラクタは role (位置引数) が必要
   final contents = [
-    Content(parts: [
+    Content('user', [ // role に 'user' を指定
       textPart,
       imagePart,
     ]),
   ];
 
-  // 修正: GenerationConfig を使用
+  // 修正: GenerationConfig を使用（JSON出力を固定）
   final config = GenerationConfig(
     responseMimeType: 'application/json',
+    // 必要に応じて下記を使う場合は追加（ここではプロンプト準拠優先のため未設定）
+    // temperature: 0.0,
+    // maxOutputTokens: 2048,
   );
 
   FlutterLogs.logInfo('GEMINI_SERVICE', 'REQUEST_SENT', 'Sending image to Gemini for ${isProductList ? "Product List" : "Nifuda"}');
@@ -59,11 +106,12 @@ Future<Map<String, dynamic>?> sendImageToGemini(
     // 5. APIリクエストの実行
     final response = await model.generateContent(
       contents, 
-      config: config, 
+      // 修正: config パラメータは generationConfig に修正 (google_generative_ai 0.4.7 の仕様)
+      generationConfig: config, 
     );
 
     // 6. 応答の検証と解析
-    final contentString = response.text;
+    String? contentString = response.text;
 
     if (contentString == null || contentString.trim().isEmpty) {
       FlutterLogs.logThis(
@@ -75,11 +123,21 @@ Future<Map<String, dynamic>?> sendImageToGemini(
       return null;
     }
 
-    // JSONデコード
+    // モデルが誤って ```json などで囲って返すケースへの耐性（プロンプトはJSONのみ要求だが念のため）
+    final trimmed = contentString.trim();
+    if (trimmed.startsWith('```')) {
+      // 先頭の ```json / ``` を除去
+      contentString = trimmed
+          .replaceFirst(RegExp(r'^```(json)?', caseSensitive: false), '')
+          .replaceFirst(RegExp(r'```$'), '')
+          .trim();
+    }
+
     try {
       if (kDebugMode) print('Gemini Parsed Content String: $contentString');
+      final decoded = jsonDecode(contentString) as Map<String, dynamic>;
       FlutterLogs.logInfo('GEMINI_SERVICE', 'PARSE_SUCCESS', 'Successfully parsed Gemini JSON response.');
-      return jsonDecode(contentString) as Map<String, dynamic>;
+      return decoded;
     } catch (e, s) {
       FlutterLogs.logThis(
         tag: 'GEMINI_SERVICE',
