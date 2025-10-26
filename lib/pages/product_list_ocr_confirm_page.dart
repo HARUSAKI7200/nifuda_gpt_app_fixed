@@ -3,8 +3,18 @@ import 'package:flutter/material.dart';
 class ProductListOcrConfirmPage extends StatefulWidget {
   final List<Map<String, String>> extractedProductRows;
 
-  static const List<String> productFields = [
-    'ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考'
+static const List<String> productFields = [
+    'ORDER No.',
+    'ITEM OF SPARE',
+    '品名記号',
+    '形格',
+    '製品コード番号',
+    '注文数',
+    '記事', // ★ gpt_service.dart の TMEIC プロンプト例に合わせる場合
+    // '記事(REMARKS)', // ★ gpt_service.dart の TMEIC 以外プロンプトに合わせる場合
+    '備考(NOTE)',    // ★ TMEIC 用
+    // '備考(REMARKS)', // ★ TMEIC 以外用 (TMEIC 以外も対応する場合)
+    // '備考' // <- これは削除 または 上記のどちらかに統一
   ];
 
   const ProductListOcrConfirmPage({

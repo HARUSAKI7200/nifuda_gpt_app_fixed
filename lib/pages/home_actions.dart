@@ -355,22 +355,27 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 ) async {
   List<String>? imageFilePaths;
   try {
-    // ★ 修正: DirectoryImagePickerPageに必須パラメータ rootDirectoryPath を渡す
-    final List<String>? galleryPaths = await Navigator.push<List<String>>(
-      context,
-      MaterialPageRoute(builder: (_) => const DirectoryImagePickerPage(rootDirectoryPath: BASE_PROJECT_DIR)),
+    // ★★★ 修正: DirectoryImagePickerPage の代わりに DocumentScanner を使用 ★★★
+    final options = DocumentScannerOptions(
+      pageLimit: 100, 
+      isGalleryImport: false, 
+      documentFormat: DocumentFormat.jpeg, 
+      mode: ScannerMode.full
     );
-    // Google ML Kit Document Scannerのコードを削除し、DirectoryImagePickerPageを使用
-    imageFilePaths = galleryPaths;
+    final docScanner = DocumentScanner(options: options);
+    final result = await docScanner.scanDocument();
+    imageFilePaths = result?.images;
     
   } catch (e, s) {
-    _logError('IMAGE_PICKER', 'Directory launch error', e, s);
-    if (context.mounted) _showErrorDialog(context, 'ファイル選択エラー', '画像選択に失敗しました: $e');
+    // ★★★ 修正: エラーログとメッセージをスキャナー用に変更 ★★★
+    _logError('DOC_SCANNER', 'Scanner launch error (GPT)', e, s);
+    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Google ML Kit Document Scannerの起動に失敗しました: $e');
     return null;
   }
 
   if (imageFilePaths == null || imageFilePaths.isEmpty) {
-    if (context.mounted) showCustomSnackBar(context, '製品リストの画像選択がキャンセルされました。');
+    // ★★★ 修正: メッセージをスキャナー用に変更 ★★★
+    if (context.mounted) showCustomSnackBar(context, '製品リストのスキャンがキャンセルされました。');
     return null;
   }
   
@@ -397,7 +402,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   }
   String template;
   switch (selectedCompany) {
-    case 'T社': template = 't'; break;
+    // ★★★ 修正: 会社名を 'TMEIC' に合わせる (プロンプトと一致させるため)
+    case 'T社': template = 't'; break; // ocr_masker側は 't' を期待
     case 'マスク処理なし': template = 'none'; break;
     case '動的マスク処理': template = 'dynamic'; break;
     default: if(context.mounted) _showErrorDialog(context, 'テンプレートエラー', '無効な会社名が選択されました。'); return null;
@@ -454,12 +460,18 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   // 5. ストリーミングリクエストの実行
   List<Map<String, dynamic>?> allAiRawResults = [];
 
+  // ★★★ 修正: プロンプトと合わせるため、T社の場合は 'TMEIC' を渡す
+  final String companyForGpt = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany;
+
   for (int i = 0; i < finalImagesToSend.length; i++) {
       if (!context.mounted) break;
       final imageBytes = finalImagesToSend[i];
       
-      // ★ 修正: ストリーミング関数を使用
-      final Stream<String> stream = sendImageToGPTStream(imageBytes, company: selectedCompany);
+      // ★ 修正: ストリーミング関数を使用 (companyForGpt を渡す)
+      final Stream<String> stream = sendImageToGPTStream(
+        imageBytes, 
+        company: companyForGpt,
+      );
       
       final String streamTitle = '製品リスト抽出中 (GPT) (${i + 1} / ${finalImagesToSend.length})';
       
@@ -474,7 +486,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       if (rawJsonResponse == null) {
           _logError('OCR_ACTION', 'PRODUCT_LIST_GPT_STREAM_FAIL', 'Stream failed or cancelled for image ${i + 1}', null);
           if (context.mounted) _showErrorDialog(context, '抽出エラー', '${i + 1}枚目の画像の抽出に失敗しました。処理を中断します。');
-          return allAiRawResults.isNotEmpty ? await _processRawProductResults(context, allAiRawResults) : null;
+          // ★★★ 修正: _processRawProductResults に selectedCompany を渡す
+          return allAiRawResults.isNotEmpty ? await _processRawProductResults(context, allAiRawResults, selectedCompany) : null;
       }
       
       // JSONのパース
@@ -500,38 +513,65 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   // 6. 結果の統合と確認画面への遷移
   if (!context.mounted) return null;
-  return _processRawProductResults(context, allAiRawResults);
+  // ★★★ 修正: _processRawProductResults に selectedCompany を渡す
+  return _processRawProductResults(context, allAiRawResults, selectedCompany);
 }
 
-// ★ 修正: 戻り値の型を Future に変更し、asyncを追加
-Future<List<List<String>>?> _processRawProductResults(BuildContext context, List<Map<String, dynamic>?> allAiRawResults) async {
+// ★★★ 修正: 会社名(selectedCompany)を引数で受け取り、OrderNo生成ロジックを分岐 ★★★
+Future<List<List<String>>?> _processRawProductResults(
+  BuildContext context, 
+  List<Map<String, dynamic>?> allAiRawResults,
+  String selectedCompany, // ★引数を追加
+) async {
   List<Map<String, String>> allExtractedProductRows = [];
+  // ★★★ 修正: productFieldsは 'product_list_ocr_confirm_page.dart' から取得する
+  // (プロンプトと一致している必要があるため、定義ファイル側も修正が必要だが、ここでは仮定する)
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
   
+  // ★★★ 修正: T社の場合、プロンプトに 'TMEIC' を使用しているため、ここで 'T社' に戻す
+  final bool isTCompany = (selectedCompany == 'T社') || (selectedCompany == 'TMEIC');
+
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {
         final List<dynamic> productListRaw = result['products'];
-        // T社リストの場合、commonOrderNoを取得
+        // 共通OrderNo (T社の場合は "QZ83941"、それ以外は "T-12345-" などを期待)
         String commonOrderNo = result['commonOrderNo']?.toString() ?? ''; 
         
         for (final item in productListRaw) {
           if (item is Map) {
             Map<String, String> row = {};
-            final String remarks = item['備考']?.toString() ?? '';
-            String finalOrderNo = commonOrderNo;
-            
-            // ORDER No. + 備考（T社特有のロジック）
-            if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
-              final lastSeparatorIndex = commonOrderNo.lastIndexOf(RegExp(r'[\s-]'));
-              if (lastSeparatorIndex != -1) {
-                final prefix = commonOrderNo.substring(0, lastSeparatorIndex + 1);
-                finalOrderNo = '$prefix$remarks';
-              } else {
-                finalOrderNo = '$commonOrderNo $remarks';
+            String finalOrderNo = '';
+
+            // ★★★ ユーザー要求に基づくロジック変更 (T社 vs T社以外) ★★★
+            if (isTCompany) {
+              // T社の場合: commonOrderNo (QZ83941) + 備考(NOTE) (FEV2385)
+              // ★ 修正: プロンプトに合わせて '備考(NOTE)' を使用
+              // (product_list_ocr_confirm_page.dart の
+              // productFields に '備考(NOTE)' が含まれている必要がある)
+              final String note = item['備考(NOTE)']?.toString() ?? '';
+              finalOrderNo = '$commonOrderNo $note'.trim(); // 例: "QZ83941 FEV2385"
+            } else {
+              // T社以外の場合: commonOrderNo + 備考(REMARKS) ※枝番
+              // ★ 修正: プロンプトに合わせて '備考(REMARKS)' を使用
+              // (product_list_ocr_confirm_page.dart の
+              // productFields に '備考(REMARKS)' が含まれている必要がある)
+              final String remarks = item['備考(REMARKS)']?.toString() ?? ''; 
+              finalOrderNo = commonOrderNo; // まず共通番号をセット
+
+              if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
+                final lastSeparatorIndex = commonOrderNo.lastIndexOf(RegExp(r'[\s-]'));
+                if (lastSeparatorIndex != -1) {
+                  final prefix = commonOrderNo.substring(0, lastSeparatorIndex + 1);
+                  finalOrderNo = '$prefix$remarks'; // 例: "T-12345-" + "01"
+                } else {
+                  finalOrderNo = '$commonOrderNo $remarks'; // 例: "12345" + "01"
+                }
               }
             }
+            // ★★★ ロジック変更ここまで ★★★
             
             for (String field in expectedProductFields) {
+              // 'ORDER No.' のみ、上で生成した finalOrderNo を使う
               row[field] = (field == 'ORDER No.') ? finalOrderNo : item[field]?.toString() ?? '';
             }
             allExtractedProductRows.add(row);

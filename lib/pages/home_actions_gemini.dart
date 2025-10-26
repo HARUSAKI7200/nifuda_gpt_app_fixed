@@ -312,12 +312,18 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
   // 5. ストリーミングリクエストの実行
   List<Map<String, dynamic>?> allAiRawResults = [];
   
+  // ★★★ 修正: プロンプトと合わせるため、T社の場合は 'TMEIC' を渡す
+  final String companyForGemini = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany;
+
   for (int i = 0; i < finalImagesToSend.length; i++) {
       if (!context.mounted) break;
       final imageBytes = finalImagesToSend[i];
       
-      // ★ 修正: ストリーミング関数を使用
-      final Stream<String> stream = sendImageToGeminiStream(imageBytes, company: selectedCompany);
+      // ★ 修正: ストリーミング関数を使用 (companyForGemini を渡す)
+      final Stream<String> stream = sendImageToGeminiStream(
+        imageBytes, 
+        company: companyForGemini,
+      );
       
       final String streamTitle = '製品リスト抽出中 (Gemini) (${i + 1} / ${finalImagesToSend.length})';
       
@@ -332,7 +338,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
       if (rawJsonResponse == null) {
           _logError('OCR_ACTION', 'PRODUCT_LIST_GEMINI_STREAM_FAIL', 'Stream failed or cancelled for image ${i + 1}', null);
           if (context.mounted) _showErrorDialog(context, '抽出エラー', '${i + 1}枚目の画像の抽出に失敗しました。処理を中断します。');
-          return allAiRawResults.isNotEmpty ? await _processRawProductResults(context, allAiRawResults) : null;
+          // ★★★ 修正: _processRawProductResults に selectedCompany を渡す
+          return allAiRawResults.isNotEmpty ? await _processRawProductResults(context, allAiRawResults, selectedCompany) : null;
       }
       
       // JSONのパース
@@ -358,38 +365,64 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionWithGemini(
 
   // 6. 結果の統合と確認画面への遷移
   if (!context.mounted) return null;
-  return _processRawProductResults(context, allAiRawResults);
+  // ★★★ 修正: _processRawProductResults に selectedCompany を渡す
+  return _processRawProductResults(context, allAiRawResults, selectedCompany);
 }
 
-// ★ 修正: 戻り値の型を Future に変更し、asyncを追加
-Future<List<List<String>>?> _processRawProductResults(BuildContext context, List<Map<String, dynamic>?> allAiRawResults) async {
+// ★★★ 修正: 会社名(selectedCompany)を引数で受け取り、OrderNo生成ロジックを分岐 ★★★
+Future<List<List<String>>?> _processRawProductResults(
+  BuildContext context, 
+  List<Map<String, dynamic>?> allAiRawResults,
+  String selectedCompany, // ★引数を追加
+) async {
   List<Map<String, String>> allExtractedProductRows = [];
+  // ★★★ 修正: productFieldsは 'product_list_ocr_confirm_page.dart' から取得する
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
   
+  // ★★★ 修正: T社の場合、プロンプトに 'TMEIC' を使用しているため、ここで 'T社' に戻す
+  final bool isTCompany = (selectedCompany == 'T社') || (selectedCompany == 'TMEIC');
+
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {
         final List<dynamic> productListRaw = result['products'];
-        // T社リストの場合、commonOrderNoを取得
+        // 共通OrderNo (T社の場合は "QZ83941"、それ以外は "T-12345-" などを期待)
         String commonOrderNo = result['commonOrderNo']?.toString() ?? ''; 
         
         for (final item in productListRaw) {
           if (item is Map) {
             Map<String, String> row = {};
-            final String remarks = item['備考']?.toString() ?? '';
-            String finalOrderNo = commonOrderNo;
-            
-            // ORDER No. + 備考（T社特有のロジック）
-            if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
-              final lastSeparatorIndex = commonOrderNo.lastIndexOf(RegExp(r'[\s-]'));
-              if (lastSeparatorIndex != -1) {
-                final prefix = commonOrderNo.substring(0, lastSeparatorIndex + 1);
-                finalOrderNo = '$prefix$remarks';
-              } else {
-                finalOrderNo = '$commonOrderNo $remarks';
+            String finalOrderNo = '';
+
+            // ★★★ ユーザー要求に基づくロジック変更 (T社 vs T社以外) ★★★
+            if (isTCompany) {
+              // T社の場合: commonOrderNo (QZ83941) + 備考(NOTE) (FEV2385)
+              // ★ 修正: プロンプトに合わせて '備考(NOTE)' を使用
+              // (product_list_ocr_confirm_page.dart の
+              // productFields に '備考(NOTE)' が含まれている必要がある)
+              final String note = item['備考(NOTE)']?.toString() ?? '';
+              finalOrderNo = '$commonOrderNo $note'.trim(); // 例: "QZ83941 FEV2385"
+            } else {
+              // T社以外の場合: commonOrderNo + 備考(REMARKS) ※枝番
+              // ★ 修正: プロンプトに合わせて '備考(REMARKS)' を使用
+              // (product_list_ocr_confirm_page.dart の
+              // productFields に '備考(REMARKS)' が含まれている必要がある)
+              final String remarks = item['備考(REMARKS)']?.toString() ?? ''; 
+              finalOrderNo = commonOrderNo; // まず共通番号をセット
+
+              if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
+                final lastSeparatorIndex = commonOrderNo.lastIndexOf(RegExp(r'[\s-]'));
+                if (lastSeparatorIndex != -1) {
+                  final prefix = commonOrderNo.substring(0, lastSeparatorIndex + 1);
+                  finalOrderNo = '$prefix$remarks'; // 例: "T-12345-" + "01"
+                } else {
+                  finalOrderNo = '$commonOrderNo $remarks'; // 例: "12345" + "01"
+                }
               }
             }
+            // ★★★ ロジック変更ここまで ★★★
             
             for (String field in expectedProductFields) {
+              // 'ORDER No.' のみ、上で生成した finalOrderNo を使う
               row[field] = (field == 'ORDER No.') ? finalOrderNo : item[field]?.toString() ?? '';
             }
             allExtractedProductRows.add(row);
