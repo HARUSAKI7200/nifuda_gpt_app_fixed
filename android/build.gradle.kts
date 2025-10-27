@@ -12,6 +12,24 @@ allprojects {
         google()
         mavenCentral()
     }
+
+    // ▼▼▼【 lStar エラー修正 v3 (最終) 】▼▼▼
+    // isar_flutter_libs が古い androidx.core と material に依存するのを修正
+    configurations.all {
+        resolutionStrategy.eachDependency {
+            // androidx.core と core-ktx が要求された場合
+            if (requested.group == "androidx.core" && (requested.name == "core" || requested.name == "core-ktx")) {
+                // lStar エラーを修正するため、バージョンを強制的に 1.13.1 に指定
+                useVersion("1.13.1")
+            }
+            // com.google.android.material が要求された場合
+            if (requested.group == "com.google.android.material" && requested.name == "material") {
+                // lStar エラーを修正するため、バージョンを強制的に 1.13.0 に指定
+                useVersion("1.13.0")
+            }
+        }
+    }
+    // ▲▲▲【 追記はここまで 】▲▲▲
 }
 
 // 明示型 Directory は外して型推論に任せる（import不要で安全）
