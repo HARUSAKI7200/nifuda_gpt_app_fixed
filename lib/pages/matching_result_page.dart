@@ -178,7 +178,7 @@ class MatchingResultPage extends StatelessWidget {
     final String? excelFilePath = await _saveAsExcel(context, headers, data, true);
 
     final List<XFile> filesToShare = [];
-    String message = 'プロジェクト「$projectTitle」の検品が完了しました。\n\n';
+    String message = '依頼No「$projectTitle」の検品が完了しました。\n\n';
 
     if (jsonFilePath != null) {
       filesToShare.add(XFile(jsonFilePath));

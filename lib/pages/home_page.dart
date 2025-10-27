@@ -6,7 +6,7 @@ import 'package:flutter_logs/flutter_logs.dart';
 import '../state/project_state.dart'; 
 // ★ 修正: home_actions.dart 全体をインポート
 import 'home_actions.dart';
-import '../widgets/home_widgets.dart';
+//import '../widgets/home_widgets.dart';
 import '../widgets/custom_snackbar.dart';
 import 'dart:io'; 
 import 'package:path/path.dart' as p; 
@@ -48,7 +48,7 @@ class HomePage extends ConsumerWidget {
 
         // --- アクションのラッパー関数 (修正あり) ---
         
-        // (変更なし)
+        // ★★★ この関数 (_handleNewProject) を修正 ★★★
         Future<void> _handleNewProject() async {
           if (_isLoading) return;
           
@@ -58,11 +58,11 @@ class HomePage extends ConsumerWidget {
             builder: (BuildContext dialogContext) {
               String? inputCode;
               return AlertDialog(
-                title: const Text('新規プロジェクト作成'),
+                title: const Text('新規フォルダ作成'),
                 content: TextField(
                   autofocus: true,
                   decoration: const InputDecoration(
-                    labelText: '製番を入力してください (例: QZ83941)',
+                    labelText: '依頼Noを入力してください',
                     border: OutlineInputBorder(),
                   ),
                   onChanged: (value) {
@@ -88,9 +88,23 @@ class HomePage extends ConsumerWidget {
 
           if (projectCode != null && projectCode.isNotEmpty) {
             try {
+              // ★★★ ここから変更 ★★★
+
+              // 1. 現在の日付を取得 (例: 20231027)
+              final now = DateTime.now();
+              final formattedDate = "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}";
+
+              // 2. ベースパスを定義
               const String baseDcimPath = "/storage/emulated/0/DCIM";
               final String inspectionRelatedPath = p.join(baseDcimPath, "検品関係");
-              final String projectFolderPath = p.join(inspectionRelatedPath, projectCode);
+              
+              // 3. 日付フォルダパスを生成 (例: /storage/emulated/0/DCIM/検品関係/20231027)
+              final String dateFolderPath = p.join(inspectionRelatedPath, formattedDate);
+
+              // 4. 最終的なプロジェクトパスを生成 (例: /storage/emulated/0/DCIM/検品関係/20231027/QZ83941)
+              final String projectFolderPath = p.join(dateFolderPath, projectCode);
+
+              // ★★★ ここまで変更 ★★★
 
               final Directory projectDir = Directory(projectFolderPath);
               if (!await projectDir.exists()) {
@@ -99,7 +113,7 @@ class HomePage extends ConsumerWidget {
               
               await projectNotifier.createProject(
                 projectCode: projectCode,
-                projectFolderPath: projectFolderPath,
+                projectFolderPath: projectFolderPath, // 変更後のパスを渡す
               );
 
               if (context.mounted) {
@@ -277,13 +291,13 @@ class HomePage extends ConsumerWidget {
 
         return Scaffold(
           appBar: AppBar(title: Text('シンコー府中輸出課 荷札照合アプリ - $_projectTitle')),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: _isLoading ? null : () => showPhotoGuide(context),
-            icon: const Icon(Icons.info_outline),
-            label: const Text('撮影の仕方'),
-            backgroundColor: Colors.indigo[600],
-            foregroundColor: Colors.white,
-          ),
+          //floatingActionButton: FloatingActionButton.extended(
+            //onPressed: _isLoading ? null : () => showPhotoGuide(context),
+            //icon: const Icon(Icons.info_outline),
+            //label: const Text('撮影の仕方'),
+            //backgroundColor: Colors.indigo[600],
+            //foregroundColor: Colors.white,
+          //),
           body: SafeArea(
             child: Stack(
               children: [
