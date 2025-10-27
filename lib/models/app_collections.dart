@@ -15,11 +15,13 @@ class Projects extends Table {
 
 // ★ 2. 荷札
 @DataClassName('NifudaRow')
+// ★ 修正: インデックスはここにアノテーションとして定義します
+@TableIndex(name: 'nifuda_project_id_idx', columns: {#projectId})
 class NifudaRows extends Table {
   IntColumn get id => integer().autoIncrement()();
 
-  // ★ 修正: .indexed() -> .index()
-  IntColumn get projectId => integer().named('project_id').index()(); 
+  // ★ 修正: .indexed() を削除
+  IntColumn get projectId => integer().named('project_id')(); 
 
   TextColumn get seiban => text().named('seiban')(); 
   TextColumn get itemNumber => text().named('item_number')(); 
@@ -33,11 +35,13 @@ class NifudaRows extends Table {
 
 // ★ 3. 製品リスト
 @DataClassName('ProductListRow')
+// ★ 修正: インデックスはここにアノテーションとして定義します
+@TableIndex(name: 'product_list_project_id_idx', columns: {#projectId})
 class ProductListRows extends Table {
   IntColumn get id => integer().autoIncrement()();
   
-  // ★ 修正: .indexed() -> .index()
-  IntColumn get projectId => integer().named('project_id').index()();
+  // ★ 修正: .indexed() を削除
+  IntColumn get projectId => integer().named('project_id')();
 
   TextColumn get orderNo => text().named('order_no')(); 
   TextColumn get itemOfSpare => text().named('item_of_spare')(); 

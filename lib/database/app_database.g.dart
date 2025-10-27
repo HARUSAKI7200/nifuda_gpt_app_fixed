@@ -1351,6 +1351,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $NifudaRowsTable nifudaRows = $NifudaRowsTable(this);
   late final $ProductListRowsTable productListRows =
       $ProductListRowsTable(this);
+  late final Index nifudaProjectIdIdx = Index('nifuda_project_id_idx',
+      'CREATE INDEX nifuda_project_id_idx ON nifuda_rows (project_id)');
+  late final Index productListProjectIdIdx = Index(
+      'product_list_project_id_idx',
+      'CREATE INDEX product_list_project_id_idx ON product_list_rows (project_id)');
   late final ProjectsDao projectsDao = ProjectsDao(this as AppDatabase);
   late final NifudaRowsDao nifudaRowsDao = NifudaRowsDao(this as AppDatabase);
   late final ProductListRowsDao productListRowsDao =
@@ -1359,8 +1364,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [projects, nifudaRows, productListRows];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+        projects,
+        nifudaRows,
+        productListRows,
+        nifudaProjectIdIdx,
+        productListProjectIdIdx
+      ];
 }
 
 typedef $$ProjectsTableCreateCompanionBuilder = ProjectsCompanion Function({
