@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
-import 'package:share_plus/share_plus.dart'; // ★ 追加
+import 'package:share_plus/share_plus.dart'; 
 import '../utils/excel_export.dart';
 import '../widgets/custom_snackbar.dart';
 import 'home_actions.dart'; // saveProjectActionのために必要
@@ -10,17 +10,17 @@ import 'home_actions.dart'; // saveProjectActionのために必要
 class MatchingResultPage extends StatelessWidget {
   final Map<String, dynamic> matchingResults;
   final String projectFolderPath; 
-  final String projectTitle; // ★ 追加
-  final List<List<String>> nifudaData; // ★ 追加
-  final List<List<String>> productListKariData; // ★ 追加
+  final String projectTitle; 
+  final List<List<String>> nifudaData; 
+  final List<List<String>> productListKariData; 
 
   const MatchingResultPage({
     super.key, 
     required this.matchingResults, 
     required this.projectFolderPath,
-    required this.projectTitle, // ★ 追加
-    required this.nifudaData, // ★ 追加
-    required this.productListKariData, // ★ 追加
+    required this.projectTitle, 
+    required this.nifudaData, 
+    required this.productListKariData, 
   });
 
   @override
@@ -38,7 +38,6 @@ class MatchingResultPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('照合結果'),
-        // 標準の戻る矢印を有効化（変更なし）
         actions: [
           IconButton(
             icon: const Icon(Icons.download_for_offline_outlined),
@@ -91,7 +90,6 @@ class MatchingResultPage extends StatelessWidget {
                 ),
         ),
       ),
-      // ★★★ 修正: FABを extended に戻し、「検品完了＆共有」と表示する ★★★
       floatingActionButton: FloatingActionButton.extended(
         onPressed: allRows.isEmpty ? null : () => _handleSaveAndShare(context, displayHeaders, allRows),
         icon: const Icon(Icons.share),
@@ -119,6 +117,7 @@ class MatchingResultPage extends StatelessWidget {
     return sorted;
   }
 
+  // ★ 修正: exportToExcelStorage の戻り値(Map)を処理するように変更
   Future<String?> _saveAsExcel(BuildContext context, List<String> headers, List<Map<String, dynamic>> data, bool silent) async {
     final now = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
     final fileName = '照合結果_$now.xlsx';
@@ -128,7 +127,8 @@ class MatchingResultPage extends StatelessWidget {
     }).toList();
 
     try {
-      final String shortPath = await exportToExcelStorage( 
+      // ★ 修正: 戻り値を Map で受け取る
+      final Map<String, String> exportResult = await exportToExcelStorage( 
         fileName: fileName,
         sheetName: '照合結果',
         headers: headers,
@@ -137,13 +137,21 @@ class MatchingResultPage extends StatelessWidget {
         subfolder: '抽出結果', // サブフォルダ名を指定
       );
       
+      final String localMsg = exportResult['local'] ?? 'ローカル保存エラー';
+      final String smbMsg = exportResult['smb'] ?? 'SMB処理エラー';
+      
       // share_plusのためにフルパスが必要なので、p.joinを使ってフルパスを再構成する
       final String fullPath = p.join(projectFolderPath, '抽出結果', fileName);
       
       if (context.mounted && !silent) {
-        showCustomSnackBar(context, 'Excelを保存しました: $shortPath'); // 修正
+        // ★ 修正: silent=false の場合のみ、両方の結果をスナックバーで表示
+        showCustomSnackBar(
+          context, 
+          'ローカル: $localMsg\n共有フォルダ: $smbMsg',
+          durationSeconds: 7, // メッセージが長いので長めに表示
+        );
       }
-      return fullPath;
+      return fullPath; // ★ 修正なし: 共有機能のためフルパスを返す
     } catch (e) {
       if (context.mounted && !silent) {
         showDialog(
@@ -158,7 +166,7 @@ class MatchingResultPage extends StatelessWidget {
     }
   }
   
-  // ★ 共有機能のみのロジック (Snackbarの文言を修正)
+  // ★ 修正なし: _saveAsExcel が fullPath を返し続けるため変更不要
   Future<void> _handleSaveAndShare(BuildContext context, List<String> headers, List<Map<String, dynamic>> data) async {
     if (!context.mounted) return;
     

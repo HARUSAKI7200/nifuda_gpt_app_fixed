@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 import 'home_actions_gemini.dart';
 import 'project_load_dialog.dart';
 import '../database/app_database.dart'; 
+import 'smb_settings_page.dart'; // ★★★ 追加: SMB設定画面のインポート
 
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
@@ -290,7 +291,22 @@ class HomePage extends ConsumerWidget {
         final actionColumnWidth = (screenWidth - 32.0 * 2).clamp(280.0, 450.0);
 
         return Scaffold(
-          appBar: AppBar(title: Text('シンコー府中輸出課 荷札照合アプリ - $_projectTitle')),
+          appBar: AppBar(
+            title: Text('シンコー府中輸出課 荷札照合アプリ - $_projectTitle'),
+            // ★★★ ここから修正 ★★★
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.settings_ethernet_rounded),
+                tooltip: '共有フォルダ設定',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (context) => const SmbSettingsPage()),
+                  );
+                },
+              ),
+            ],
+            // ★★★ ここまで修正 ★★★
+          ),
           //floatingActionButton: FloatingActionButton.extended(
             //onPressed: _isLoading ? null : () => showPhotoGuide(context),
             //icon: const Icon(Icons.info_outline),

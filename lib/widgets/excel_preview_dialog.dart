@@ -69,7 +69,8 @@ class ExcelPreviewDialog extends StatelessWidget {
                   final fileName = '${baseFileName}_$now.xlsx';
 
                   try {
-                    final filePath = await exportToExcelStorage(
+                    // ★ 修正: 戻り値を Map で受け取る
+                    final Map<String, String> exportResult = await exportToExcelStorage(
                       fileName: fileName,
                       sheetName: title,
                       headers: headers,
@@ -77,8 +78,17 @@ class ExcelPreviewDialog extends StatelessWidget {
                       projectFolderPath: projectFolderPath, // 渡されたパスを使用
                       subfolder: subfolder, // 渡されたサブフォルダを使用
                     );
+                    
+                    final String localMsg = exportResult['local'] ?? 'ローカル保存エラー';
+                    final String smbMsg = exportResult['smb'] ?? 'SMB処理エラー';
+
                     if (context.mounted) {
-                      showCustomSnackBar(context, 'Excelファイルを保存しました: $filePath'); // 修正
+                      // ★ 修正: 両方の結果をスナックバーで表示
+                      showCustomSnackBar(
+                        context, 
+                        'ローカル: $localMsg\n共有フォルダ: $smbMsg',
+                        durationSeconds: 7, // メッセージが長いので長めに表示
+                      );
                       Navigator.of(context).pop();
                     }
                   } catch (e) {

@@ -30,8 +30,8 @@ dependencies:
   flutter_riverpod: ^2.5.1       # 状態管理
   drift: ^2.29.0                 # ★ 変更: Drift (DB)
   sqlite3_flutter_libs: ^0.5.40   # ★ 追加: Drift (Android/iOS用)
-  # isar: ^3.1.0+1               # 削除
-  # isar_flutter_libs: ^3.1.0+1  # 削除
+  smb_connect: ^0.0.9 # (執筆時点での最新版。pub.devで確認してください)
+  shared_preferences: ^2.5.3
   
   shimmer: ^3.0.0                # ローディング時のUX向上
   flutter_logs: ^2.2.1            # ローカルファイルベースのロギング
