@@ -81,8 +81,32 @@ class MyApp extends StatelessWidget {
           backgroundColor: Colors.indigo[600],
           foregroundColor: Colors.white,
         ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+        ),
+        // ★ 修正: CardTheme -> CardThemeData
+        cardTheme: CardThemeData(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          filled: true,
+          fillColor: Colors.grey[100],
+        ),
       ),
-      home: const HomePage(),
+      // ★ 修正: const HomePage() -> HomePage() に変更
+      home: HomePage(),
     );
   }
 }

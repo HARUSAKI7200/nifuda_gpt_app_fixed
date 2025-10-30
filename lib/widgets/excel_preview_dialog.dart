@@ -1,108 +1,102 @@
 // lib/widgets/excel_preview_dialog.dart
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
 import '../utils/excel_export.dart';
-import '../widgets/custom_snackbar.dart';
+import 'custom_snackbar.dart';
 
 class ExcelPreviewDialog extends StatelessWidget {
   final String title;
   final List<List<String>> data;
   final List<String> headers;
-  final String projectFolderPath; // 追加
-  final String? subfolder; // 追加
+  final String projectFolderPath;
+  final String subfolder; // 例: '荷札リスト/#1'
 
   const ExcelPreviewDialog({
     super.key,
     required this.title,
     required this.data,
     required this.headers,
-    required this.projectFolderPath, // 追加
-    this.subfolder, // 追加
+    required this.projectFolderPath,
+    required this.subfolder,
   });
+
+  Future<void> _exportExcel(BuildContext context) async {
+    if (data.length <= 1) {
+      showCustomSnackBar(context, 'エクスポートするデータがありません。', isError: true);
+      return;
+    }
+
+    try {
+      if (!context.mounted) return;
+      showCustomSnackBar(context, 'Excelファイルを保存しています...', showAtTop: true);
+
+      // ★ 修正: ファイル名を生成 (サブフォルダ名 + タイムスタンプ)
+      final safeSubfolderName = subfolder.replaceAll(RegExp(r'[/\\]'), '_');
+      final fileName = '${safeSubfolderName}_${_formatTimestampForFilename(DateTime.now())}.xlsx';
+      
+      final rowsWithoutHeader = data.sublist(1); // ヘッダーを除いたデータ行
+
+      final results = await exportToExcelStorage(
+        fileName: fileName,
+        sheetName: title.replaceAll(RegExp(r'[/\\]'), ' '), // シート名はファイル名に使えない文字を置換
+        headers: headers,
+        rows: rowsWithoutHeader,
+        projectFolderPath: projectFolderPath,
+        subfolder: subfolder,
+      );
+
+      if (!context.mounted) return;
+      showCustomSnackBar(context, '保存完了: ローカル(${results['local']}), SMB(${results['smb']})', durationSeconds: 5);
+
+    } catch (e) {
+      if (!context.mounted) return;
+      showCustomSnackBar(context, 'Excelエクスポートエラー: $e', isError: true);
+    }
+  }
+
+  // home_actions.dart からコピーしたユーティリティ関数
+  String _formatTimestampForFilename(DateTime dateTime) {
+    return '${dateTime.year.toString().padLeft(4, '0')}'
+        '${dateTime.month.toString().padLeft(2, '0')}'
+        '${dateTime.day.toString().padLeft(2, '0')}'
+        '${dateTime.hour.toString().padLeft(2, '0')}'
+        '${dateTime.minute.toString().padLeft(2, '0')}'
+        '${dateTime.second.toString().padLeft(2, '0')}';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final dataRows = data.length > 1 ? data.sublist(1) : <List<String>>[];
-
     return AlertDialog(
-      title: Text(title),
-      content: SizedBox(
-        width: double.maxFinite,
-        height: MediaQuery.of(context).size.height * 0.6,
-        child: dataRows.isEmpty
-            ? const Center(child: Text('表示するデータがありません。'))
-            : SingleChildScrollView(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: headers
-                        .map((headerText) => DataColumn(
-                              label: Text(headerText, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            ))
-                        .toList(),
-                    rows: dataRows.map((row) {
-                      return DataRow(
-                        cells: headers.asMap().entries.map((entry) {
-                          final colIndex = entry.key;
-                          return DataCell(Text(colIndex < row.length ? row[colIndex] : ''));
-                        }).toList(),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title),
+          IconButton(
+            icon: const Icon(Icons.file_download),
+            onPressed: () => _exportExcel(context),
+            tooltip: 'Excelとして保存',
+          ),
+        ],
       ),
-      actionsAlignment: MainAxisAlignment.spaceBetween,
-      actions: <Widget>[
-        TextButton(
-          child: const Text('閉じる'),
-          onPressed: () => Navigator.of(context).pop(),
+      content: SizedBox(
+        width: MediaQuery.of(context).size.width * 0.8,
+        height: MediaQuery.of(context).size.height * 0.6,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columns: headers.map((h) => DataColumn(label: Text(h, style: const TextStyle(fontWeight: FontWeight.bold)))).toList(),
+            rows: data.sublist(1).map((row) {
+              return DataRow(
+                cells: row.map((cell) => DataCell(Text(cell))).toList(),
+              );
+            }).toList(),
+          ),
         ),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.save_alt_rounded),
-          label: const Text('Excel保存'),
-          onPressed: dataRows.isEmpty
-              ? null
-              : () async {
-                  final now = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-                  final baseFileName = title.replaceAll(' ', '_').replaceAll(':', '').replaceAll('-', '_');
-                  final fileName = '${baseFileName}_$now.xlsx';
-
-                  try {
-                    // ★ 修正: 戻り値を Map で受け取る
-                    final Map<String, String> exportResult = await exportToExcelStorage(
-                      fileName: fileName,
-                      sheetName: title,
-                      headers: headers,
-                      rows: dataRows,
-                      projectFolderPath: projectFolderPath, // 渡されたパスを使用
-                      subfolder: subfolder, // 渡されたサブフォルダを使用
-                    );
-                    
-                    final String localMsg = exportResult['local'] ?? 'ローカル保存エラー';
-                    final String smbMsg = exportResult['smb'] ?? 'SMB処理エラー';
-
-                    if (context.mounted) {
-                      // ★ 修正: 両方の結果をスナックバーで表示
-                      showCustomSnackBar(
-                        context, 
-                        'ローカル: $localMsg\n共有フォルダ: $smbMsg',
-                        durationSeconds: 7, // メッセージが長いので長めに表示
-                      );
-                      Navigator.of(context).pop();
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      showDialog(
-                          context: context,
-                          builder: (_) => AlertDialog(
-                                title: const Text('Excel保存エラー'),
-                                content: Text('保存に失敗しました: $e'),
-                                actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-                              ));
-                    }
-                  }
-                },
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('閉じる'),
         ),
       ],
     );

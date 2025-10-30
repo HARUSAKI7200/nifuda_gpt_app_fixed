@@ -5,110 +5,132 @@ import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import '../widgets/custom_snackbar.dart';
 
-// ★ 修正：2段階選択に対応した新しい画像選択画面
+// ★ 修正：JSONファイルピッカーとしても機能するように修正
 class DirectoryImagePickerPage extends StatefulWidget {
   final String rootDirectoryPath;
+  // ★ 追加: オプションのパラメータ
+  final String title;
+  final List<String>? fileExtensionFilter; // e.g., ['.json'] or ['.jpg', '.png']
+  final bool showDirectoriesFirst;
+  final bool returnOnlyFilePath; // trueの場合、選択したらすぐにPathを返す
 
-  const DirectoryImagePickerPage({super.key, required this.rootDirectoryPath});
+  // ★ 修正: コンストラクタを修正
+  const DirectoryImagePickerPage({
+    super.key,
+    required this.rootDirectoryPath,
+    this.title = "日付を選択", // デフォルトタイトル
+    this.fileExtensionFilter,
+    this.showDirectoriesFirst = true,
+    this.returnOnlyFilePath = false,
+  });
 
   @override
   State<DirectoryImagePickerPage> createState() => _DirectoryImagePickerPageState();
 }
 
 class _DirectoryImagePickerPageState extends State<DirectoryImagePickerPage> {
-  List<Directory> _dateDirs = [];
-  List<Directory> _seibanDirs = [];
-  List<File> _imageFiles = [];
-
-  Directory? _selectedDateDir;
-  Directory? _selectedSeibanDir;
+  late Directory _currentDirectory;
+  List<FileSystemEntity> _entities = [];
+  String _currentTitle = "";
 
   final Set<String> _selectedImagePaths = {};
   bool _isLoading = true;
-  String _currentTitle = "日付を選択";
-  String _currentPath = ""; // ★★★ 追加：現在のパスを表示するための変数
+  String _currentPathDisplay = ""; // ★ 追加：現在のパスを表示するための変数
 
   @override
   void initState() {
     super.initState();
+    _currentDirectory = Directory(widget.rootDirectoryPath);
+    _currentTitle = widget.title;
     _requestPermissionAndLoad();
   }
 
   Future<void> _requestPermissionAndLoad() async {
     var status = await Permission.storage.status;
     if (!status.isGranted) status = await Permission.storage.request();
-    
-    if (Platform.isAndroid) {
-      var externalStatus = await Permission.manageExternalStorage.status;
-      if (!externalStatus.isGranted) externalStatus = await Permission.manageExternalStorage.request();
-      if (!externalStatus.isGranted) {
-        if (mounted) {
-          showCustomSnackBar(context, 'ストレージへのアクセス権限がありません。', isError: true);
-          Navigator.pop(context);
-        }
-        return;
-      }
-    }
-    _loadDateDirs();
-  }
+    if (!status.isGranted) status = await Permission.manageExternalStorage.request();
 
-  void _loadDateDirs() {
-    setState(() {
-      _isLoading = true;
-      _currentTitle = "日付を選択";
-      _currentPath = widget.rootDirectoryPath; // ★★★ 追加：パスを設定
-      _selectedDateDir = null;
-      _selectedSeibanDir = null;
-    });
-    final rootDir = Directory(widget.rootDirectoryPath);
-    if (rootDir.existsSync()) {
-      final dirs = rootDir.listSync().whereType<Directory>().toList();
-      dirs.sort((a, b) => b.path.compareTo(a.path)); // 日付で降順ソート
-      setState(() {
-        _dateDirs = dirs;
-        _isLoading = false;
-      });
-    } else {
+    if (!status.isGranted) {
       if (mounted) {
-        showCustomSnackBar(context, 'ルートフォルダが見つかりません', isError: true);
+        showCustomSnackBar(context, 'ストレージ権限がありません。', isError: true);
         Navigator.pop(context);
       }
+      return;
+    }
+    _loadEntitiesInDir(_currentDirectory);
+  }
+
+  Future<void> _loadEntitiesInDir(Directory dir) async {
+    setState(() {
+      _isLoading = true;
+      _currentDirectory = dir;
+      // パス表示をルートからの相対パスに
+      _currentPathDisplay = p.relative(dir.path, from: widget.rootDirectoryPath);
+      if (_currentPathDisplay == '.') _currentPathDisplay = '';
+    });
+
+    try {
+      List<FileSystemEntity> entities = await dir.list().toList();
+      List<Directory> dirs = [];
+      List<File> files = [];
+
+      for (var entity in entities) {
+        if (entity is Directory) {
+          dirs.add(entity);
+        } else if (entity is File) {
+          if (widget.fileExtensionFilter != null) {
+            // ファイルフィルターが指定されている場合
+            final extension = p.extension(entity.path).toLowerCase();
+            if (widget.fileExtensionFilter!.contains(extension)) {
+              files.add(entity);
+            }
+          } else {
+            // デフォルト (画像ピッカー)
+            final extension = p.extension(entity.path).toLowerCase();
+            if (['.jpg', '.jpeg', '.png'].contains(extension)) {
+              files.add(entity);
+            }
+          }
+        }
+      }
+
+      // 並び替え (ディレクトリ優先、名前順)
+      dirs.sort((a, b) => b.path.compareTo(a.path)); // 降順 (新しい日付が上)
+      files.sort((a, b) => b.path.compareTo(a.path)); // 降順
+
+      setState(() {
+        if (widget.showDirectoriesFirst) {
+          _entities = [...dirs, ...files];
+        } else {
+          _entities = [...dirs, ...files]..sort((a, b) => b.path.compareTo(a.path));
+        }
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (mounted) showCustomSnackBar(context, 'フォルダの読み込みに失敗: $e', isError: true);
+      setState(() => _isLoading = false);
     }
   }
 
-  void _loadSeibanDirs(Directory dateDir) {
+  // ディレクトリタップ時の動作
+  void _onDirectoryTap(Directory dir) {
     setState(() {
-      _isLoading = true;
-      _selectedDateDir = dateDir;
-      _currentTitle = "${p.basename(dateDir.path)} > 製番を選択";
-      _currentPath = dateDir.path; // ★★★ 追加：パスを設定
+      _currentTitle = p.basename(dir.path);
     });
-    final dirs = dateDir.listSync().whereType<Directory>().toList();
-    dirs.sort((a, b) => a.path.compareTo(b.path)); // 製番で昇順ソート
-    setState(() {
-      _seibanDirs = dirs;
-      _isLoading = false;
-    });
+    _loadEntitiesInDir(dir);
   }
 
-  void _loadImages(Directory seibanDir) {
-    setState(() {
-      _isLoading = true;
-      _selectedSeibanDir = seibanDir;
-      _currentTitle = "${p.basename(_selectedDateDir!.path)} > ${p.basename(seibanDir.path)}";
-      _currentPath = seibanDir.path; // ★★★ 追加：パスを設定
-    });
-    final files = seibanDir.listSync().whereType<File>().where((file) {
-      final ext = p.extension(file.path).toLowerCase();
-      return ext == '.jpg' || ext == '.jpeg' || ext == '.png' || ext == '.webp';
-    }).toList();
-    files.sort((a, b) => a.path.compareTo(b.path));
-    setState(() {
-      _imageFiles = files;
-      _isLoading = false;
-    });
+  // ファイルタップ時の動作 (JSONピッカー用)
+  void _onFileTap(File file) {
+    if (widget.returnOnlyFilePath) {
+      Navigator.pop(context, {'filePath': file.path});
+    } else {
+      // 画像選択ロジック (既存)
+      _toggleSelection(file.path);
+    }
   }
-
+  
+  // 画像選択のトグル (既存)
   void _toggleSelection(String path) {
     setState(() {
       if (_selectedImagePaths.contains(path)) {
@@ -118,23 +140,21 @@ class _DirectoryImagePickerPageState extends State<DirectoryImagePickerPage> {
       }
     });
   }
-  
-  void _onConfirm() {
-    Navigator.pop(context, _selectedImagePaths.toList());
-  }
 
+  // 戻るボタンの動作
   Future<bool> _onWillPop() async {
-    if (_selectedSeibanDir != null) {
-      _loadSeibanDirs(_selectedDateDir!);
-      _selectedSeibanDir = null; // 状態をリセット
-      _imageFiles = []; // 画像リストをクリア
-      return false;
+    if (_currentDirectory.path == widget.rootDirectoryPath) {
+      return true; // ルートディレクトリなら閉じる
+    } else {
+      _loadEntitiesInDir(_currentDirectory.parent); // 親ディレクトリに戻る
+      setState(() {
+        _currentTitle = p.basename(_currentDirectory.parent.path);
+        if (_currentDirectory.parent.path == widget.rootDirectoryPath) {
+          _currentTitle = widget.title;
+        }
+      });
+      return false; // ダイアログは閉じない
     }
-    if (_selectedDateDir != null) {
-      _loadDateDirs();
-      return false;
-    }
-    return true;
   }
 
   @override
@@ -143,99 +163,134 @@ class _DirectoryImagePickerPageState extends State<DirectoryImagePickerPage> {
       onWillPop: _onWillPop,
       child: Scaffold(
         appBar: AppBar(
-          // ★★★ 変更点：タイトル部分に現在のパスも表示するように修正 ★★★
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('$_currentTitle (${_selectedImagePaths.length}件選択中)'),
-              Text(
-                _currentPath,
-                style: const TextStyle(fontSize: 12, color: Colors.white70),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+          title: Text("$_currentTitle ($_currentPathDisplay)", style: const TextStyle(fontSize: 16)),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () async {
+              if (await _onWillPop()) {
+                Navigator.pop(context);
+              }
+            },
           ),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.check),
-              tooltip: '確定',
-              onPressed: _selectedImagePaths.isEmpty ? null : _onConfirm,
-            )
+            // JSONピッカーモードでは完了ボタンは不要
+            if (!widget.returnOnlyFilePath)
+              IconButton(
+                icon: Icon(Icons.check, color: _selectedImagePaths.isNotEmpty ? Colors.white : Colors.grey),
+                onPressed: _selectedImagePaths.isNotEmpty
+                    ? () => Navigator.pop(context, _selectedImagePaths.toList())
+                    : null,
+              ),
           ],
         ),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : _buildCurrentView(),
-        floatingActionButton: _selectedImagePaths.isEmpty
-          ? null 
-          : FloatingActionButton.extended(
-              onPressed: _onConfirm,
-              label: Text('確定 (${_selectedImagePaths.length}件)'),
-              icon: const Icon(Icons.check),
-            ),
+            : _entities.isEmpty
+                ? Center(child: Text("このフォルダは空です。 (${_currentPathDisplay})"))
+                // ★ 修正: fileExtensionFilter がある場合は ListView、ない場合は GridView
+                : (widget.fileExtensionFilter != null)
+                    ? _buildFileListView()
+                    : _buildImageGridView(),
       ),
     );
   }
 
-  Widget _buildCurrentView() {
-    if (_selectedSeibanDir != null) {
-      return _buildImageGrid();
-    }
-    if (_selectedDateDir != null) {
-      return _buildDirectoryList(_seibanDirs, (dir) => _loadImages(dir));
-    }
-    return _buildDirectoryList(_dateDirs, (dir) => _loadSeibanDirs(dir));
-  }
-
-  Widget _buildDirectoryList(List<Directory> dirs, void Function(Directory) onTap) {
-    if (dirs.isEmpty) return const Center(child: Text("このフォルダにサブフォルダはありません。"));
+  Widget _buildFileListView() {
     return ListView.builder(
-      itemCount: dirs.length,
+      itemCount: _entities.length,
       itemBuilder: (context, index) {
-        final dir = dirs[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-          child: ListTile(
-            leading: const Icon(Icons.folder, size: 40, color: Colors.orange),
-            title: Text(p.basename(dir.path)),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => onTap(dir),
-          ),
-        );
+        final entity = _entities[index];
+        if (entity is Directory) {
+          return _buildDirectoryTile(entity, _onDirectoryTap);
+        } else if (entity is File) {
+          return _buildFileTile(entity, _onFileTap);
+        }
+        return const SizedBox.shrink();
       },
     );
   }
 
-  Widget _buildImageGrid() {
-    if (_imageFiles.isEmpty) return const Center(child: Text("このフォルダに画像ファイルはありません。"));
-    return GridView.builder(
-      padding: const EdgeInsets.all(4.0),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 4.0,
-        mainAxisSpacing: 4.0,
-      ),
-      itemCount: _imageFiles.length,
-      itemBuilder: (context, index) {
-        final file = _imageFiles[index];
-        final isSelected = _selectedImagePaths.contains(file.path);
-        return GestureDetector(
-          onTap: () => _toggleSelection(file.path),
-          child: GridTile(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.file(file, fit: BoxFit.cover),
-                if (isSelected)
-                  Container(
-                    color: Colors.black.withOpacity(0.5),
-                    child: const Icon(Icons.check_circle, color: Colors.white, size: 32),
-                  ),
-              ],
-            ),
+  Widget _buildImageGridView() {
+    // GridView表示用にFileのみを抽出
+    final imageFiles = _entities.whereType<File>().toList();
+    // GridViewの前にDirectoryをリスト表示
+    final directories = _entities.whereType<Directory>().toList();
+
+    if (imageFiles.isEmpty && directories.isEmpty) {
+        return Center(child: Text("このフォルダは空です。 (${_currentPathDisplay})"));
+    }
+    
+    return Column(
+      children: [
+        if(directories.isNotEmpty)
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: directories.length,
+            itemBuilder: (context, index) => _buildDirectoryTile(directories[index], _onDirectoryTap),
           ),
-        );
-      },
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.all(4.0),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 4.0,
+              mainAxisSpacing: 4.0,
+            ),
+            itemCount: imageFiles.length,
+            itemBuilder: (context, index) {
+              final file = imageFiles[index];
+              return _buildImageTile(file, _toggleSelection);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDirectoryTile(Directory dir, Function(Directory) onTap) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+      child: ListTile(
+        leading: const Icon(Icons.folder, size: 40, color: Colors.orange),
+        title: Text(p.basename(dir.path)),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => onTap(dir),
+      ),
+    );
+  }
+  
+  Widget _buildFileTile(File file, Function(File) onTap) {
+    final isSelected = _selectedImagePaths.contains(file.path); // (流用)
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+      color: isSelected ? Colors.blue.shade100 : null,
+      child: ListTile(
+        leading: const Icon(Icons.description, size: 40, color: Colors.blueGrey),
+        title: Text(p.basename(file.path)),
+        trailing: widget.returnOnlyFilePath ? const Icon(Icons.chevron_right) : null,
+        onTap: () => onTap(file),
+      ),
+    );
+  }
+
+  Widget _buildImageTile(File file, Function(String) onTap) {
+    final isSelected = _selectedImagePaths.contains(file.path);
+    return GestureDetector(
+      onTap: () => onTap(file.path),
+      child: GridTile(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.file(file, fit: BoxFit.cover),
+            if (isSelected)
+              Container(
+                color: Colors.black.withOpacity(0.5),
+                child: const Icon(Icons.check_circle, color: Colors.white, size: 40),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -2,223 +2,287 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
-import 'package:share_plus/share_plus.dart'; 
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_logs/flutter_logs.dart'; // ★ 修正: インポート追加
 import '../utils/excel_export.dart';
 import '../widgets/custom_snackbar.dart';
-import 'home_actions.dart'; // saveProjectActionのために必要
+import 'home_actions.dart';
+import '../state/project_state.dart';
+import '../database/app_database.dart';
+import 'package:drift/drift.dart' show Value; // DB更新のため
 
-class MatchingResultPage extends StatelessWidget {
+class MatchingResultPage extends ConsumerWidget {
   final Map<String, dynamic> matchingResults;
-  final String projectFolderPath; 
-  final String projectTitle; 
-  final List<List<String>> nifudaData; 
-  final List<List<String>> productListKariData; 
+  final String projectFolderPath;
+  final String projectTitle;
+  final List<List<String>> nifudaData;
+  final List<List<String>> productListKariData;
+  final String currentCaseNumber;
 
   const MatchingResultPage({
-    super.key, 
-    required this.matchingResults, 
+    super.key,
+    required this.matchingResults,
     required this.projectFolderPath,
-    required this.projectTitle, 
-    required this.nifudaData, 
-    required this.productListKariData, 
+    required this.projectTitle,
+    required this.nifudaData,
+    required this.productListKariData,
+    required this.currentCaseNumber,
   });
 
-  @override
-  Widget build(BuildContext context) {
+  List<String> get _excelHeaders {
+    return [
+      '照合結果', '荷札_製番', '荷札_項目番号', '荷札_品名',
+      '製品_ORDER No.', '製品_品名記号', '製品_製品コード番号',
+      '照合済Case', '照合に使用したCase'
+    ];
+  }
+
+  // ★ 修正: 戻り値の型 List<List<String>> を保証
+  List<List<String>> get _excelData {
     final List<Map<String, dynamic>> allRows = [
       ...(matchingResults['matched'] as List<dynamic>).cast<Map<String, dynamic>>(),
       ...(matchingResults['unmatched'] as List<dynamic>).cast<Map<String, dynamic>>(),
       ...(matchingResults['missing'] as List<dynamic>).cast<Map<String, dynamic>>(),
     ];
 
-    final List<String> displayHeaders = allRows.isNotEmpty
-        ? _getSortedHeaders(allRows.first.keys.toList())
-        : ['照合結果'];
+    // ★ 修正: map の結果を List<String> にする
+    return allRows.map((row) {
+      final nifuda = row['nifuda'] as Map<String, dynamic>? ?? {}; // null チェック追加
+      final product = row['product'] as Map<String, dynamic>? ?? {}; // null チェック追加
+      final status = row['照合ステータス'] as String? ?? '';
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('照合結果'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.download_for_offline_outlined),
-            tooltip: 'Excelで保存',
-            onPressed: allRows.isEmpty ? null : () => _saveAsExcel(context, displayHeaders, allRows, false), // false: 共有なし
-          )
-        ],
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(8.0), 
-          child: allRows.isEmpty
-              ? const Center(child: Text('照合結果データがありません。'))
-              : SingleChildScrollView( 
-                  child: SingleChildScrollView( 
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable( 
-                      columnSpacing: 12.0,
-                      columns: displayHeaders
-                          .map((header) => DataColumn(
-                                label: Text(header, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                              ))
-                          .toList(),
-                      rows: allRows.map((resultMap) {
-                        return DataRow(
-                          cells: displayHeaders.map((header) {
-                            final cellValue = resultMap[header]?.toString() ?? '';
-                            final status = resultMap['照合ステータス']?.toString() ?? '';
-                            final mismatches = (resultMap['不一致項目リスト'] as List<dynamic>?)?.cast<String>() ?? [];
-                            
-                            Color cellColor = Colors.black;
-                            if (mismatches.any((mismatch) => header.contains(mismatch.split('/').first))) {
-                              cellColor = Colors.red.shade700;
-                            }
-    
-                            if (header == '照合ステータス') {
-                              if (status == '一致') cellColor = Colors.green.shade700;
-                              else if (status.contains('不一致')) cellColor = Colors.red.shade700;
-                              else if (status.contains('未検出')) cellColor = Colors.orange.shade700;
-                            }
-    
-                            return DataCell(
-                              Text(cellValue, style: TextStyle(fontSize: 12, color: cellColor)),
-                            );
-                          }).toList(),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: allRows.isEmpty ? null : () => _handleSaveAndShare(context, displayHeaders, allRows),
-        icon: const Icon(Icons.share),
-        label: const Text('検品完了＆共有'),
-        backgroundColor: Colors.green[700],
-        foregroundColor: Colors.white,
-      ),
-    );
-  }
+      // ★ 修正: nifuda Mapから 'Case No.' を取得
+      final matchingCase = nifuda['Case No.']?.toString() ?? currentCaseNumber;
 
-  List<String> _getSortedHeaders(List<String> originalHeaders) {
-    const preferredOrder = ['照合ステータス', '製番', '項目番号', '手配コード', '品名', '形式', '個数', 'ORDER No.', 'ITEM OF SPARE', '製品コード番号'];
-    List<String> sorted = [];
-    for (var key in preferredOrder) {
-      final match = originalHeaders.firstWhere((h) => h.contains(key), orElse: () => '');
-      if (match.isNotEmpty && !sorted.contains(match)) {
-        sorted.add(match);
-      }
-    }
-    for (var header in originalHeaders) {
-      if (!sorted.contains(header)) {
-        sorted.add(header);
-      }
-    }
-    return sorted;
-  }
-
-  // ★ 修正: exportToExcelStorage の戻り値(Map)を処理するように変更
-  Future<String?> _saveAsExcel(BuildContext context, List<String> headers, List<Map<String, dynamic>> data, bool silent) async {
-    final now = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    final fileName = '照合結果_$now.xlsx';
-
-    final List<List<String>> dataRows = data.map((resultMap) {
-      return headers.map((header) => resultMap[header]?.toString() ?? '').toList();
+      return <String>[ // 明示的に List<String> を返す
+        status,
+        nifuda['製番']?.toString() ?? '', nifuda['項目番号']?.toString() ?? '', nifuda['品名']?.toString() ?? '',
+        product['ORDER No.']?.toString() ?? '', product['品名記号']?.toString() ?? '', product['製品コード番号']?.toString() ?? '',
+        product['照合済Case']?.toString() ?? '',
+        matchingCase,
+      ];
     }).toList();
+  }
 
+  Future<String?> _saveAsExcel(BuildContext context, List<String> headers, List<List<String>> data, bool silent) async {
     try {
-      // ★ 修正: 戻り値を Map で受け取る
-      final Map<String, String> exportResult = await exportToExcelStorage( 
+      final fileName = 'MatchingResult_${currentCaseNumber}_${_formatTimestampForFilename(DateTime.now())}.xlsx';
+      final rowsWithoutHeader = data;
+
+      final results = await exportToExcelStorage(
         fileName: fileName,
-        sheetName: '照合結果',
+        sheetName: '照合結果_${currentCaseNumber}',
         headers: headers,
-        rows: dataRows,
-        projectFolderPath: projectFolderPath, // 渡されたパスを使用
-        subfolder: '抽出結果', // サブフォルダ名を指定
+        rows: rowsWithoutHeader,
+        projectFolderPath: projectFolderPath,
+        subfolder: '照合結果/$currentCaseNumber',
       );
-      
-      final String localMsg = exportResult['local'] ?? 'ローカル保存エラー';
-      final String smbMsg = exportResult['smb'] ?? 'SMB処理エラー';
-      
-      // share_plusのためにフルパスが必要なので、p.joinを使ってフルパスを再構成する
-      final String fullPath = p.join(projectFolderPath, '抽出結果', fileName);
-      
-      if (context.mounted && !silent) {
-        // ★ 修正: silent=false の場合のみ、両方の結果をスナックバーで表示
-        showCustomSnackBar(
-          context, 
-          'ローカル: $localMsg\n共有フォルダ: $smbMsg',
-          durationSeconds: 7, // メッセージが長いので長めに表示
-        );
+      if (!silent && context.mounted) {
+        showCustomSnackBar(context, '照合結果を保存しました。ローカル: ${results['local']}, SMB: ${results['smb']}', durationSeconds: 5);
       }
-      return fullPath; // ★ 修正なし: 共有機能のためフルパスを返す
+      return p.join(projectFolderPath, '照合結果', currentCaseNumber, fileName);
     } catch (e) {
-      if (context.mounted && !silent) {
-        showDialog(
-            context: context,
-            builder: (_) => AlertDialog(
-                  title: const Text('保存エラー'),
-                  content: Text('Excelファイルの保存に失敗しました: $e'),
-                  actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-                ));
+      if (!silent && context.mounted) {
+        showCustomSnackBar(context, '照合結果の保存に失敗しました: $e', isError: true);
       }
       return null;
     }
   }
-  
-  // ★ 修正なし: _saveAsExcel が fullPath を返し続けるため変更不要
-  Future<void> _handleSaveAndShare(BuildContext context, List<String> headers, List<Map<String, dynamic>> data) async {
-    if (!context.mounted) return;
-    
-    // 1. Loading表示
-    showCustomSnackBar(context, '検品完了データを保存中...', showAtTop: true);
 
-    // 2. プロジェクトデータ (JSON) の保存
-    final String? jsonFilePath = await saveProjectAction(
-      context,
-      projectFolderPath,
-      projectTitle,
-      nifudaData,
-      productListKariData,
+  void _moveToNextCase(BuildContext context, WidgetRef ref) {
+    final currentNumber = int.tryParse(currentCaseNumber.replaceAll('#', '')) ?? 1;
+    final nextNumber = currentNumber + 1;
+
+    if (nextNumber > 50) {
+      showCustomSnackBar(context, 'Case No. #50が最終です。', isError: true);
+      return;
+    }
+
+    final nextCaseNumber = '#$nextNumber';
+    final notifier = ref.read(projectProvider.notifier);
+    notifier.updateCaseNumber(nextCaseNumber);
+
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    showCustomSnackBar(context, 'Case No.を $nextCaseNumber に切り替えました。', showAtTop: true);
+  }
+
+  Future<void> _updateMatchedProducts(BuildContext context, WidgetRef ref) async {
+    final matchedRows = (matchingResults['matched'] as List<dynamic>).cast<Map<String, dynamic>>();
+    final db = ref.read(appDatabaseInstanceProvider);
+    final productListDao = db.productListRowsDao;
+
+    final projectState = ref.read(projectProvider);
+    final projectId = projectState.currentProjectId;
+
+    if (projectId == null) {
+      showCustomSnackBar(context, 'DBプロジェクト未選択のため、照合済みマークは更新されません (JSONモード)。', isError: false, durationSeconds: 4);
+      return;
+    }
+
+    final productRowsFromDb = await productListDao.getAllProductListRows(projectId);
+    final productDbMap = { for (var row in productRowsFromDb) (row.orderNo + row.itemOfSpare) : row };
+
+
+    List<Future<int>> updateFutures = [];
+
+    for (final matchedRow in matchedRows) {
+        final productMap = matchedRow['product'] as Map<String, dynamic>? ?? {};
+        final productKey = (productMap['ORDER No.']?.toString() ?? '') + (productMap['ITEM OF SPARE']?.toString() ?? '');
+
+        final dbRow = productDbMap[productKey];
+
+        if (dbRow != null) {
+            updateFutures.add(productListDao.updateMatchedCase(dbRow.id, currentCaseNumber));
+        }
+    }
+
+    if (updateFutures.isNotEmpty) {
+      await Future.wait(updateFutures);
+      FlutterLogs.logInfo('DB_ACTION', 'UPDATE_MATCHED_CASE', '${updateFutures.length} product rows marked as matched for Case $currentCaseNumber.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final List<String> displayHeaders = [
+      '結果', '荷札_製番/項目番号', '製品_Order No./Item', '詳細'
+    ];
+    final allRows = [
+      ...(matchingResults['matched'] as List<dynamic>).cast<Map<String, dynamic>>(),
+      ...(matchingResults['unmatched'] as List<dynamic>).cast<Map<String, dynamic>>(),
+      ...(matchingResults['missing'] as List<dynamic>).cast<Map<String, dynamic>>(),
+    ];
+
+    final projectState = ref.watch(projectProvider);
+    final notifier = ref.read(projectProvider.notifier);
+
+    final headers = _excelHeaders;
+    final data = _excelData;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('照合結果 (Case ${currentCaseNumber})'),
+        actions: [
+            IconButton(
+              icon: const Icon(Icons.save),
+              onPressed: () => _saveAsExcel(context, headers, data, false),
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SingleChildScrollView(
+                 scrollDirection: Axis.vertical,
+                 child: DataTable(
+                    columns: displayHeaders.map((h) => DataColumn(label: Text(h, style: const TextStyle(fontWeight: FontWeight.bold)))).toList(),
+                    rows: allRows.map((row) {
+                      final status = row['照合ステータス'] as String? ?? '';
+                      final isMatched = status.contains('一致') || status.contains('再');
+                      final isSkipped = status.contains('スキップ');
+                      final nifuda = row['nifuda'] as Map<String, dynamic>? ?? {};
+                      final product = row['product'] as Map<String, dynamic>? ?? {};
+
+                      return DataRow(
+                        color: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
+                          if (isMatched) return Colors.green.shade100;
+                          if (status.contains('未検出') || status.contains('失敗')) return Colors.red.shade100;
+                          if (isSkipped) return Colors.yellow.shade100;
+                          return null;
+                        }),
+                        cells: [
+                          DataCell(Text(status)),
+                          DataCell(Text('${nifuda['製番']?.toString() ?? ''}-${nifuda['項目番号']?.toString() ?? ''}')),
+                          DataCell(Text(isMatched || isSkipped ? '${product['ORDER No.']?.toString() ?? ''}/${product['ITEM OF SPARE']?.toString() ?? ''}' : (product['ORDER No.']?.toString() ?? ''))),
+                          DataCell(Text(row['詳細']?.toString() ?? '')),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8.0),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
+                      icon: const Icon(Icons.skip_next),
+                      label: Text('次のCase (${'#${(int.tryParse(currentCaseNumber.replaceAll('#', '')) ?? 1) + 1}'})へ', style: const TextStyle(fontSize: 16)),
+                      onPressed: () async {
+                         await _updateMatchedProducts(context, ref);
+                         _moveToNextCase(context, ref);
+                      },
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8.0),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
+                      icon: const Icon(Icons.share),
+                      label: const Text('検品完了＆共有', style: TextStyle(fontSize: 16)),
+                      onPressed: () async {
+                        await _updateMatchedProducts(context, ref);
+
+                        // ★ 修正: productListData: productListKariData
+                        final newStatus = await exportAllProjectDataAction(
+                            context: context,
+                            projectTitle: projectTitle,
+                            projectFolderPath: projectFolderPath,
+                            nifudaData: nifudaData,
+                            productListData: productListKariData, // ★ 修正
+                            matchingResults: matchingResults,
+                            currentCaseNumber: currentCaseNumber,
+                            jsonSavePath: projectState.jsonSavePath,
+                            inspectionStatus: STATUS_COMPLETED,
+                        );
+
+                        if (newStatus == STATUS_COMPLETED) {
+                           if (projectState.currentProjectId != null) {
+                              await notifier.updateProjectStatus(STATUS_COMPLETED);
+                           } else {
+                              notifier.updateProjectStatus(STATUS_COMPLETED);
+                           }
+                           if(context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
-    
-    // 3. 照合結果 Excel の保存 (サイレント)
-    final String? excelFilePath = await _saveAsExcel(context, headers, data, true);
+  }
 
-    final List<XFile> filesToShare = [];
-    String message = '依頼No「$projectTitle」の検品が完了しました。\n\n';
+  String _formatTimestampForFilename(DateTime dateTime) {
+    return '${dateTime.year.toString().padLeft(4, '0')}'
+        '${dateTime.month.toString().padLeft(2, '0')}'
+        '${dateTime.day.toString().padLeft(2, '0')}'
+        '${dateTime.hour.toString().padLeft(2, '0')}'
+        '${dateTime.minute.toString().padLeft(2, '0')}'
+        '${dateTime.second.toString().padLeft(2, '0')}';
+  }
+}
 
-    if (jsonFilePath != null) {
-      filesToShare.add(XFile(jsonFilePath));
-      message += '・プロジェクトデータ (JSON) を添付しました。\n';
-    } else {
-      message += '・プロジェクトデータ (JSON) の保存に失敗しました。\n';
+// 補助的な拡張関数 (List<ProductListRow>の検索用)
+extension IterableExtension<E> on Iterable<E> {
+  E? firstWhereOrNull(bool Function(E element) test) {
+    for (final element in this) {
+      if (test(element)) return element;
     }
-
-    if (excelFilePath != null) {
-      filesToShare.add(XFile(excelFilePath));
-      message += '・照合結果 (Excel) を添付しました。';
-    } else {
-      message += '・照合結果 (Excel) の保存に失敗しました。\n';
-    }
-
-    if (!context.mounted) return;
-    showCustomSnackBar(context, '共有メニューを開きます...', showAtTop: true);
-    
-    // 4. ファイル共有の実行
-    if (filesToShare.isNotEmpty) {
-       await Share.shareXFiles(
-          filesToShare,
-          text: message,
-          subject: '【検品完了】$projectTitle',
-       );
-    } else {
-       await Share.share(message, subject: '【検品完了】$projectTitle');
-    }
-    
-    if (context.mounted) {
-       // 画面暗転回避のため、手動で戻ることを推奨するSnackbarを出す
-       showCustomSnackBar(context, '共有が完了しました。左上の矢印でホーム画面に戻ってください。', durationSeconds: 5, showAtTop: true);
-    }
+    return null;
   }
 }

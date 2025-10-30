@@ -2,9 +2,9 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_logs/flutter_logs.dart';
-import 'package:drift/drift.dart'; // ★ 修正: drift全体をインポート
+import 'package:drift/drift.dart';
 
-import '../database/app_database.dart'; 
+import '../database/app_database.dart';
 
 // 進捗ステータス
 const String STATUS_PENDING = '検品前';
@@ -13,10 +13,13 @@ const String STATUS_COMPLETED = '検品完了';
 
 // 状態 (State)
 class ProjectState {
-  final int? currentProjectId; 
+  final int? currentProjectId;
   final String projectTitle;
   final String inspectionStatus;
   final String? projectFolderPath;
+  final String currentCaseNumber;
+  final String? jsonSavePath;
+
   final List<List<String>> nifudaData;
   final List<List<String>> productListKariData;
   final bool isLoading;
@@ -24,10 +27,12 @@ class ProjectState {
   final String selectedMatchingPattern;
 
   const ProjectState({
-    this.currentProjectId, 
+    this.currentProjectId,
     required this.projectTitle,
     required this.inspectionStatus,
     required this.projectFolderPath,
+    required this.currentCaseNumber,
+    this.jsonSavePath,
     required this.nifudaData,
     required this.productListKariData,
     required this.isLoading,
@@ -36,10 +41,12 @@ class ProjectState {
   });
 
   ProjectState copyWith({
-    Value<int?>? currentProjectId, 
+    Value<int?>? currentProjectId,
     String? projectTitle,
     String? inspectionStatus,
     String? projectFolderPath,
+    String? currentCaseNumber,
+    Value<String?>? jsonSavePath,
     List<List<String>>? nifudaData,
     List<List<String>>? productListKariData,
     bool? isLoading,
@@ -51,6 +58,8 @@ class ProjectState {
       projectTitle: projectTitle ?? this.projectTitle,
       inspectionStatus: inspectionStatus ?? this.inspectionStatus,
       projectFolderPath: projectFolderPath ?? this.projectFolderPath,
+      currentCaseNumber: currentCaseNumber ?? this.currentCaseNumber,
+      jsonSavePath: jsonSavePath == null ? this.jsonSavePath : jsonSavePath.value,
       nifudaData: nifudaData ?? this.nifudaData,
       productListKariData: productListKariData ?? this.productListKariData,
       isLoading: isLoading ?? this.isLoading,
@@ -65,12 +74,14 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
 
   ProjectNotifier(this._db)
       : super(const ProjectState(
-          currentProjectId: null, 
+          currentProjectId: null,
           projectTitle: '',
           inspectionStatus: STATUS_PENDING,
           projectFolderPath: null,
-          nifudaData: const [],
-          productListKariData: const [],
+          currentCaseNumber: '#1',
+          jsonSavePath: null,
+          nifudaData: const [], // 初期状態ではヘッダーを含めない
+          productListKariData: const [], // 初期状態ではヘッダーを含めない
           isLoading: false,
           selectedCompany: 'T社',
           selectedMatchingPattern: 'T社（製番・項目番号）',
@@ -88,7 +99,7 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
   void updateMatchingPattern(String pattern) {
     state = state.copyWith(selectedMatchingPattern: pattern);
   }
-  
+
   void updateSelection({String? company, String? matchingPattern}) {
     state = state.copyWith(
       selectedCompany: company ?? state.selectedCompany,
@@ -96,10 +107,19 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     );
   }
 
+  void updateCaseNumber(String caseNumber) {
+    state = state.copyWith(currentCaseNumber: caseNumber);
+  }
+
+  void updateJsonSavePath(String? path) {
+      state = state.copyWith(jsonSavePath: Value(path));
+  }
+
   // ====== DB連携ロジック ======
 
-  final List<String> _nifudaHeader = const ['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード'];
-  final List<String> _productListHeader = const ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考'];
+  // ★ 修正: プライベート -> パブリック に変更 (getter)
+  List<String> get nifudaHeader => const ['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード', 'Case No.'];
+  List<String> get productListHeader => const ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考', '照合済Case'];
 
   Future<void> createProject({
     required String projectCode,
@@ -109,7 +129,7 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     try {
       final entry = ProjectsCompanion.insert(
         projectCode: projectCode,
-        projectTitle: projectCode, 
+        projectTitle: projectCode,
         inspectionStatus: STATUS_IN_PROGRESS,
         projectFolderPath: projectFolderPath,
       );
@@ -120,8 +140,11 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         projectTitle: newProject.projectTitle,
         inspectionStatus: newProject.inspectionStatus,
         projectFolderPath: newProject.projectFolderPath,
-        nifudaData: [_nifudaHeader], 
-        productListKariData: [_productListHeader], 
+        currentCaseNumber: '#1',
+        jsonSavePath: Value(null),
+        // ★ 修正: 新規作成時はヘッダーのみ設定
+        nifudaData: [nifudaHeader],
+        productListKariData: [productListHeader],
       );
       FlutterLogs.logInfo('DB_ACTION', 'CREATE_PROJECT', 'Project ${newProject.id} created/updated.');
 
@@ -137,24 +160,26 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     setLoading(true);
     try {
       final projectId = project.id;
-      
+
       final nifudaFuture = _db.nifudaRowsDao.getAllNifudaRows(projectId);
       final productListFuture = _db.productListRowsDao.getAllProductListRows(projectId);
-      
+
       final results = await Future.wait([nifudaFuture, productListFuture]);
       final nifudaDbRows = results[0] as List<NifudaRow>;
       final productListDbRows = results[1] as List<ProductListRow>;
 
-      final nifudaData = [_nifudaHeader]; 
+      final nifudaData = [nifudaHeader];
       nifudaData.addAll(nifudaDbRows.map((row) => [
-        row.seiban, row.itemNumber, row.productName, row.form, 
-        row.quantity, row.documentNumber, row.remarks, row.arrangementCode
+        row.seiban, row.itemNumber, row.productName, row.form,
+        row.quantity, row.documentNumber, row.remarks, row.arrangementCode,
+        row.caseNumber,
       ]));
-      
-      final productListData = [_productListHeader]; 
+
+      final productListData = [productListHeader];
       productListData.addAll(productListDbRows.map((row) => [
         row.orderNo, row.itemOfSpare, row.productSymbol, row.formSpec,
-        row.productCode, row.orderQuantity, row.article, row.note
+        row.productCode, row.orderQuantity, row.article, row.note,
+        row.matchedCase ?? '',
       ]));
 
       state = state.copyWith(
@@ -162,6 +187,8 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         projectTitle: project.projectTitle,
         inspectionStatus: project.inspectionStatus,
         projectFolderPath: project.projectFolderPath,
+        currentCaseNumber: '#1',
+        jsonSavePath: Value(null),
         nifudaData: nifudaData,
         productListKariData: productListData,
       );
@@ -175,78 +202,125 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     }
   }
 
+  // ★ 追加: JSONデータからStateを更新するメソッド
+  Future<void> loadProjectFromJsonData(Map<String, dynamic> jsonData) async {
+      setLoading(true);
+      try {
+          // ヘッダーがJSONデータに含まれているか確認し、なければ追加
+          List<List<String>> nifudaData = List<List<String>>.from((jsonData['nifudaData'] as List).map((e) => List<String>.from(e)));
+          List<List<String>> productListData = List<List<String>>.from((jsonData['productListKariData'] as List).map((e) => List<String>.from(e)));
+
+          // ヘッダーがない、または形式が違う場合はデフォルトヘッダーを追加
+          if (nifudaData.isEmpty || (nifudaData.first.isNotEmpty && nifudaData.first[0] != nifudaHeader[0])) {
+              nifudaData.insert(0, nifudaHeader);
+          }
+          if (productListData.isEmpty || (productListData.first.isNotEmpty && productListData.first[0] != productListHeader[0])) {
+              productListData.insert(0, productListHeader);
+          }
+
+          state = state.copyWith(
+              projectTitle: jsonData['projectTitle'],
+              projectFolderPath: jsonData['currentProjectFolderPath'],
+              nifudaData: nifudaData,
+              productListKariData: productListData,
+              inspectionStatus: STATUS_IN_PROGRESS, // JSONロード時は '検品中' に
+              currentProjectId: Value(null), // DBとは切り離す
+              currentCaseNumber: jsonData['currentCaseNumber'] ?? '#1', // Case No.も復元
+              // jsonSavePath は loadProjectAction 側で更新済み
+          );
+          FlutterLogs.logInfo('STATE_ACTION', 'LOAD_JSON', 'Project state loaded from JSON.');
+      } catch (e, s) {
+          FlutterLogs.logError('STATE_ACTION', 'LOAD_JSON_FAIL', 'Failed to load project state from JSON: $e\n$s');
+          rethrow;
+      } finally {
+          setLoading(false);
+      }
+  }
+
   Future<void> addNifudaRows(List<List<String>> newRows) async {
-    if (state.currentProjectId == null) return; 
+    if (state.currentProjectId == null) return;
     if (newRows.isEmpty) return;
 
     final projectId = state.currentProjectId!;
-    
+    final currentCaseNumber = state.currentCaseNumber;
+
     final List<NifudaRowsCompanion> entries = newRows.map((row) {
+      // rowの要素数がヘッダーより少ない場合も考慮
+      String safeGet(int index) => (index < row.length) ? row[index] : '';
       return NifudaRowsCompanion.insert(
         projectId: projectId,
-        seiban: row[0],
-        itemNumber: row[1],
-        productName: row[2],
-        form: row[3],
-        quantity: row[4],
-        documentNumber: row[5],
-        remarks: row[6],
-        arrangementCode: row[7],
+        seiban: safeGet(0),
+        itemNumber: safeGet(1),
+        productName: safeGet(2),
+        form: safeGet(3),
+        quantity: safeGet(4),
+        documentNumber: safeGet(5),
+        remarks: safeGet(6),
+        arrangementCode: safeGet(7),
+        caseNumber: currentCaseNumber,
       );
     }).toList();
 
     await _db.nifudaRowsDao.batchInsertNifudaRows(entries);
 
-    final updatedList = List<List<String>>.from(state.nifudaData)..addAll(newRows);
+    final newRowsWithCase = newRows.map((row) => [...row, currentCaseNumber]).toList();
+    final currentData = state.nifudaData.isEmpty ? [nifudaHeader] : state.nifudaData;
+    final updatedList = List<List<String>>.from(currentData)..addAll(newRowsWithCase);
     state = state.copyWith(
       nifudaData: updatedList,
-      inspectionStatus: STATUS_IN_PROGRESS, 
+      inspectionStatus: STATUS_IN_PROGRESS,
     );
-    FlutterLogs.logInfo('DB_ACTION', 'ADD_NIFUDA', '${entries.length} nifuda rows added.');
+    FlutterLogs.logInfo('DB_ACTION', 'ADD_NIFUDA', '${entries.length} nifuda rows added for Case $currentCaseNumber.');
   }
 
   Future<void> addProductListRows(List<List<String>> newRows) async {
     if (state.currentProjectId == null) return;
     if (newRows.isEmpty) return;
-    
+
     final projectId = state.currentProjectId!;
 
     final List<ProductListRowsCompanion> entries = newRows.map((row) {
+      String safeGet(int index) => (index < row.length) ? row[index] : '';
       return ProductListRowsCompanion.insert(
         projectId: projectId,
-        orderNo: row[0],
-        itemOfSpare: row[1],
-        productSymbol: row[2],
-        formSpec: row[3],
-        productCode: row[4],
-        orderQuantity: row[5],
-        article: row[6],
-        note: row[7],
+        orderNo: safeGet(0),
+        itemOfSpare: safeGet(1),
+        productSymbol: safeGet(2),
+        formSpec: safeGet(3),
+        productCode: safeGet(4),
+        orderQuantity: safeGet(5),
+        article: safeGet(6),
+        note: safeGet(7),
+        matchedCase: Value(null), // 初期値は null
       );
     }).toList();
 
     await _db.productListRowsDao.batchInsertProductListRows(entries);
 
-    final updatedList = List<List<String>>.from(state.productListKariData)..addAll(newRows);
+    final newRowsWithMatchedCase = newRows.map((row) => [...row, '']).toList();
+    final currentData = state.productListKariData.isEmpty ? [productListHeader] : state.productListKariData;
+    final updatedList = List<List<String>>.from(currentData)..addAll(newRowsWithMatchedCase);
     state = state.copyWith(
       productListKariData: updatedList,
-      inspectionStatus: STATUS_IN_PROGRESS, 
+      inspectionStatus: STATUS_IN_PROGRESS,
     );
     FlutterLogs.logInfo('DB_ACTION', 'ADD_PRODUCT_LIST', '${entries.length} product list rows added.');
   }
-  
+
   Future<void> updateProjectStatus(String status) async {
-    if (state.currentProjectId == null) {
-      state = state.copyWith(inspectionStatus: status);
-      return;
-    }
-    
+    // DB ID がなくても State のステータスは更新
     state = state.copyWith(inspectionStatus: status);
-    
+
+    if (state.currentProjectId == null) {
+      return; // DB 操作はスキップ
+    }
+
+    // DB ID があれば DB も更新
     await _db.projectsDao.upsertProject(
       ProjectsCompanion(
         id: Value(state.currentProjectId!),
         inspectionStatus: Value(status),
+        // 他のカラムは更新しない場合は Value.absent() を指定
         projectCode: Value.absent(),
         projectTitle: Value.absent(),
         projectFolderPath: Value.absent(),
@@ -259,41 +333,31 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
 // Riverpod Provider
 final projectProvider = StateNotifierProvider<ProjectNotifier, ProjectState>((ref) {
   final dbAsyncValue = ref.watch(databaseProvider);
+  // requireValue は DB 初期化完了まで待機する
   return ProjectNotifier(dbAsyncValue.requireValue);
 });
 
-// ★ 修正: Provider -> FutureProvider に変更
 final databaseProvider = FutureProvider<AppDatabase>((ref) async {
-  // AppDatabaseのインスタンスをシングルトンで返す
-  // LazyDatabaseが使われているため、`AppDatabase()`の呼び出しは同期的でOK。
-  // 実際の接続はDBが最初に使用されるとき (例: .watch() や .get()) に非同期で行われる。
-  // ただし、Notifierが .requireValue を使うため、ここではインスタンスを
-  // Futureでラップするだけでもよいが、
-  // 他のエラーを避けるため、シングルトンインスタンスを ref.read で管理する。
-  
-  // 変更：シングルトンDBインスタンスを別途Providerで管理
   final db = ref.read(appDatabaseInstanceProvider);
   return db;
 });
 
-// ★ 追加: AppDatabaseのシングルトンインスタンス
 final appDatabaseInstanceProvider = Provider<AppDatabase>((ref) {
+  // アプリ起動時に一度だけインスタンス化される
   return AppDatabase();
 });
 
 
 // プロジェクト一覧をストリーミング
 final projectListStreamProvider = StreamProvider<List<Project>>((ref) {
-  // ★ 修正: DBが準備できるまで待機
   final dbAsync = ref.watch(databaseProvider);
-  
-  // DBがロード中またはエラーの場合は、空のStreamを返す
+
   if (dbAsync.isLoading || dbAsync.hasError) {
     return Stream.value([]);
   }
-  
-  // DBが利用可能なら、Streamを返す
+
   final db = dbAsync.requireValue;
+  // orderBy で降順にソート
   return (db.projectsDao.select(db.projects)
          ..orderBy([(t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc)]))
          .watch();

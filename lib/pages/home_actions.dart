@@ -14,8 +14,10 @@ import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:flutter_logs/flutter_logs.dart';
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
-import 'package:permission_handler/permission_handler.dart'; 
-import 'package:media_scanner/media_scanner.dart'; 
+import 'package:permission_handler/permission_handler.dart';
+import 'package:media_scanner/media_scanner.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:drift/drift.dart' show Value; // ProductMatcherで使用するため
 
 import '../utils/gpt_service.dart';
 import '../utils/product_matcher.dart';
@@ -29,15 +31,15 @@ import '../widgets/excel_preview_dialog.dart';
 import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
 import 'directory_image_picker_page.dart';
-// ★ 修正: ProjectLoadDialog (Drift版) をインポート
-import 'project_load_dialog.dart'; 
+import 'project_load_dialog.dart';
 import 'streaming_progress_dialog.dart';
-import '../utils/gemini_service.dart'; 
+import '../utils/gemini_service.dart';
+import '../state/project_state.dart';
 
 // --- Constants ---
 const String BASE_PROJECT_DIR = "/storage/emulated/0/DCIM/検品関係";
 
-// --- Utility Functions (省略) ---
+// --- Utility Functions ---
 void _logError(String tag, String subTag, Object error, StackTrace? stack) {
   FlutterLogs.logThis(
     tag: tag,
@@ -128,7 +130,7 @@ img.Image _applySharpeningFilter(img.Image image) {
 // --- End of Utility Functions ---
 
 
-// ★★★ _saveScannedProductImages (変更なしのため省略) ★★★
+// ★★★ _saveScannedProductImages (製品リスト画像はCase No.関係なし) ★★★
 Future<void> _saveScannedProductImages(
     BuildContext context,
     String projectFolderPath,
@@ -138,20 +140,12 @@ Future<void> _saveScannedProductImages(
     return;
   }
   try {
-    var status = await Permission.storage.status;
-    if (!status.isGranted) status = await Permission.storage.request();
+    var status = await Permission.storage.request();
     if (!status.isGranted) {
-      if (Platform.isAndroid) {
-        var externalStatus = await Permission.manageExternalStorage.status;
-        if (!externalStatus.isGranted) {
-          externalStatus = await Permission.manageExternalStorage.request();
-        }
-        if (!externalStatus.isGranted) {
-          throw Exception('ストレージへのアクセス権限がありません。');
-        }
-      } else {
-        throw Exception('ストレージへのアクセス権限がありません。');
-      }
+       status = await Permission.manageExternalStorage.request();
+    }
+    if (!status.isGranted) {
+      throw Exception('ストレージへのアクセス権限がありません。');
     }
 
     final String targetDirPath = p.join(projectFolderPath, "製品リスト画像");
@@ -167,7 +161,7 @@ Future<void> _saveScannedProductImages(
       final sourceFile = File(sourcePath);
       if (!await sourceFile.exists()) {
         FlutterLogs.logWarn('IMAGE_SAVE', 'SOURCE_NOT_FOUND', 'Source image not found: $sourcePath');
-        continue; 
+        continue;
       }
       final timestamp = _formatTimestampForFilename(DateTime.now());
       final originalExtension = p.extension(sourcePath);
@@ -200,28 +194,45 @@ Future<void> _saveScannedProductImages(
   }
 }
 
-// ★★★ saveProjectAction (変更なし) ★★★
-// (これはDB保存ではなく「JSONエクスポート」機能として home_page.dart で使われ続ける)
+// ★★★ saveProjectAction (修正: JSON保存パス、新規/上書き対応) ★★★
 Future<String?> saveProjectAction(
   BuildContext context,
   String currentProjectFolderPath,
   String projectTitle,
   List<List<String>> nifudaData,
   List<List<String>> productListKariData,
+  String currentCaseNumber,
+  String? existingJsonSavePath,
+  void Function(String?) updateJsonSavePath,
 ) async {
   try {
-    final now = DateTime.now();
-    final timestamp = _formatTimestampForFilename(now); 
-    final fileName = '$projectTitle\_$timestamp.json';
+    String fileName = '$projectTitle.json';
+    String saveFilePath;
+    String saveDirPath;
+    bool isNewSave = existingJsonSavePath == null;
 
-    final saveDirPath = p.join(currentProjectFolderPath, 'SAVES');
+    if (isNewSave) {
+      // 2-2: DCIM/検品関係/プロジェクトコード/SAVES/YYYYMMDD/hhmmss/プロジェクトコード.json
+      final now = DateTime.now();
+      final timestamp = _formatTimestampForFilename(now);
+      final dateFolder = timestamp.substring(0, 8);
+      final timeFolder = timestamp.substring(9);
+
+      final savesDir = p.join(currentProjectFolderPath, 'SAVES');
+      saveDirPath = p.join(savesDir, dateFolder, timeFolder);
+      saveFilePath = p.join(saveDirPath, fileName);
+    } else {
+      saveFilePath = existingJsonSavePath!;
+      saveDirPath = p.dirname(saveFilePath);
+      fileName = p.basename(saveFilePath);
+    }
+
     final saveDir = Directory(saveDirPath);
 
     if (!await saveDir.exists()) {
       await saveDir.create(recursive: true);
     }
 
-    final saveFilePath = p.join(saveDirPath, fileName);
     final file = File(saveFilePath);
 
     final projectData = {
@@ -229,14 +240,25 @@ Future<String?> saveProjectAction(
       'projectFolderPath': currentProjectFolderPath,
       'nifudaData': nifudaData,
       'productListKariData': productListKariData,
+      'currentCaseNumber': currentCaseNumber,
     };
 
     final jsonString = jsonEncode(projectData);
     await file.writeAsString(jsonString);
 
+    if (isNewSave) {
+        updateJsonSavePath(saveFilePath);
+    }
+
     if (context.mounted) {
-      showCustomSnackBar(context, 'プロジェクトを $fileName に保存しました。', durationSeconds: 3);
-      FlutterLogs.logInfo('PROJECT_ACTION', 'SAVE_SUCCESS', 'Project $projectTitle saved to $saveFilePath');
+      final actionType = isNewSave ? '新規保存' : '上書き保存';
+      // メッセージ用に相対パスを生成 (SAVESフォルダからの相対パス)
+      // currentProjectFolderPath = .../DCIM/検品関係/プロジェクトコード
+      // baseSavesDir = .../DCIM/検品関係/SAVES
+      final baseSavesDir = p.join(p.dirname(currentProjectFolderPath), 'SAVES');
+      final relativePath = p.relative(saveFilePath, from: baseSavesDir);
+      showCustomSnackBar(context, 'プロジェクトを SAVES/$relativePath にて $actionType しました。', durationSeconds: 3);
+      FlutterLogs.logInfo('PROJECT_ACTION', 'SAVE_SUCCESS', 'Project $projectTitle $actionType to $saveFilePath');
     }
 
     return saveFilePath;
@@ -249,38 +271,46 @@ Future<String?> saveProjectAction(
   }
 }
 
-// ★★★ 修正: loadProjectAction (JSON読み込み) ★★★
-// home_page.dart からは呼ばれなくなったが、コンパイルエラーを解消するために
-// ProjectLoadDialog.show() の呼び出しを修正する。
-// (もしくはこの関数全体を削除しても良い)
-Future<Map<String, dynamic>?> loadProjectAction(BuildContext context) async {
-  final baseDir = Directory(BASE_PROJECT_DIR);
+// ★★★ loadProjectAction (修正: JSON読み込み - UI変更対応) ★★★
+Future<Map<String, dynamic>?> loadProjectAction(
+  BuildContext context,
+  void Function(String?) updateJsonSavePath,
+) async {
+  // ★ 修正: ベースのSAVESディレクトリを指定
+  final baseSaveDir = Directory(p.join(BASE_PROJECT_DIR, 'SAVES'));
 
-  if (!await baseDir.exists()) {
-    if (context.mounted) showCustomSnackBar(context, 'プロジェクトの保存フォルダが見つかりませんでした。', isError: true);
+  if (!await baseSaveDir.exists()) {
+    if (context.mounted) showCustomSnackBar(context, 'JSON保存フォルダ(SAVES)が見つかりませんでした。', isError: true);
     return null;
   }
 
-  // ★ 修正: ProjectLoadDialog (Drift版) は引数を取らない。
-  // このJSON読み込み機能は事実上DB版に置き換えられたため、
-  // この関数は「古いJSONを読み込む」という目的でもはや機能しない。
-  // コンパイルを通すため、呼び出し自体をコメントアウトする。
-  
-  // final Map<String, String>? selectedFile = await ProjectLoadDialog.show(context, BASE_PROJECT_DIR); // <-- エラー箇所
-  
-  if (context.mounted) {
-    _showErrorDialog(context, '機能が変更されました', 'プロジェクトの読み込みは「DBから読み込み」ボタンを使用してください。\n\n（古いJSONバックアップファイルを読み込む機能は現在サポートされていません）');
-  }
-  return null;
+  // ★ 修正: DirectoryImagePickerPage のコンストラクタ引数を修正
+  final Map<String, String>? selectedFile = await Navigator.push<Map<String, String>>(
+    context,
+    MaterialPageRoute(builder: (_) => DirectoryImagePickerPage(
+      rootDirectoryPath: baseSaveDir.path,
+      title: 'JSONプロジェクトを選択', // ★ 修正: title を渡す
+      fileExtensionFilter: const ['.json'], // ★ 修正: fileExtensionFilter を渡す
+      showDirectoriesFirst: true,
+      returnOnlyFilePath: true,
+    ))
+  );
 
-  /* --- 以下、古いJSON読み込みロジック (到達不能) ---
-  if (selectedFile == null) {
+  if (selectedFile == null || selectedFile['filePath'] == null) {
     if (context.mounted) showCustomSnackBar(context, 'プロジェクトの読み込みがキャンセルされました。');
     return null;
   }
+
   final filePath = selectedFile['filePath']!;
-  final projectTitle = selectedFile['projectTitle']!;
-  final projectFolderPath = selectedFile['projectFolderPath']!;
+  final fileName = p.basename(filePath);
+  final projectTitle = fileName.replaceAll(RegExp(r'\.json$', caseSensitive: false), '');
+  // ★ 修正: projectFolderPath はJSONファイルからではなく、パス構造から決定
+  // .../DCIM/検品関係/SAVES/YYYYMMDD/hhmmss/file.json
+  // プロジェクトフォルダは .../DCIM/検品関係/プロジェクト名 になる
+  // プロジェクト名は projectTitle と同じ
+  final projectFolderPath = p.join(BASE_PROJECT_DIR, projectTitle);
+
+
   try {
     final file = File(filePath);
     if (!await file.exists()) {
@@ -288,20 +318,26 @@ Future<Map<String, dynamic>?> loadProjectAction(BuildContext context) async {
     }
     final jsonString = await file.readAsString();
     final Map<String, dynamic> loadedData = jsonDecode(jsonString) as Map<String, dynamic>;
+
     if (loadedData['projectTitle'] == null ||
         loadedData['nifudaData'] is! List ||
         loadedData['productListKariData'] is! List) {
       throw Exception('ファイルの構造が不正です。');
     }
+
+    updateJsonSavePath(filePath);
+
     if (context.mounted) {
       showCustomSnackBar(context, 'プロジェクト「$projectTitle」を読み込みました。', durationSeconds: 3);
       FlutterLogs.logInfo('PROJECT_ACTION', 'LOAD_SUCCESS', 'Project $projectTitle loaded from $filePath');
     }
+
     return {
       'projectTitle': projectTitle,
       'currentProjectFolderPath': projectFolderPath,
       'nifudaData': (loadedData['nifudaData'] as List).map((e) => List<String>.from(e)).toList(),
       'productListKariData': (loadedData['productListKariData'] as List).map((e) => List<String>.from(e)).toList(),
+      'currentCaseNumber': loadedData['currentCaseNumber'] ?? '#1',
     };
   } catch (e, s) {
     _logError('PROJECT_ACTION', 'LOAD_ERROR', e, s);
@@ -310,12 +346,15 @@ Future<Map<String, dynamic>?> loadProjectAction(BuildContext context) async {
     }
     return null;
   }
-  */
 }
 
 
-// ★★★ captureProcessAndConfirmNifudaAction (変更なし) ★★★
-Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext context, String projectFolderPath) async {
+// ★★★ captureProcessAndConfirmNifudaAction (修正: Case No.を渡す) ★★★
+Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
+    BuildContext context,
+    String projectFolderPath,
+    String currentCaseNumber,
+) async {
   final List<Map<String, dynamic>>? allGptResults =
       await Navigator.push<List<Map<String, dynamic>>>(
     context,
@@ -323,6 +362,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
         overlayText: '荷札を枠に合わせて撮影',
         isProductListOcr: false,
         projectFolderPath: projectFolderPath,
+        caseNumber: currentCaseNumber,
         aiService: sendImageToGPT,
     )),
   );
@@ -398,25 +438,44 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(BuildContext co
   }
 }
 
-// ★★★ showAndExportNifudaListAction (変更なし) ★★★
+// ★★★ showAndExportNifudaListAction (修正: Case No.でフィルタリング) ★★★
 void showAndExportNifudaListAction(
   BuildContext context,
   List<List<String>> nifudaData,
   String projectTitle,
   String projectFolderPath,
+  String currentCaseNumber,
 ) {
-    if (nifudaData.length <= 1) {
-    _showErrorDialog(context, 'データなし', '表示する荷札データがありません。');
+  // ★ 修正: 変数定義を追加
+  // nifudaHeader: ['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード', 'Case No.']
+  const int caseNoColumnIndex = 8;
+
+  if (nifudaData.isEmpty) {
+     _showErrorDialog(context, 'データなし', '荷札データが空です。');
+     return;
+  }
+  final header = nifudaData.first;
+  final filteredRows = nifudaData.sublist(1).where((row) {
+    if (row.length > caseNoColumnIndex) {
+      return row[caseNoColumnIndex] == currentCaseNumber;
+    }
+    return false;
+  }).toList();
+
+  final filteredData = [header, ...filteredRows];
+
+  if (filteredData.length <= 1) {
+    _showErrorDialog(context, 'データなし', '表示する荷札データがありません。\n（Case $currentCaseNumber のデータがありません）');
     return;
   }
   showDialog(
     context: context,
     builder: (_) => ExcelPreviewDialog(
-      title: '荷札リスト',
-      data: nifudaData,
-      headers: nifudaData.first,
+      title: '荷札リスト (Case $currentCaseNumber)',
+      data: filteredData,
+      headers: filteredData.first,
       projectFolderPath: projectFolderPath,
-      subfolder: '荷札リスト',
+      subfolder: '荷札リスト/$currentCaseNumber',
     ),
   );
 }
@@ -468,7 +527,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   } catch (e, s) {
     _logError('IMAGE_PROC', 'Image read/resize error', e, s);
     if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはリサイズに失敗しました: $e');
-    return null; 
+    return null;
   }
   if (rawImageBytesList.isEmpty) {
       if(context.mounted) _showErrorDialog(context, '画像処理エラー', '有効な画像が読み込めませんでした。');
@@ -501,14 +560,14 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   final List<Rect> dynamicMasks = previewResult.dynamicMasks;
 
-  List<Uint8List> finalImagesToSend = [previewResult.imageBytes]; 
+  List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
   if (rawImageBytesList.length > 1) {
     if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${rawImageBytesList.length})');
     try {
       for (int i = 1; i < rawImageBytesList.length; i++) {
-        if (!context.mounted) break; 
-        if(i > 1 && context.mounted) { 
-            Navigator.pop(context); 
+        if (!context.mounted) break;
+        if(i > 1 && context.mounted) {
+            Navigator.pop(context);
            _showLoadingDialog(context, '画像を準備中... (${i + 1}/${rawImageBytesList.length})');
         }
 
@@ -518,14 +577,15 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
         if (template == 't') {
             maskedImage = applyMaskToImage(image, template: 't');
         } else if (template == 'dynamic' && dynamicMasks.isNotEmpty) {
+            // ★ 修正: dynamicMasks -> dynamicMaskRects
             maskedImage = applyMaskToImage(image, template: 'dynamic', dynamicMaskRects: dynamicMasks);
         } else {
-            maskedImage = image; 
+            maskedImage = image;
         }
         finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
       }
     } finally {
-       if (context.mounted) _hideLoadingDialog(context); 
+       if (context.mounted) _hideLoadingDialog(context);
     }
   }
 
@@ -535,7 +595,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   }
 
   List<Map<String, dynamic>?> allAiRawResults = [];
-  final String companyForGpt = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany; 
+  final String companyForGpt = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany;
 
   for (int i = 0; i < finalImagesToSend.length; i++) {
       if (!context.mounted) break;
@@ -573,11 +633,11 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
           FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_GPT_PARSE_OK', 'Successfully parsed response for image ${i + 1}');
       } catch (e, s) {
           _logError('OCR_ACTION', 'PRODUCT_LIST_GPT_PARSE_FAIL', 'Failed to parse JSON for image ${i + 1}: ${rawJsonResponse}', s);
-          allAiRawResults.add(null); 
+          allAiRawResults.add(null);
       }
   }
 
-  if (!context.mounted) return null; 
+  if (!context.mounted) return null;
   return _processRawProductResults(context, allAiRawResults, selectedCompany);
 }
 
@@ -585,12 +645,12 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 Future<List<List<String>>?> _processRawProductResults(
   BuildContext context,
   List<Map<String, dynamic>?> allAiRawResults,
-  String selectedCompany, 
+  String selectedCompany,
 ) async {
   List<Map<String, String>> allExtractedProductRows = [];
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
 
-  final bool isTCompany = (selectedCompany == 'T社'); 
+  final bool isTCompany = (selectedCompany == 'T社');
 
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {
@@ -604,16 +664,16 @@ Future<List<List<String>>?> _processRawProductResults(
 
             if (isTCompany) {
               final String note = item['備考(NOTE)']?.toString() ?? '';
-              finalOrderNo = '$commonOrderNo $note'.trim(); 
+              finalOrderNo = '$commonOrderNo $note'.trim();
             } else {
               final String remarks = item['備考(REMARKS)']?.toString() ?? '';
-              finalOrderNo = commonOrderNo; 
+              finalOrderNo = commonOrderNo;
 
               if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
                  if (commonOrderNo.endsWith('-') || commonOrderNo.endsWith(' ')) {
-                     finalOrderNo = '$commonOrderNo$remarks'; 
+                     finalOrderNo = '$commonOrderNo$remarks';
                  } else {
-                     finalOrderNo = '$commonOrderNo $remarks'; 
+                     finalOrderNo = '$commonOrderNo $remarks';
                  }
               }
             }
@@ -647,23 +707,27 @@ void showAndExportProductListAction(
   List<List<String>> productListData,
   String projectFolderPath,
 ) {
+    if (productListData.isEmpty) {
+       _showErrorDialog(context, 'データなし', '表示する製品リストデータがありません。');
+       return;
+    }
     if (productListData.length <= 1) {
-    _showErrorDialog(context, 'データなし', '表示する製品リストデータがありません。');
-    return;
-  }
-  showDialog(
-    context: context,
-    builder: (_) => ExcelPreviewDialog(
-      title: '製品リスト',
-      data: productListData,
-      headers: productListData.first,
-      projectFolderPath: projectFolderPath,
-      subfolder: '製品リスト',
-    ),
-  );
+       _showErrorDialog(context, 'データなし', '表示する製品リストデータがありません。');
+       return;
+    }
+    showDialog(
+      context: context,
+      builder: (_) => ExcelPreviewDialog(
+        title: '製品リスト',
+        data: productListData,
+        headers: productListData.first,
+        projectFolderPath: projectFolderPath,
+        subfolder: '製品リスト',
+      ),
+    );
 }
 
-// ★★★ startMatchingAndShowResultsAction (変更なし) ★★★
+// ★★★ startMatchingAndShowResultsAction (修正: Case No.連携) ★★★
 Future<String?> startMatchingAndShowResultsAction(
   BuildContext context,
   List<List<String>> nifudaData,
@@ -671,41 +735,64 @@ Future<String?> startMatchingAndShowResultsAction(
   String matchingPattern,
   String projectTitle,
   String projectFolderPath,
+  String currentCaseNumber,
 ) async {
+  const nifudaCaseNoColumnIndex = 8;
+
   if (nifudaData.length <= 1 || productListData.length <= 1) {
     _showErrorDialog(context, 'データ不足', '照合には荷札と製品リストの両方のデータが必要です。');
-    FlutterLogs.logThis(
-      tag: 'MATCHING_ACTION',
-      subTag: 'DATA_INSUFFICIENT',
-      logMessage: 'Matching attempted with insufficient data.',
-      level: LogLevel.WARNING,
-    );
     return null;
   }
+
+  final nifudaHeader = nifudaData.first;
+  final filteredNifudaData = [
+    nifudaHeader,
+    ...nifudaData.sublist(1).where((row) {
+      if (row.length > nifudaCaseNoColumnIndex) {
+        return row[nifudaCaseNoColumnIndex] == currentCaseNumber;
+      }
+      return false;
+    })
+  ];
+
+  if (filteredNifudaData.length <= 1) {
+    _showErrorDialog(context, 'データ不足', '照合には荷札(${currentCaseNumber}分)のデータが必要です。');
+    return null;
+  }
+
   _showLoadingDialog(context, '照合処理を実行中...');
 
-  final nifudaHeaders = nifudaData.first;
-  final nifudaMapList = nifudaData.sublist(1).map((row) {
-    return { for (int i = 0; i < nifudaHeaders.length; i++) nifudaHeaders[i]: (i < row.length ? row[i] : '') };
+  final nifudaMapList = filteredNifudaData.sublist(1).map((row) {
+    final Map<String, String> map = {};
+    for (int i = 0; i < nifudaHeader.length; i++) { // Include Case No. column
+      map[nifudaHeader[i]] = (i < row.length ? row[i] : '');
+    }
+    return map;
   }).toList();
-  final productHeaders = productListData.first;
+
+
+  final productHeader = productListData.first;
   final productMapList = productListData.sublist(1).map((row) {
-    return { for (int i = 0; i < productHeaders.length; i++) productHeaders[i]: (i < row.length ? row[i] : '') };
+    final Map<String, String> map = {};
+    for (int i = 0; i < productHeader.length; i++) {
+      map[productHeader[i]] = (i < row.length ? row[i] : '');
+    }
+    return map;
   }).toList();
+
   if (nifudaMapList.isEmpty || productMapList.isEmpty) {
      _hideLoadingDialog(context);
-     _showErrorDialog(context, 'データ不足', '荷札または製品リストの有効なデータがありません。');
-     FlutterLogs.logThis(
-       tag: 'MATCHING_ACTION',
-       subTag: 'DATA_EMPTY',
-       logMessage: 'Matching failed due to empty map lists.',
-       level: LogLevel.WARNING,
-     );
-    return null;
+     _showErrorDialog(context, 'データ不足', '荷札(${currentCaseNumber}分)または製品リストの有効なデータがありません。');
+     return null;
   }
 
   final matchingLogic = ProductMatcher();
-  final Map<String, dynamic> rawResults = matchingLogic.match(nifudaMapList, productMapList, pattern: matchingPattern);
+  final Map<String, dynamic> rawResults = await matchingLogic.match(
+      nifudaMapList,
+      productMapList,
+      pattern: matchingPattern,
+      currentCaseNumber: currentCaseNumber,
+  );
 
   _hideLoadingDialog(context);
 
@@ -719,10 +806,132 @@ Future<String?> startMatchingAndShowResultsAction(
         projectTitle: projectTitle,
         nifudaData: nifudaData,
         productListKariData: productListData,
+        currentCaseNumber: currentCaseNumber,
     )),
   );
   if (context.mounted && newStatus != null) {
     return newStatus;
   }
   return null;
+}
+
+// ★★★ exportAllProjectDataAction (修正: productListData パラメータ名修正、型修正、nullチェック追加) ★★★
+Future<String?> exportAllProjectDataAction({
+  required BuildContext context,
+  required String projectTitle,
+  required String projectFolderPath,
+  required List<List<String>> nifudaData,
+  required List<List<String>> productListData, // ★ 修正: パラメータ名
+  required Map<String, dynamic> matchingResults,
+  required String currentCaseNumber,
+  required String? jsonSavePath,
+  required String inspectionStatus,
+}) async {
+  if (!context.mounted) return null;
+  _showLoadingDialog(context, '全データの検品完了＆共有処理を実行中...');
+
+  try {
+    // 1. JSONデータの保存（最新状態に更新）
+    final jsonExporter = saveProjectAction(
+      context,
+      projectFolderPath,
+      projectTitle,
+      nifudaData,
+      productListData, // ★ 修正: 正しいパラメータを渡す
+      currentCaseNumber,
+      jsonSavePath,
+      (_) {},
+    );
+    final finalJsonPath = await jsonExporter;
+    if (finalJsonPath == null) {
+       throw Exception('JSONデータファイルの最終保存に失敗しました。');
+    }
+
+    // 2. Excelデータの作成とエクスポート（ローカル＆SMB）
+    List<Future<Map<String, String>>> excelExports = [];
+
+    // 2-1. 荷札リスト Excel (Case No.ごとの全データ)
+    excelExports.add(exportToExcelStorage(
+      fileName: 'Nifuda_All_Cases.xlsx',
+      sheetName: '荷札リスト',
+      headers: nifudaData.first,
+      rows: nifudaData.sublist(1),
+      projectFolderPath: projectFolderPath,
+      subfolder: '最終エクスポート/Excel',
+    ));
+
+    // 2-2. 製品リスト Excel (全データ + 照合済Case)
+    excelExports.add(exportToExcelStorage(
+      fileName: 'ProductList_All.xlsx',
+      sheetName: '製品リスト',
+      headers: productListData.first,
+      rows: productListData.sublist(1),
+      projectFolderPath: projectFolderPath,
+      subfolder: '最終エクスポート/Excel',
+    ));
+
+    // 2-3. 照合結果 Excel (全Caseの最新照合結果)
+    final allMatchedData = (matchingResults['matched'] as List).cast<Map<String, dynamic>>();
+    final allUnmatchedData = (matchingResults['unmatched'] as List).cast<Map<String, dynamic>>();
+
+    final matchingHeaders = [
+        '照合結果', '荷札_製番', '荷札_項目番号', '荷札_品名', '製品_ORDER No.', '製品_品名記号', '製品_製品コード番号', '製品_照合済Case', '照合Case'
+    ];
+
+    // ★ 修正: 型を List<List<String>> に合わせる, null チェック強化
+    final List<List<String>> matchingRows = [
+      ...allMatchedData.map((m) => <String>[
+          '照合成功',
+          m['nifuda']?['製番']?.toString() ?? '', m['nifuda']?['項目番号']?.toString() ?? '', m['nifuda']?['品名']?.toString() ?? '',
+          m['product']?['ORDER No.']?.toString() ?? '', m['product']?['品名記D~H号']?.toString() ?? '', m['product']?['製品コード番号']?.toString() ?? '',
+          m['product']?['照合済Case']?.toString() ?? '', m['nifuda']?['Case No.']?.toString() ?? '',
+      ]),
+      ...allUnmatchedData.map((u) => <String>[
+          '照合失敗',
+          u['nifuda']?['製番']?.toString() ?? '', u['nifuda']?['項目番号']?.toString() ?? '', u['nifuda']?['品名']?.toString() ?? '',
+          '', '', '', '',
+          u['nifuda']?['Case No.']?.toString() ?? '',
+      ]),
+    ];
+
+
+    excelExports.add(exportToExcelStorage(
+      fileName: 'MatchingResult_All.xlsx',
+      sheetName: '照合結果',
+      headers: matchingHeaders,
+      rows: matchingRows,
+      projectFolderPath: projectFolderPath,
+      subfolder: '最終エクスポート/Excel',
+    ));
+
+    final results = await Future.wait(excelExports);
+
+    // ★ 修正: Nullチェックを強化 (?.isNotEmpty ?? false)
+    String localMessages = results.map((r) => r['local']).where((m) => m?.isNotEmpty ?? false).join(', ');
+    String smbMessages = results.map((r) => r['smb']).where((m) => m?.isNotEmpty ?? false).join('; ');
+
+    // 4. メッセージの作成とSnackbar表示
+    _hideLoadingDialog(context);
+
+    String successMessage = "検品完了＆共有が完了しました。\n\n";
+    successMessage += "・JSONデータ: " + p.basename(finalJsonPath) + "を最終保存\n";
+    successMessage += "・Excelエクスポート結果: ローカル($localMessages), SMB($smbMessages)\n";
+    successMessage += "・画像フォルダ: 製品リスト画像、荷札画像(Case_#1〜#50)はプロジェクトフォルダ内に保存されています。";
+
+    if (context.mounted) {
+       _showErrorDialog(context, '検品完了＆共有', successMessage);
+    }
+
+    FlutterLogs.logInfo('PROJECT_ACTION', 'EXPORT_ALL_SUCCESS', 'Project $projectTitle exported successfully.');
+
+    return STATUS_COMPLETED;
+
+  } catch (e, s) {
+    _hideLoadingDialog(context);
+    _logError('PROJECT_ACTION', 'EXPORT_ALL_FAIL', e, s);
+    if (context.mounted) {
+      _showErrorDialog(context, '共有エラー', '全データのエクスポートに失敗しました: ${e.toString()}');
+    }
+    return null;
+  }
 }

@@ -28,6 +28,7 @@ class CameraCapturePage extends StatefulWidget {
   final String? companyForGpt;
   final String projectFolderPath;
   final AiServiceFunction aiService;
+  final String? caseNumber; // ★ 追加: Case No. (荷札画像保存用)
 
   const CameraCapturePage({
     super.key,
@@ -38,6 +39,7 @@ class CameraCapturePage extends StatefulWidget {
     this.companyForGpt,
     required this.projectFolderPath,
     required this.aiService,
+    this.caseNumber, // ★ 追加
   });
 
   @override
@@ -46,17 +48,15 @@ class CameraCapturePage extends StatefulWidget {
 
 class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindingObserver {
   CameraController? _controller;
-  Future<void>? _initializeControllerFuture;
+  List<CameraDescription> _cameras = [];
   bool _isCameraInitialized = false;
-  String? _errorMessage;
-  bool _isProcessingImage = false;
+  bool _isProcessing = false;
+  int _capturedImageCount = 0;
+  final List<Map<String, dynamic>> _allGptResults = [];
+  final List<String> _capturedFilePaths = []; // 撮影したファイルのパスを保持
 
-  final List<Future<Map<String, dynamic>?>> _aiResultFutures = [];
-  final List<Uint8List> _capturedImageBytes = []; // ★★★ Nifuda OCRでは使用されないが、ProductList OCRで使っていたため残す ★★★
-  int _requestedImageCount = 0;
-  int _respondedImageCount = 0;
-  OverlayEntry? _flashOverlay;
-
+  // カメラプレビューとオーバーレイのサイズを計算するためのグローバルキー
+  final GlobalKey _cameraPreviewKey = GlobalKey();
   Rect _cameraPreviewAreaOnScreen = Rect.zero;
   Rect _overlayRectOnScreen = Rect.zero;
 
@@ -64,385 +64,386 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initCamera();
+    _initializeCamera();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
-    _flashOverlay?.remove();
     super.dispose();
   }
-  
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final CameraController? cameraController = _controller;
     if (cameraController == null || !cameraController.value.isInitialized) {
       return;
     }
+
     if (state == AppLifecycleState.inactive) {
       cameraController.dispose();
     } else if (state == AppLifecycleState.resumed) {
-      _initCamera();
+      _initializeController(cameraController.description);
     }
   }
 
-  Future<void> _initCamera() async {
-    try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
-        if (mounted) setState(() => _errorMessage = '利用可能なカメラが見つかりません。');
-        return;
-      }
-      final backCamera = cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.back,
-        orElse: () => cameras.first,
-      );
-      _controller = CameraController(
-        backCamera,
-        ResolutionPreset.high,
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
-      );
-      _initializeControllerFuture = _controller!.initialize();
-      await _initializeControllerFuture;
-      if (mounted) {
-        setState(() => _isCameraInitialized = true);
-      }
-    } on CameraException catch (e) {
-      if (mounted) setState(() => _errorMessage = 'カメラ初期化エラー: ${e.description}');
-    } catch (e) {
-      if (mounted) setState(() => _errorMessage = '予期せぬカメラエラー: $e');
-    }
-  }
-
-  void _showFlashEffect() {
-    _flashOverlay?.remove();
-    _flashOverlay = OverlayEntry(
-      builder: (_) => Positioned.fill(
-        child: IgnorePointer(child: Container(color: Colors.white.withOpacity(0.5))),
-      ),
-    );
-    Overlay.of(context).insert(_flashOverlay!);
-    Future.delayed(const Duration(milliseconds: 120), () {
-      _flashOverlay?.remove();
-      _flashOverlay = null;
-    });
-  }
-
-  Future<void> _saveCroppedImage(Uint8List imageBytes, String fileName) async {
-    if (!Platform.isAndroid) {
-      debugPrint("この画像保存方法はAndroid専用です。");
+  Future<void> _initializeCamera() async {
+    // 権限チェック
+    var status = await Permission.camera.request();
+    if (!status.isGranted) {
+      if (mounted) showCustomSnackBar(context, 'カメラのアクセス権限が拒否されました。', isError: true);
+      if (mounted) Navigator.pop(context);
       return;
-    }
-    try {
-      final status = await Permission.storage.request();
-      if (!status.isGranted) {
-        if (!await Permission.manageExternalStorage.request().isGranted) {
-          throw Exception('ストレージへのアクセス権限がありません。');
-        }
-      }
-      final String albumPath = p.join(widget.projectFolderPath, "荷札画像");
-      final Directory albumDir = Directory(albumPath);
-      if (!await albumDir.exists()) {
-        await albumDir.create(recursive: true);
-      }
-      final File file = File(p.join(albumDir.path, fileName));
-      await file.writeAsBytes(imageBytes);
-      await MediaScanner.loadMedia(path: file.path);
-      
-      if (mounted) {
-        final savedPath = p.join(p.basename(widget.projectFolderPath), "荷札画像", fileName);
-        showCustomSnackBar(context, '画像を保存しました: $savedPath', showAtTop: true);
-      }
-    } catch (e) {
-      debugPrint('画像保存エラー: $e');
-      if (mounted) {
-        showCustomSnackBar(context, '画像保存エラー: ${e.toString()}', isError: true, showAtTop: true);
-      }
-    }
-  }
-
-  Future<void> _takeAndProcessImage(BuildContext layoutContext) async {
-    if (!_isCameraInitialized || _controller == null || _controller!.value.isTakingPicture || _isProcessingImage || !_controller!.value.isInitialized) {
-      return;
-    }
-    if (_cameraPreviewAreaOnScreen.isEmpty || _overlayRectOnScreen.isEmpty) {
-         if(mounted) showCustomSnackBar(layoutContext, 'レイアウト計算待機中。', showAtTop: true);
-        return;
-    }
-
-    if (mounted) setState(() => _isProcessingImage = true);
-    _showFlashEffect();
-
-    try {
-      final XFile imageFile = await _controller!.takePicture();
-      final Uint8List originalImageBytes = await imageFile.readAsBytes();
-      
-      img.Image? originalImage = img.decodeImage(originalImageBytes);
-      if (originalImage == null) throw Exception("画像デコード失敗");
-      
-      final img.Image orientedImage = img.bakeOrientation(originalImage);
-      
-      Uint8List bytesForProcessing;
-
-      if (widget.isProductListOcr) {
-        // ★★★ 製品リストOCRは外部スキャナを使用するため、このページはスキップされます。★★★
-        // 万が一到達した場合は、エラーまたはデータ破棄となるはずですが、ここでは従来の Product List の処理フローを定義します。
-        bytesForProcessing = Uint8List.fromList(img.encodeJpg(orientedImage, quality: 100));
-        
-      } else {
-        // ★★★ 荷札の場合: 従来の矩形クロップロジックを使用 (Nifuda OCR継続のため) ★★★
-        final int imgW = orientedImage.width;
-        final int imgH = orientedImage.height;
-
-        final double scaleX = imgW / _cameraPreviewAreaOnScreen.width;
-        final double scaleY = imgH / _cameraPreviewAreaOnScreen.height;
-
-        final double overlayLocalX = _overlayRectOnScreen.left - _cameraPreviewAreaOnScreen.left;
-        final double overlayLocalY = _overlayRectOnScreen.top - _cameraPreviewAreaOnScreen.top;
-
-        int cropX = (overlayLocalX * scaleX).round();
-        int cropY = (overlayLocalY * scaleY).round();
-        int cropW = (_overlayRectOnScreen.width * scaleX).round();
-        int cropH = (_overlayRectOnScreen.height * scaleY).round();
-        
-        final int finalCropX = cropX.clamp(0, imgW - cropW < 0 ? imgW : imgW - cropW).round();
-        final int finalCropY = cropY.clamp(0, imgH - cropH < 0 ? imgH : imgH - cropH).round();
-        final int finalCropW = cropW.clamp(1, imgW - finalCropX).round();
-        final int finalCropH = cropH.clamp(1, imgH - finalCropY).round();
-
-        if (finalCropW <= 0 || finalCropH <= 0) {
-          throw Exception("Invalid crop dimensions after clamp: W=$finalCropW, H=$finalCropH.");
-        }
-        
-        final img.Image croppedImage = img.copyCrop(
-            orientedImage,
-            x: finalCropX,
-            y: finalCropY,
-            width: finalCropW,
-            height: finalCropH,
-        );
-        bytesForProcessing = Uint8List.fromList(img.encodeJpg(croppedImage, quality: 100));
-      }
-
-      if(mounted) setState(() => _requestedImageCount++);
-
-      if (widget.isProductListOcr) { 
-        // Product List OCRは外部スキャナに置き換えられたため、このパスは無効です。
-        _capturedImageBytes.add(bytesForProcessing);
-        _aiResultFutures.add(Future.value({}).then((result) {
-          if (mounted) setState(() => _respondedImageCount++);
-          return null; 
-        }));
-      } else {
-        // AIへの送信処理を開始 (荷札の場合: 既存ロジック)
-        final aiFuture = widget.aiService(
-          bytesForProcessing,
-          isProductList: widget.isProductListOcr,
-          company: widget.isProductListOcr ? (widget.companyForGpt ?? 'none') : 'none',
-        ).then<Map<String, dynamic>?>((result) {
-          if (mounted) setState(() => _respondedImageCount++);
-          return result;
-        }).catchError((error) {
-          if (mounted) setState(() => _respondedImageCount++);
-          debugPrint("AI処理エラー: $error");
-          return null;
-        });
-        _aiResultFutures.add(aiFuture);
-      }
-      
-      final String fileName = 'nifuda_cropped_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      unawaited(_saveCroppedImage(bytesForProcessing, fileName));
-      
-    } catch (e, s) {
-      debugPrint('撮影または処理エラー: $e');
-      debugPrintStack(stackTrace: s);
-      if (mounted) showCustomSnackBar(layoutContext, '撮影または処理に失敗: ${e.toString()}', isError: true, showAtTop: true);
-    } finally {
-      if (mounted) setState(() => _isProcessingImage = false);
-    }
-  }
-
-  Future<void> _finishCapturingAndPop() async {
-    if (_requestedImageCount == 0) {
-        // 荷札: <Map<String, dynamic>>[] 製品リスト: <Uint8List>[]
-        Navigator.pop(context, widget.isProductListOcr ? <Uint8List>[] : <Map<String, dynamic>>[]); 
-        return;
-    }
-    if (_requestedImageCount != _respondedImageCount) {
-      final proceed = await showDialog<bool>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('処理が完了していません'),
-          content: Text('$_respondedImageCount件中、$_requestedImageCount件の処理のみ完了しています。このまま終了しますか？'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('待機')),
-            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('終了')),
-          ],
-        )
-      );
-      if(proceed != true) return;
     }
     
-    if (widget.isProductListOcr) { // 製品リストのパスは action filesで置き換えられたため、ここには到達しないはずですが、安全のために戻り値を定義します
-      if (mounted) setState(() => _isProcessingImage = true);
-      await Future.wait(_aiResultFutures); 
+    // カメラリスト取得
+    _cameras = await availableCameras();
+    if (_cameras.isEmpty) {
+      if (mounted) showCustomSnackBar(context, '利用可能なカメラが見つかりませんでした。', isError: true);
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+    
+    // バックカメラを優先的に選択
+    CameraDescription selectedCamera = _cameras.firstWhere(
+      (camera) => camera.lensDirection == CameraLensDirection.back,
+      orElse: () => _cameras.first,
+    );
+
+    await _initializeController(selectedCamera);
+  }
+  
+  Future<void> _initializeController(CameraDescription cameraDescription) async {
+    _controller = CameraController(
+      cameraDescription,
+      ResolutionPreset.high,
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.jpeg,
+    );
+
+    _controller!.addListener(() {
+      if (mounted) setState(() {});
+    });
+
+    try {
+      await _controller!.initialize();
+      // Androidのバグ回避: フォーカスモードをAutoに設定
+      if (Platform.isAndroid) {
+         await _controller!.setFocusMode(FocusMode.auto);
+      }
+      
+      // 画面上のカメラプレビューエリアのサイズを計算 (UIビルド後に実行)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_cameraPreviewKey.currentContext != null) {
+          final renderBox = _cameraPreviewKey.currentContext!.findRenderObject() as RenderBox;
+          final offset = renderBox.localToGlobal(Offset.zero);
+          _cameraPreviewAreaOnScreen = offset & renderBox.size;
+          setState(() {});
+        }
+      });
+      
       if (mounted) {
-        Navigator.pop(context, _capturedImageBytes); 
+        setState(() {
+          _isCameraInitialized = true;
+        });
       }
-    } else { // 荷札の場合はAI結果を返す (既存ロジック)
-      if (mounted) setState(() => _isProcessingImage = true);
-      List<Map<String, dynamic>> validResults = [];
-      final allRawResults = await Future.wait(_aiResultFutures);
-      for (final result in allRawResults) {
-          if (result != null) {
-              validResults.add(result);
-          }
+    } on CameraException catch (e) {
+      debugPrint('Error initializing camera: $e');
+      if (mounted) showCustomSnackBar(context, 'カメラの初期化に失敗しました: ${e.code}', isError: true);
+      _isCameraInitialized = false;
+    }
+  }
+
+  // ★ 追加: 画像をプロジェクトフォルダに保存する関数 (Case No.対応)
+  Future<String?> _saveImageToProjectFolder(XFile xfile) async {
+    try {
+      if (widget.projectFolderPath.isEmpty) {
+        throw Exception("プロジェクトフォルダパスが設定されていません。");
       }
+
+      String subfolder;
+      String fileNamePrefix;
+      if (widget.isProductListOcr) {
+        subfolder = "製品リスト画像";
+        fileNamePrefix = "product_list";
+      } else {
+        // 荷札画像の場合、Case No.ごとのフォルダを作成 (3-2)
+        final caseNo = widget.caseNumber ?? 'UnknownCase';
+        subfolder = "荷札画像/$caseNo"; 
+        fileNamePrefix = "nifuda_${caseNo.replaceAll('#', 'Case_')}";
+      }
+
+      final targetDirPath = p.join(widget.projectFolderPath, subfolder);
+      final targetDir = Directory(targetDirPath);
+
+      if (!await targetDir.exists()) {
+        await targetDir.create(recursive: true);
+      }
+
+      final timestamp = _formatTimestampForFilename(DateTime.now());
+      final originalExtension = p.extension(xfile.path);
+      final fileName = '${fileNamePrefix}_$timestamp$originalExtension';
+      final targetFilePath = p.join(targetDir.path, fileName);
+      
+      final file = File(xfile.path);
+      await file.copy(targetFilePath);
+      
+      // ギャラリーを更新
+      await MediaScanner.loadMedia(path: targetFilePath);
+
+      return targetFilePath;
+
+    } catch (e) {
+      debugPrint('Error saving image to project folder: $e');
+      if (mounted) showCustomSnackBar(context, '画像の保存に失敗しました: $e', isError: true);
+      return null;
+    }
+  }
+
+  // ★ 撮影ボタンのアクション
+  Future<void> _onCapturePressed() async {
+    if (!_controller!.value.isInitialized || _isProcessing) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      // 1. 画像の撮影
+      final XFile xfile = await _controller!.takePicture();
+      
+      // 2. 撮影した画像をプロジェクトフォルダに保存
+      final savedPath = await _saveImageToProjectFolder(xfile);
+      if (savedPath == null) return;
+      _capturedFilePaths.add(savedPath);
+
+      // 3. 画像のクロップ
+      final rawBytes = await xfile.readAsBytes();
+      final croppedBytes = _cropImageBytes(rawBytes);
+
+      if (croppedBytes == null) {
+        if (mounted) showCustomSnackBar(context, '画像クロップ中にエラーが発生しました。', isError: true);
+        return;
+      }
+      
+      // 4. OCR処理の実行
+      final result = await widget.aiService(
+        croppedBytes,
+        isProductList: widget.isProductListOcr,
+        company: widget.companyForGpt ?? '',
+      );
+
+      if (result != null) {
+        _allGptResults.add(result);
+        _capturedImageCount++;
+        if (mounted) {
+           showCustomSnackBar(context, '画像 #${_capturedImageCount} のOCRが完了しました。');
+        }
+      } else {
+         if (mounted) {
+           showCustomSnackBar(context, '画像 #${_capturedImageCount + 1} のOCR処理に失敗しました。', isError: true);
+        }
+      }
+
+    } on CameraException catch (e) {
+      debugPrint('Error taking picture: $e');
+      if (mounted) showCustomSnackBar(context, '撮影に失敗しました: ${e.code}', isError: true);
+    } catch (e) {
+      debugPrint('OCR processing error: $e');
+      if (mounted) showCustomSnackBar(context, 'OCR処理中に予期せぬエラーが発生しました: $e', isError: true);
+    } finally {
       if (mounted) {
-        Navigator.pop(context, validResults);
+        setState(() {
+          _isProcessing = false;
+        });
       }
+    }
+  }
+
+  // ★ 画像のクロップロジック
+  Uint8List? _cropImageBytes(Uint8List rawBytes) {
+    // 画面上のカメラプレビューの描画エリアと、オーバーレイの描画エリアが正しく取得されていることを確認
+    if (_overlayRectOnScreen == Rect.zero || _cameraPreviewAreaOnScreen == Rect.zero) {
+        debugPrint('Warning: Overlay or Preview rect is zero. Cannot crop.');
+        return rawBytes; // クロップ情報がない場合はそのまま返す
+    }
+    
+    try {
+      final img.Image? originalImage = img.decodeImage(rawBytes);
+      if (originalImage == null) return null;
+
+      // 画面上の座標を画像ピクセル座標に変換
+      final double widthRatio = originalImage.width / _cameraPreviewAreaOnScreen.width;
+      final double heightRatio = originalImage.height / _cameraPreviewAreaOnScreen.height;
+      
+      // クロップ領域の計算
+      final x = ((_overlayRectOnScreen.left - _cameraPreviewAreaOnScreen.left) * widthRatio).round();
+      final y = ((_overlayRectOnScreen.top - _cameraPreviewAreaOnScreen.top) * heightRatio).round();
+      final width = (_overlayRectOnScreen.width * widthRatio).round();
+      final height = (_overlayRectOnScreen.height * heightRatio).round();
+      
+      // クロップを実行
+      final img.Image croppedImage = img.copyCrop(
+        originalImage, 
+        x: x.clamp(0, originalImage.width), 
+        y: y.clamp(0, originalImage.height), 
+        width: width.clamp(0, originalImage.width - x), 
+        height: height.clamp(0, originalImage.height - y),
+      );
+      
+      // JPEGとしてエンコードして返却
+      return Uint8List.fromList(img.encodeJpg(croppedImage, quality: 90));
+
+    } catch (e, s) {
+      debugPrint('Image cropping error: $e\n$s');
+      return null;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!_isCameraInitialized) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    
+    // カメラプレビューが利用可能なエリア全体を覆う
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final double screenHeight = MediaQuery.of(context).size.height;
+
+    // カメラの縦横比に合わせたプレビューサイズを計算
+    final double cameraAspectRatio = _controller!.value.aspectRatio;
+    double previewWidth = screenWidth;
+    double previewHeight = previewWidth / cameraAspectRatio;
+
+    if (previewHeight < screenHeight) {
+      previewHeight = screenHeight;
+      previewWidth = previewHeight * cameraAspectRatio;
+    }
+    
+    // プレビューエリアの中心を計算
+    final Size previewSize = Size(previewWidth, previewHeight);
+    final Offset previewOffset = Offset((screenWidth - previewWidth) / 2, (screenHeight - previewHeight) / 2);
+
+
     return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(title: Text(widget.isProductListOcr ? '製品リスト連続撮影' : '荷札連続撮影')),
-      body: Builder( 
-        builder: (layoutContext) { 
-          return Stack(
-            children: [
-              _buildCameraPreview(layoutContext), 
-              if (_isProcessingImage && _requestedImageCount != _respondedImageCount)
-                Container(
-                  color: Colors.black.withOpacity(0.7),
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const CircularProgressIndicator(color: Colors.white),
-                        const SizedBox(height: 20),
-                        Text('画像処理中... ($_respondedImageCount / $_requestedImageCount)', style: const TextStyle(color: Colors.white, fontSize: 17)),
-                      ],
-                    ),
-                  ),
-                ),
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  top: false,
-                  child: Container(
-                    color: Colors.black.withOpacity(0.7),
-                    padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 16),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                         Text('結果: $_respondedImageCount / $_requestedImageCount 枚', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-                         const SizedBox(height: 12),
-                         Row(
+      body: Stack(
+        children: [
+          // 1. カメラプレビューエリア
+          Positioned.fromRect(
+            rect: previewOffset & previewSize,
+            child: SizedBox.expand(
+              key: _cameraPreviewKey, // このSizedBoxのサイズを取得するためにキーを使用
+              child: CameraPreview(_controller!),
+            ),
+          ),
+          
+          // 2. オーバーレイとボタンエリア (SafeAreaで上部を考慮)
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // カメラプレビューの画面上の位置を計算 (この時点で _cameraPreviewAreaOnScreen は更新されているはず)
+                final actualPreviewWidth = _cameraPreviewAreaOnScreen.width;
+                final actualPreviewHeight = _cameraPreviewAreaOnScreen.height;
+                
+                // オーバーレイのサイズと位置を計算
+                final actualOverlayWidth = actualPreviewWidth * widget.overlayWidthRatio;
+                final actualOverlayHeight = actualPreviewHeight * widget.overlayHeightRatio;
+
+                _overlayRectOnScreen = Rect.fromLTWH(
+                  _cameraPreviewAreaOnScreen.left + (actualPreviewWidth - actualOverlayWidth) / 2,
+                  _cameraPreviewAreaOnScreen.top + (actualPreviewHeight - actualOverlayHeight) / 2,
+                  actualOverlayWidth,
+                  actualOverlayHeight
+                );
+
+                return Stack(
+                    alignment: Alignment.topLeft,
+                    children: [
+                      // オーバーレイ描画
+                      Positioned.fromRect(
+                        rect: _overlayRectOnScreen,
+                        child: Container(
+                          decoration: BoxDecoration(border: Border.all(color: Colors.redAccent, width: 2.5)),
+                          alignment: Alignment.bottomCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              color: Colors.black.withOpacity(0.6),
+                              child: Text(widget.overlayText, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                            ),
+                          ),
+                        ),
+                      ),
+                      
+                      // 撮影・完了ボタン
+                      Positioned(
+                        bottom: 32,
+                        left: 0,
+                        right: 0,
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.camera_enhance_rounded),
-                                label: const Text('撮影＆送信'),
-                                onPressed: _isProcessingImage ? null : () => _takeAndProcessImage(layoutContext),
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.indigoAccent[700], foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
+                            // 完了ボタン
+                            ElevatedButton.icon(
+                              onPressed: _isProcessing ? null : () {
+                                // 撮影済みの結果を返却
+                                Navigator.pop(context, _allGptResults);
+                              },
+                              icon: const Icon(Icons.check),
+                              label: Text('完了 (${_allGptResults.length}件)', style: const TextStyle(fontSize: 16)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green.shade600,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.check_circle_outline_rounded),
-                                label: const Text('撮影終了'),
-                                onPressed: _finishCapturingAndPop,
-                                 style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey[700], foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
-                              ),
+                            
+                            // 撮影ボタン
+                            FloatingActionButton(
+                              onPressed: _onCapturePressed,
+                              backgroundColor: Colors.white,
+                              foregroundColor: Colors.black,
+                              child: _isProcessing 
+                                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blue))
+                                : const Icon(Icons.camera),
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        }
+                      ),
+                      
+                      // 戻るボタン (AppBar風)
+                      Positioned(
+                        top: 10,
+                        left: 10,
+                        child: IconButton(
+                          icon: const Icon(Icons.arrow_back, color: Colors.white),
+                          onPressed: () => Navigator.pop(context),
+                          style: IconButton.styleFrom(
+                            backgroundColor: Colors.black.withOpacity(0.5),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+              }
+            ),
+          ),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildCameraPreview(BuildContext layoutContext) {
-    if (_errorMessage != null) {
-      return Center(child: Text(_errorMessage!, style: const TextStyle(color: Colors.white, fontSize: 18)));
-    }
-    if (!_isCameraInitialized || _controller == null || !_controller!.value.isInitialized || _controller!.value.previewSize == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final screenWidth = constraints.maxWidth;
-        final screenHeight = constraints.maxHeight;
-
-        final cameraPreviewWidth = _controller!.value.previewSize!.height;
-        final cameraPreviewHeight = _controller!.value.previewSize!.width;
-
-        final FittedSizes fittedSizes = applyBoxFit(
-          BoxFit.contain,
-          Size(cameraPreviewWidth, cameraPreviewHeight),
-          Size(screenWidth, screenHeight)
-        );
-
-        _cameraPreviewAreaOnScreen = Rect.fromLTWH(
-          (screenWidth - fittedSizes.destination.width) / 2,
-          (screenHeight - fittedSizes.destination.height) / 2,
-          fittedSizes.destination.width,
-          fittedSizes.destination.height
-        );
-        
-        final actualOverlayWidth = _cameraPreviewAreaOnScreen.width * widget.overlayWidthRatio;
-        final actualOverlayHeight = _cameraPreviewAreaOnScreen.height * widget.overlayHeightRatio;
-
-        _overlayRectOnScreen = Rect.fromLTWH(
-          _cameraPreviewAreaOnScreen.left + (_cameraPreviewAreaOnScreen.width - actualOverlayWidth) / 2,
-          _cameraPreviewAreaOnScreen.top + (_cameraPreviewAreaOnScreen.height - actualOverlayHeight) / 2,
-          actualOverlayWidth,
-          actualOverlayHeight
-        );
-
-        return Stack(
-            alignment: Alignment.topLeft,
-            children: [
-              Positioned.fromRect(
-                rect: _cameraPreviewAreaOnScreen,
-                child: CameraPreview(_controller!),
-              ),
-              Positioned.fromRect(
-                rect: _overlayRectOnScreen,
-                child: Container(
-                  decoration: BoxDecoration(border: Border.all(color: Colors.redAccent, width: 2.5)),
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      color: Colors.black.withOpacity(0.6),
-                      child: Text(widget.overlayText, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-      }
-    );
-  }
+// 既存の _formatTimestampForFilename 関数を再定義 (home_actions.dartからのコピー)
+String _formatTimestampForFilename(DateTime dateTime) {
+  return '${dateTime.year.toString().padLeft(4, '0')}'
+      '${dateTime.month.toString().padLeft(2, '0')}'
+      '${dateTime.day.toString().padLeft(2, '0')}'
+      '${dateTime.hour.toString().padLeft(2, '0')}'
+      '${dateTime.minute.toString().padLeft(2, '0')}'
+      '${dateTime.second.toString().padLeft(2, '0')}';
 }
