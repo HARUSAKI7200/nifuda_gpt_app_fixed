@@ -184,6 +184,9 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
             TextFormField(
               controller: hostController,
               decoration: const InputDecoration(
+                // ★ 修正: ラベルと入力欄の隙間を確保
+                isDense: true, 
+                contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'ホスト名 または IPアドレス (*)',
                 hintText: '例: 192.168.1.100',
               ),
@@ -197,6 +200,9 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
             TextFormField(
               controller: shareController,
               decoration: const InputDecoration(
+                // ★ 修正: ラベルと入力欄の隙間を確保
+                isDense: true, 
+                contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: '共有名 (*)',
                 hintText: '例: Share や Public',
               ),
@@ -210,6 +216,9 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
             TextFormField(
               controller: pathController,
               decoration: const InputDecoration(
+                // ★ 修正: ラベルと入力欄の隙間を確保
+                isDense: true, 
+                contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'フォルダパス (共有名以下)',
                 hintText: '例: 検品データ/2025年 (空欄可)',
               ),
@@ -218,6 +227,9 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
             TextFormField(
               controller: domainController,
               decoration: const InputDecoration(
+                // ★ 修正: ラベルと入力欄の隙間を確保
+                isDense: true, 
+                contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'ドメイン名 (空欄可)',
                 hintText: '例: WORKGROUP (通常は空欄)',
               ),
@@ -225,6 +237,9 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
             TextFormField(
               controller: userController,
               decoration: const InputDecoration(
+                // ★ 修正: ラベルと入力欄の隙間を確保
+                isDense: true, 
+                contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'ユーザー名 (*)',
               ),
               validator: (value) {
@@ -237,6 +252,9 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
             TextFormField(
               controller: passController,
               decoration: const InputDecoration(
+                // ★ 修正: ラベルと入力欄の隙間を確保
+                isDense: true, 
+                contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'パスワード (*)',
               ),
               obscureText: true,

@@ -90,7 +90,7 @@ class HomePage extends ConsumerWidget {
                 const Spacer(),
 
                 // 6. DBから読み込みボタン (ProjectLoadDialog)
-                _buildDBLoadButton(context, ref, isLoading),
+                // ★ 修正: ボタンを_buildActionButtons内に移動したため削除
               ],
             ),
           ),
@@ -139,7 +139,7 @@ class HomePage extends ConsumerWidget {
           ),
         ),
 
-        // 新規作成 / JSON読み込み / JSON保存
+        // 新規作成 / DBから読み込み / JSON保存
         Row(
           children: [
             // 新規作成ボタン
@@ -157,23 +157,25 @@ class HomePage extends ConsumerWidget {
             ),
             const SizedBox(width: 8),
 
-            // JSON読み込みボタン
+            // ★ 修正: DBから読み込むボタン (JSON読込ボタンを置き換え)
             Expanded(
               child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.grey.shade600,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                icon: const Icon(Icons.folder_open),
-                label: const Text('JSON読込', style: TextStyle(fontSize: 16)),
-                onPressed: isLoading ? null : () async {
-                    final loadedData = await loadProjectAction(context, notifier.updateJsonSavePath);
-                    if (loadedData != null) {
-                        // ★ 修正: NotifierにJSONデータを渡して状態を更新する (project_state.dartに追加したメソッド)
-                        await notifier.loadProjectFromJsonData(loadedData);
-                    }
-                },
+                 style: ElevatedButton.styleFrom(
+                   // DBロードボタンのスタイルを使用
+                   backgroundColor: Colors.lightGreen.shade600,
+                   foregroundColor: Colors.white,
+                   padding: const EdgeInsets.symmetric(vertical: 12),
+                 ),
+                 icon: const Icon(Icons.storage),
+                 label: const Text('DBから読込', style: TextStyle(fontSize: 16)), // ラベルを短縮
+                 onPressed: isLoading ? null : () async {
+                   final selectedProject = await ProjectLoadDialog.show(context);
+                   if (selectedProject != null) {
+                     await notifier.loadProject(selectedProject);
+                     // DBからロードした場合、JSONパスはリセットされる
+                     notifier.updateJsonSavePath(null);
+                   }
+                 },
               ),
             ),
             const SizedBox(width: 8),
@@ -537,28 +539,6 @@ class HomePage extends ConsumerWidget {
      );
   }
 
-  Widget _buildDBLoadButton(BuildContext context, WidgetRef ref, bool isLoading) {
-     final notifier = ref.read(projectProvider.notifier);
-     return Center(
-       child: ElevatedButton.icon(
-         style: ElevatedButton.styleFrom(
-           backgroundColor: Colors.lightGreen.shade600,
-           foregroundColor: Colors.white,
-           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24)
-         ),
-         icon: const Icon(Icons.storage),
-         label: const Text('DBからプロジェクトを読み込む', style: TextStyle(fontSize: 16)),
-         onPressed: isLoading ? null : () async {
-           final selectedProject = await ProjectLoadDialog.show(context);
-           if (selectedProject != null) {
-             await notifier.loadProject(selectedProject);
-             // DBからロードした場合、JSONパスはリセットされる
-             notifier.updateJsonSavePath(null);
-           }
-         },
-       ),
-     );
-   }
 
   void _showCreateProjectDialog(BuildContext context, ProjectNotifier notifier) {
     final projectCodeController = TextEditingController();
