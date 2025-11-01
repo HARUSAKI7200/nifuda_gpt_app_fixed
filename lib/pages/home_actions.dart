@@ -918,3 +918,33 @@ Future<String?> exportAllProjectDataAction({
     return null;
   }
 }
+
+// ★★★ [FIX] showAndExportProductListAction (新規追加) ★★★
+// 製品リストのプレビューとエクスポート
+void showAndExportProductListAction(
+  BuildContext context,
+  List<List<String>> productListData,
+  String projectFolderPath,
+) {
+  if (productListData.isEmpty) {
+     _showErrorDialog(context, 'データなし', '製品リストデータが空です。');
+     return;
+  }
+
+  // data[0] がヘッダー
+  if (productListData.length <= 1) {
+    _showErrorDialog(context, 'データなし', '表示する製品リストデータがありません。');
+    return;
+  }
+
+  showDialog(
+    context: context,
+    builder: (_) => ExcelPreviewDialog(
+      title: '製品リスト (全体)', // タイトル
+      data: productListData, // 全データを渡す
+      headers: productListData.first, // ヘッダー行
+      projectFolderPath: projectFolderPath,
+      subfolder: '製品リスト', // 保存用サブフォルダ
+    ),
+  );
+}

@@ -68,7 +68,7 @@ class HomePage extends ConsumerWidget {
               children: [
                 // --- 左カラム (操作ボタン) ---
                 Expanded(
-                  flex: 2, // 左カラムを少し狭く
+                  flex: 1, // 左カラムを少し狭く
                   child: SingleChildScrollView(
                     child: _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns),
                   ),
@@ -78,7 +78,7 @@ class HomePage extends ConsumerWidget {
 
                 // --- 右カラム (プロジェクト情報) ---
                 Expanded(
-                  flex: 3, // 右カラムを少し広く
+                  flex: 1, // 右カラムを少し広く
                   child: Column(
                     children: [
                       _buildProjectInfoCard(projectState, isLoading),
