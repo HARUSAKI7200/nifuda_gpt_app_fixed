@@ -17,11 +17,11 @@ import '../widgets/custom_snackbar.dart';
 
 // --- 設定値 ---
 class _CropConfig {
-  // 画面幅に対する枠の横幅率（例: 0.85 = 画面幅の85%）
-  static const double widthFactor = 0.85;
+  // ★ ユーザー指定: 0.6 (画面幅の60%)
+  static const double widthFactor = 0.6;
 
-  // 枠のアスペクト比（幅/高さ）。例: 1.4142 = A4縦っぽい
-  static const double aspectRatio = 4 / 3; // (約1.333)
+  // ★ ユーザー指定: 3.0 / 3.0 (1:1) を反映
+  static const double aspectRatio = 3.0 / 3.0; // (1.0)
 
   // 画面中央からの縦オフセット（+で下へ, 単位は画面高さに対する割合）
   static const double verticalOffsetFactor = 0.0;
@@ -78,10 +78,10 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
   bool _isBusy = false;
   String? _lastError;
   int _capturedImageCount = 0;
-  final List<Map<String, dynamic>> _allGptResults = []; 
+  final List<Map<String, dynamic>> _allGptResults = [];
 
   // 画面上で実際にプレビューが描かれている領域（Containでの描画矩形）
-  Rect _previewRectOnScreen = Rect.zero; 
+  Rect _previewRectOnScreen = Rect.zero;
 
   // 画面上のトリミング枠（固定サイズ・中央寄せ）
   Rect _cropRectOnScreen = Rect.zero;
@@ -175,27 +175,25 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
 
   // 画面サイズとカメラのアスペクト比を元に、Containで貼ったときの矩形を計算
   Rect _computePreviewRectOnScreen(Size screenSize) {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
-      return Rect.fromLTWH(0, 0, screenSize.width, screenSize.height);
-    }
-
-    // プレビューの横/縦の比率を取得
-    final previewAspect = controller.value.aspectRatio; 
+    // ★ 修正: プレビュー領域のアスペクト比を 1:1 に固定
+    const targetAspectRatio = 1.0; // 3.0 / 3.0
+    
+    // 画面のアスペクト比
     final screenAspect = screenSize.width / screenSize.height;
 
     double drawWidth, drawHeight, dx, dy;
 
-    if (screenAspect < previewAspect) {
-      // 画面の方が縦長 → 幅に合わせて縮小 → 上下黒帯 (Contain)
+    // ★ 修正: controller.value.aspectRatio の代わりに targetAspectRatio を使う
+    if (screenAspect < targetAspectRatio) {
+      // 画面の方が縦長 (または 1:1 より狭い)
       drawWidth = screenSize.width;
-      drawHeight = drawWidth / previewAspect;
+      drawHeight = drawWidth / targetAspectRatio;
       dx = 0.0;
       dy = (screenSize.height - drawHeight) / 2.0;
     } else {
-      // 画面の方が横長 → 高さにあわせて縮小 → 左右黒帯 (Contain)
+      // 画面の方が横長 (1:1 より広い)
       drawHeight = screenSize.height;
-      drawWidth = drawHeight * previewAspect;
+      drawWidth = drawHeight * targetAspectRatio;
       dx = (screenSize.width - drawWidth) / 2.0;
       dy = 0.0;
     }
@@ -205,54 +203,14 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
 
   // 画面中央に固定サイズでトリミング枠を置く
   Rect _computeCropRectOnScreen(Size screenSize) {
+    // ★ _CropConfig の値 (widthFactor = 0.6) を使用
     final cropW = screenSize.width * _CropConfig.widthFactor;
+    // ★ _CropConfig の値 (aspectRatio = 1.0) を使用
     final cropH = cropW / _CropConfig.aspectRatio;
     final center = Offset(screenSize.width / 2, screenSize.height / 2 + screenSize.height * _CropConfig.verticalOffsetFactor);
     return Rect.fromCenter(center: center, width: cropW, height: cropH);
   }
-
-  // 画面座標 → 画像ピクセル座標へのシンプルな線形変換 (Contain表示のためオフセット補正不要)
-  Rect _mapScreenCropToImagePixels({
-    required ui.Size imageSize,
-    required Rect previewRectOnScreen,
-    required Rect screenCropRect,
-  }) {
-    // 画面上のクロップ枠と、実際に描画されているプレビュー領域のサイズ比を求める
-    final sw = previewRectOnScreen.width;
-    final sh = previewRectOnScreen.height;
-    final iw = imageSize.width.toDouble();
-    final ih = imageSize.height.toDouble();
-
-    // プレビューの描画サイズと画像のピクセルサイズの比率
-    final scaleW = iw / sw;
-    final scaleH = ih / sh;
-
-    // 画面上のクロップ矩形を、プレビュー矩形左上を原点としたローカル座標に変換
-    final sx1 = screenCropRect.left - previewRectOnScreen.left;
-    final sy1 = screenCropRect.top - previewRectOnScreen.top;
-    final sx2 = screenCropRect.right - previewRectOnScreen.left;
-    final sy2 = screenCropRect.bottom - previewRectOnScreen.top;
-
-    // 画像ピクセルに変換 (Containなので単純な比率計算)
-    final ix1 = sx1 * scaleW;
-    final iy1 = sy1 * scaleH;
-    final ix2 = sx2 * scaleW;
-    final iy2 = sy2 * scaleH;
-
-    // 枠が撮影画像の外にはみ出していた場合に備え、クランプ
-    final x1 = ix1.clamp(0.0, iw);
-    final y1 = iy1.clamp(0.0, ih);
-    final x2 = ix2.clamp(0.0, iw);
-    final y2 = iy2.clamp(0.0, ih);
-
-    final left = math.min(x1, x2);
-    final top = math.min(y1, y2);
-    final right = math.max(x1, x2);
-    final bottom = math.max(y1, y2);
-
-    return Rect.fromLTRB(left, top, right, bottom);
-  }
-
+  
   // --- 既存機能の再実装 ---
 
   // タイムスタンプ生成関数 (省略)
@@ -265,8 +223,11 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
         '${dateTime.second.toString().padLeft(2, '0')}';
   }
 
-  // 画像をプロジェクトフォルダに保存する関数 (省略)
-  Future<String?> _saveImageToProjectFolder(XFile xfile) async {
+  // ★ 修正: 画像をプロジェクトフォルダに保存する関数 (Uint8List を受け取る)
+  Future<String?> _saveImageToProjectFolder(
+    Uint8List imageBytes,
+    String originalFileExtension, // 元のファイルの拡張子 (例: .jpg)
+  ) async {
     try {
       if (widget.projectFolderPath.isEmpty) throw Exception("プロジェクトフォルダパスが設定されていません。");
       String subfolder;
@@ -276,18 +237,21 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
         fileNamePrefix = "product_list";
       } else {
         final caseNo = widget.caseNumber ?? 'UnknownCase';
-        subfolder = "荷札画像/$caseNo"; 
+        subfolder = "荷札画像/$caseNo";
         fileNamePrefix = "nifuda_${caseNo.replaceAll('#', 'Case_')}";
       }
       final targetDirPath = p.join(widget.projectFolderPath, subfolder);
       final targetDir = Directory(targetDirPath);
       if (!await targetDir.exists()) await targetDir.create(recursive: true);
       final timestamp = _formatTimestampForFilename(DateTime.now());
-      final originalExtension = p.extension(xfile.path);
-      final fileName = '${fileNamePrefix}_$timestamp$originalExtension';
+      // ★ 修正: 拡張子を引数から取得
+      final fileName = '${fileNamePrefix}_$timestamp$originalFileExtension';
       final targetFilePath = p.join(targetDir.path, fileName);
-      final file = File(xfile.path);
-      await file.copy(targetFilePath);
+
+      // ★ 修正: XFile.copy() の代わりに bytes を書き込む
+      final file = File(targetFilePath);
+      await file.writeAsBytes(imageBytes);
+      
       await MediaScanner.loadMedia(path: targetFilePath);
       return targetFilePath;
     } catch (e) {
@@ -297,7 +261,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
     }
   }
   
-  // 画像のクロップロジック (Contain座標変換ロジック)
+  // ★ 修正: 画像のクロップロジック (BoxFit.cover 座標変換ロジック)
   Future<Uint8List?> _cropImageBytes(XFile xfile) async {
     final rawBytes = await xfile.readAsBytes();
     final img.Image? originalImage = img.decodeImage(rawBytes);
@@ -308,20 +272,78 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
         return Uint8List.fromList(img.encodeJpg(originalImage, quality: 90));
     }
 
-    final imageSize = ui.Size(originalImage.width.toDouble(), originalImage.height.toDouble());
+    // プレビュー領域のサイズ (e.g., W=360, H=360)
+    final sw = _previewRectOnScreen.width;
+    final sh = _previewRectOnScreen.height;
+    // ★ ターゲットのアスペクト比 (1:1 = 1.0)
+    final targetAspectRatio = sw / sh;
 
-    // 画面クロップ→画像ピクセルの矩形に変換 (Contain補正)
-    final cropOnImage = _mapScreenCropToImagePixels(
-      imageSize: imageSize,
-      previewRectOnScreen: _previewRectOnScreen,
-      screenCropRect: _cropRectOnScreen,
-    );
+    // 撮影された画像(originalImage)の縦向きアスペクト比を計算
+    final bool isImageLandscape = originalImage.width > originalImage.height;
+    // 縦向きにしたときの (W, H)
+    final double iw_v = isImageLandscape ? originalImage.height.toDouble() : originalImage.width.toDouble();
+    final double ih_v = isImageLandscape ? originalImage.width.toDouble() : originalImage.height.toDouble();
+    // 縦向きの比率 (W_v / H_v)
+    final cameraPreviewAspectRatio = iw_v / ih_v; // e.g., 3000/4000 = 0.75 (4:3)
 
-    final cropX = cropOnImage.left.round();
-    final cropY = cropOnImage.top.round();
-    final cropW = (cropOnImage.width).round().clamp(1, originalImage.width - cropX);
-    final cropH = (cropOnImage.height).round().clamp(1, originalImage.height - cropY);
+    // プレビュー表示時のスケール（BoxFit.cover）を計算
+    double scale;
+    
+    // R_cam < R_target ? (Camera THINNER) : (Camera WIDER or SAME)
+    if (cameraPreviewAspectRatio < targetAspectRatio) {
+        // Camera is THINNER (e.g., 4:3) than target (1:1)
+        // -> Scale up to match width
+        // scale = W_t / W_v
+        scale = sw / iw_v;
+    } else {
+        // Camera is WIDER or SAME (e.g., 1:1) than target (1:1)
+        // -> Scale up to match height
+        // scale = H_t / H_v
+        scale = sh / ih_v;
+    }
 
+    // プレビュー領域 (sw, sh) の中央と、
+    // 描画された画像 (iw_v * scale, ih_v * scale) の中央のズレ (Offset)
+    final dx = (sw - (iw_v * scale)) / 2.0;
+    final dy = (sh - (ih_v * scale)) / 2.0;
+    
+    // 画面上のクロップ矩形 (_cropRectOnScreen) を、
+    // 描画された画像(クリップ前)の左上を原点としたローカル座標に変換
+    // ★ ここで _cropRectOnScreen (Configから計算された矩形) を使用
+    final sx1 = (_cropRectOnScreen.left - _previewRectOnScreen.left) - dx;
+    final sy1 = (_cropRectOnScreen.top - _previewRectOnScreen.top) - dy;
+    
+    // ローカル座標をスケールで割って、画像のピクセル座標 (縦向き基準) に変換
+    final ix1_v = sx1 / scale;
+    final iy1_v = sy1 / scale;
+    final cropRectW_v = _cropRectOnScreen.width / scale;
+    final cropRectH_v = _cropRectOnScreen.height / scale;
+
+    // 画像ピクセル (縦向き基準 iw_v, ih_v) から、
+    // 実際の画像 (originalImage.width, originalImage.height) の座標に変換
+    int cropX, cropY, cropW, cropH;
+    
+    if (isImageLandscape) {
+      // 画像は横向き (W > H)
+      cropX = iy1_v.round();
+      cropY = ix1_v.round();
+      cropW = cropRectH_v.round();
+      cropH = cropRectW_v.round();
+    } else {
+      // 画像は縦向き (W <= H)
+      cropX = ix1_v.round();
+      cropY = iy1_v.round();
+      cropW = cropRectW_v.round();
+      cropH = cropRectH_v.round();
+    }
+    
+    // クランプ処理
+    cropX = cropX.clamp(0, originalImage.width);
+    cropY = cropY.clamp(0, originalImage.height);
+    cropW = cropW.clamp(1, originalImage.width - cropX);
+    cropH = cropH.clamp(1, originalImage.height - cropY);
+    
+    // ★ 最終的な切り抜き実行
     final croppedImage = img.copyCrop(
       originalImage,
       x: cropX,
@@ -346,10 +368,10 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
     });
 
     try {
+      // 1. 撮影 (元画像)
       final XFile xfile = await controller.takePicture();
-      final savedPath = await _saveImageToProjectFolder(xfile);
-      if (savedPath == null) return;
-
+      
+      // 2. トリミング (元画像 -> トリミング後のBytes)
       final croppedBytes = await _cropImageBytes(xfile);
 
       if (croppedBytes == null) {
@@ -357,6 +379,16 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
         return;
       }
       
+      // 3. 保存 (トリミング後のBytesを保存)
+      final originalExtension = p.extension(xfile.path);
+      final savedPath = await _saveImageToProjectFolder(croppedBytes, originalExtension);
+      
+      if (savedPath == null) {
+         if (mounted) showCustomSnackBar(context, 'トリミング画像の保存に失敗しました。', isError: true);
+         return;
+      }
+
+      // 4. AI処理 (トリミング後のBytesをAIに送信)
       final result = await widget.aiService(
         croppedBytes,
         isProductList: widget.isProductListOcr,
@@ -388,27 +420,64 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
   
   // --- UIウィジェット ---
   
+  // ★ 修正: _buildCameraPreview を Transform.scale を使う方式に変更
   Widget _buildCameraPreview() {
     final controller = _controller;
-    final previewSize = controller?.value.previewSize;
-    if (controller == null || !controller.value.isInitialized || previewSize == null) {
+    if (controller == null || !controller.value.isInitialized || controller.value.previewSize == null) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    // Contain表示 (ズームなし)
+    // ユーザー要望のターゲットアスペクト比 (1:1)
+    const double targetAspectRatio = 1.0; // 3.0 / 3.0
+    
+    // カメラのプレビューアスペクト比 (縦向き)
+    // (縦向き固定なので、常に 1.0 未満 (または 1.0) になるように計算)
+    final cameraPreviewAspectRatio = (controller.value.previewSize!.height > controller.value.previewSize!.width)
+      ? controller.value.previewSize!.width / controller.value.previewSize!.height
+      : controller.value.previewSize!.height / controller.value.previewSize!.width;
+    
     return Positioned.fill(
       child: Center(
-        // ★ 修正: このContainerにKeyを付けて、表示サイズを取得する
         child: Container(
           key: _previewKey,
           constraints: BoxConstraints(
-            // 画面サイズを最大制約として、Contain相当に表示させる
             maxWidth: MediaQuery.of(context).size.width,
             maxHeight: MediaQuery.of(context).size.height,
           ),
           child: AspectRatio(
-            aspectRatio: controller.value.aspectRatio,
-            child: CameraPreview(controller),
+            aspectRatio: targetAspectRatio, // (1:1) の枠
+            child: ClipRect( // 枠外をクリップ
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // R_target = 1.0
+                  final R_cam_preview = cameraPreviewAspectRatio; // e.g., 0.75 (4:3)
+                  
+                  double finalScale;
+                  
+                  // R_cam < R_target ? (Camera THINNER) : (Camera WIDER or SAME)
+                  if (R_cam_preview < targetAspectRatio) {
+                      // Camera is THINNER (e.g., 4:3) than target (1:1)
+                      // -> Scale up to match width
+                      finalScale = targetAspectRatio / R_cam_preview; // e.g., 1.0 / 0.75 = 1.333
+                  } else {
+                      // Camera is WIDER or SAME (e.g., 1:1) than target (1:1)
+                      // -> Scale up to match height
+                      finalScale = R_cam_preview / targetAspectRatio; // e.g., 1.0 / 1.0 = 1.0
+                  }
+
+                  if (finalScale < 1.0) finalScale = 1.0;
+                  
+                  return Transform.scale(
+                    scale: finalScale,
+                    alignment: Alignment.center,
+                    child: AspectRatio(
+                      aspectRatio: cameraPreviewAspectRatio,
+                      child: CameraPreview(controller),
+                    ),
+                  );
+                }
+              ),
+            ),
           ),
         ),
       ),
@@ -506,6 +575,8 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
             builder: (context, constraints) {
               // LayoutBuilder内で、画面レイアウト確定時に矩形を更新
               WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return; // ★ mounted チェックを追加
+                
                 // プレビュー表示サイズを取得
                 final box = _previewKey.currentContext?.findRenderObject() as RenderBox?;
                 if (box != null) {
@@ -522,6 +593,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
                 
                 // クロップ矩形を計算 (画面サイズベース)
                 final screenSize = Size(constraints.maxWidth, constraints.maxHeight);
+                // ★ 修正: _computeCropRectOnScreen は Config (0.6, 1:1) に対応済み
                 final newCropRect = _computeCropRectOnScreen(screenSize);
                 if (_cropRectOnScreen != newCropRect) {
                    setState(() {
@@ -532,7 +604,7 @@ class _CameraCapturePageState extends State<CameraCapturePage> with WidgetsBindi
               
               return Stack(
                 children: [
-                  // 1. カメラプレビュー（Contain/ズームなし）
+                  // 1. カメラプレビュー（1:1 固定、BoxFit.cover）
                   _buildCameraPreview(),
 
                   // 2. トリミング枠オーバーレイ (全画面を覆う)
