@@ -41,9 +41,12 @@ class HomePage extends ConsumerWidget {
         // ★ 修正: isProjectActive は DB ID がなくても JSON ロード直後は true になるように title も見る
         final isProjectActive = projectState.currentProjectId != null || projectState.projectTitle.isNotEmpty;
         final isLoading = projectState.isLoading;
-
+        
         // T社と汎用のパターン
         final List<String> matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）'];
+        // マスク処理の選択肢
+        final List<String> maskOptions = ['T社', 'マスク処理なし', '動的マスク処理'];
+
 
         return Scaffold(
           appBar: AppBar(
@@ -59,38 +62,31 @@ class HomePage extends ConsumerWidget {
           ),
           body: Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Column(
+            // ★ 修正: UI全体を2カラムレイアウト (Row) に変更
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 1. プロジェクト情報エリア
-                _buildProjectInfoCard(projectState, isLoading),
-                const SizedBox(height: 16),
-
-                // 2. アクションボタンエリア
-                _buildActionButtons(context, ref, projectState, notifier, isProjectActive, isLoading),
-                const SizedBox(height: 16),
-
-                // 3. 会社・照合パターン選択エリア
-                Row(
-                  children: [
-                    Expanded(child: _buildCompanySelector(projectState, notifier, ['T社', 'マスク処理なし', '動的マスク処理'], isLoading)),
-                    const SizedBox(width: 8),
-                    Expanded(child: _buildMatchingPatternSelector(projectState, notifier, matchingPatterns, isLoading)),
-                  ],
+                // --- 左カラム (操作ボタン) ---
+                Expanded(
+                  flex: 2, // 左カラムを少し狭く
+                  child: SingleChildScrollView(
+                    child: _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns),
+                  ),
                 ),
-                const SizedBox(height: 16),
+                
+                const SizedBox(width: 16),
 
-                // 4. OCR・照合実行ボタンエリア
-                _buildOCRAndMatchingButtons(context, ref, projectState, isProjectActive, isLoading),
-                const SizedBox(height: 16),
-
-                // 5. データプレビューエリア
-                _buildDataPreview(context, ref, projectState, isProjectActive),
-
-                const Spacer(),
-
-                // 6. DBから読み込みボタン (ProjectLoadDialog)
-                // ★ 修正: ボタンを_buildActionButtons内に移動したため削除
+                // --- 右カラム (プロジェクト情報) ---
+                Expanded(
+                  flex: 3, // 右カラムを少し広く
+                  child: Column(
+                    children: [
+                      _buildProjectInfoCard(projectState, isLoading),
+                      const SizedBox(height: 16),
+                      _buildCaseSelector(projectState, notifier, isProjectActive, isLoading),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -99,98 +95,43 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  Widget _buildActionButtons(
-    BuildContext context,
-    WidgetRef ref,
-    ProjectState state,
-    ProjectNotifier notifier,
-    bool isProjectActive,
+  // ★ 新規: 左カラムのUIを構築するメソッド
+  Widget _buildLeftColumn(
+    BuildContext context, 
+    WidgetRef ref, 
+    ProjectState state, 
+    ProjectNotifier notifier, 
+    bool isProjectActive, 
     bool isLoading,
+    List<String> maskOptions,
+    List<String> matchingPatterns,
   ) {
+    // データ件数
+    final nifudaDataCount = state.nifudaData.length - (state.nifudaData.isNotEmpty ? 1 : 0);
+    final productDataCount = state.productListKariData.length - (state.productListKariData.isNotEmpty ? 1 : 0);
+    final hasNifudaData = nifudaDataCount > 0;
+    final hasProductData = productDataCount > 0;
+
     return Column(
       children: [
-        // Case No.選択ドロップダウン
-        Container(
-          height: 48,
-          margin: const EdgeInsets.only(bottom: 8.0),
-          padding: const EdgeInsets.symmetric(horizontal: 12.0),
-          decoration: BoxDecoration(
-            color: Colors.orange[50],
-            borderRadius: BorderRadius.circular(8.0),
-            border: Border.all(color: Colors.orange.shade200)
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: state.currentCaseNumber,
-              items: _caseNumbers.map((String caseNo) {
-                return DropdownMenuItem<String>(
-                  value: caseNo,
-                  child: Text(
-                    'Case No.: $caseNo',
-                    style: TextStyle(color: Colors.orange[800], fontWeight: FontWeight.w600, fontSize: 14.5),
-                  )
-                );
-              }).toList(),
-              onChanged: isLoading || !isProjectActive ? null : (String? newValue) => notifier.updateCaseNumber(newValue ?? '#1'),
-              icon: Icon(Icons.arrow_drop_down_rounded, color: Colors.orange[700]),
-              isDense: true,
-              isExpanded: true,
-            ),
-          ),
+        // 1. 新規作成
+        _buildActionButton(
+          text: '新規作成',
+          icon: Icons.add,
+          color: Colors.indigo.shade700,
+          onPressed: isLoading ? null : () => _showCreateProjectDialog(context, notifier),
         ),
-
-        // 新規作成 / DBから読み込み / JSON保存
+        
+        // 2. 保存 / 読み込み
         Row(
           children: [
-            // 新規作成ボタン
             Expanded(
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.indigo.shade700,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                icon: const Icon(Icons.add),
-                label: const Text('新規作成', style: TextStyle(fontSize: 16)),
-                onPressed: isLoading ? null : () => _showCreateProjectDialog(context, notifier),
-              ),
-            ),
-            const SizedBox(width: 8),
-
-            // ★ 修正: DBから読み込むボタン (JSON読込ボタンを置き換え)
-            Expanded(
-              child: ElevatedButton.icon(
-                 style: ElevatedButton.styleFrom(
-                   // DBロードボタンのスタイルを使用
-                   backgroundColor: Colors.lightGreen.shade600,
-                   foregroundColor: Colors.white,
-                   padding: const EdgeInsets.symmetric(vertical: 12),
-                 ),
-                 icon: const Icon(Icons.storage),
-                 label: const Text('DBから読込', style: TextStyle(fontSize: 16)), // ラベルを短縮
-                 onPressed: isLoading ? null : () async {
-                   final selectedProject = await ProjectLoadDialog.show(context);
-                   if (selectedProject != null) {
-                     await notifier.loadProject(selectedProject);
-                     // DBからロードした場合、JSONパスはリセットされる
-                     notifier.updateJsonSavePath(null);
-                   }
-                 },
-              ),
-            ),
-            const SizedBox(width: 8),
-
-            // JSON保存ボタン
-            Expanded(
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: isProjectActive ? Colors.green.shade600 : Colors.grey.shade400,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                icon: const Icon(Icons.archive),
-                label: Text(state.jsonSavePath == null ? 'JSON保存(新規)' : 'JSON保存(上書)', style: const TextStyle(fontSize: 14)),
-                onPressed: isLoading || !isProjectActive ? null : () async {
+              child: _buildActionButton(
+                text: state.jsonSavePath == null ? '保存(新規)' : '保存(上書)',
+                icon: Icons.archive,
+                color: Colors.green.shade600,
+                isEnabled: isProjectActive && !isLoading,
+                onPressed: () async {
                   if (state.projectFolderPath == null) {
                     _showErrorDialog(context, '保存エラー', 'プロジェクトが作成または読み込まれていません。');
                     return;
@@ -208,9 +149,296 @@ class HomePage extends ConsumerWidget {
                 },
               ),
             ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildActionButton(
+                text: 'DB読込',
+                icon: Icons.storage,
+                color: Colors.lightGreen.shade600,
+                isEnabled: !isLoading,
+                onPressed: () async {
+                   final selectedProject = await ProjectLoadDialog.show(context);
+                   if (selectedProject != null) {
+                     await notifier.loadProject(selectedProject);
+                     notifier.updateJsonSavePath(null);
+                   }
+                },
+              ),
+            ),
           ],
         ),
+        
+        const Divider(height: 24, thickness: 1),
+
+        // 3. 荷札 (GPT)
+        _buildActionButton(
+          text: '荷札を撮影して抽出 (GPT)',
+          icon: Icons.camera_alt,
+          color: Colors.deepOrange.shade600,
+          isEnabled: isProjectActive && !isLoading,
+          onPressed: () async {
+             if (state.projectFolderPath == null) {
+                 _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
+                 return;
+             }
+             final newRows = await captureProcessAndConfirmNifudaAction(
+                context,
+                state.projectFolderPath!,
+                state.currentCaseNumber,
+             );
+             if (newRows != null && newRows.isNotEmpty) {
+                 // DB未保存（JSONのみ）の場合もStateは更新される
+                 await notifier.addNifudaRows(newRows);
+             }
+          },
+        ),
+        
+        // 4. 荷札 (Gemini)
+        _buildActionButton(
+          text: '荷札を撮影して抽出 (Gemini)',
+          icon: Icons.camera_alt_outlined, // 別のアイコン
+          color: Colors.orange.shade700,
+          isEnabled: isProjectActive && !isLoading,
+          onPressed: () async {
+             if (state.projectFolderPath == null) {
+                 _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
+                 return;
+             }
+             // ★ 新しい Gemini アクションを呼び出す
+             final newRows = await captureProcessAndConfirmNifudaActionGemini(
+                context,
+                state.projectFolderPath!,
+                state.currentCaseNumber,
+             );
+             if (newRows != null && newRows.isNotEmpty) {
+                 await notifier.addNifudaRows(newRows);
+             }
+          },
+        ),
+        
+        // 5. 荷札リスト
+        _buildActionButton(
+          text: '荷札リスト (全体: $nifudaDataCount 件)',
+          icon: Icons.list,
+          color: Colors.blue.shade600,
+          isEnabled: hasNifudaData && isProjectActive && !isLoading,
+          onPressed: () => showAndExportNifudaListAction(
+             context,
+             state.nifudaData,
+             state.projectTitle,
+             state.projectFolderPath!,
+             state.currentCaseNumber, // (ダイアログ側で Case No. フィルタリング)
+          ),
+        ),
+
+        const Divider(height: 24, thickness: 1),
+
+        // 6. マスク処理 (ドロップダウン)
+        _buildDropdownSelector(
+          value: state.selectedCompany,
+          items: maskOptions,
+          prefix: 'マスク処理:',
+          onChanged: isLoading ? null : (String? newValue) => notifier.updateSelection(company: newValue),
+          color: Colors.indigo,
+        ),
+
+        // 7. 製品リスト (GPT)
+        _buildActionButton(
+          text: '製品リストを撮影して抽出 (GPT)',
+          icon: Icons.scanner,
+          color: Colors.pink.shade600,
+          isEnabled: isProjectActive && !isLoading,
+          onPressed: () async {
+             if (state.projectFolderPath == null) {
+                 _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
+                 return;
+             }
+             final newRows = await captureProcessAndConfirmProductListAction(
+                context,
+                state.selectedCompany,
+                notifier.setLoading,
+                state.projectFolderPath!,
+             );
+             if (newRows != null && newRows.isNotEmpty) {
+                 await notifier.addProductListRows(newRows);
+             }
+          },
+        ),
+        
+        // 8. 製品リスト (Gemini)
+        _buildActionButton(
+          text: '製品リストを撮影して抽出 (Gemini)',
+          icon: Icons.scanner_outlined, // 別のアイコン
+          color: Colors.red.shade700,
+          isEnabled: isProjectActive && !isLoading,
+          onPressed: () async {
+             if (state.projectFolderPath == null) {
+                 _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
+                 return;
+             }
+             final newRows = await captureProcessAndConfirmProductListActionGemini(
+                context,
+                state.selectedCompany,
+                notifier.setLoading,
+                state.projectFolderPath!,
+             );
+             if (newRows != null && newRows.isNotEmpty) {
+                 await notifier.addProductListRows(newRows);
+             }
+          },
+        ),
+
+        // 9. 製品リスト
+        _buildActionButton(
+          text: '製品リスト ($productDataCount 件)',
+          icon: Icons.list_alt,
+          color: Colors.teal.shade600,
+          isEnabled: hasProductData && isProjectActive && !isLoading,
+          onPressed: () => showAndExportProductListAction(
+             context,
+             state.productListKariData,
+             state.projectFolderPath!,
+          ),
+        ),
+        
+        const Divider(height: 24, thickness: 1),
+
+        // 10. 照合パターン (ドロップダウン)
+        _buildDropdownSelector(
+          value: state.selectedMatchingPattern,
+          items: matchingPatterns,
+          prefix: '照合パターン:',
+          onChanged: isLoading ? null : (String? newValue) => notifier.updateSelection(matchingPattern: newValue),
+          color: Colors.green,
+        ),
+        
+        // 11. 照合を開始する
+        _buildActionButton(
+          text: '照合を開始する (${state.currentCaseNumber})',
+          icon: Icons.rule,
+          color: Colors.purple.shade600,
+          isEnabled: hasNifudaData && hasProductData && isProjectActive && !isLoading,
+          isLarge: true,
+          onPressed: () async {
+             if (state.projectFolderPath == null) {
+                 _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
+                 return;
+             }
+             final newStatus = await startMatchingAndShowResultsAction(
+               context,
+               state.nifudaData,
+               state.productListKariData,
+               state.selectedMatchingPattern,
+               state.projectTitle,
+               state.projectFolderPath!,
+               state.currentCaseNumber,
+             );
+             if (newStatus != null) {
+               await notifier.updateProjectStatus(newStatus);
+             }
+          },
+        ),
       ],
+    );
+  }
+
+  // ★ 新規: 汎用的なアクションボタン
+  Widget _buildActionButton({
+    required String text,
+    required IconData icon,
+    required Color color,
+    required VoidCallback? onPressed,
+    bool isEnabled = true,
+    bool isLarge = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: (isEnabled && onPressed != null) ? color : Colors.grey.shade400,
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(vertical: isLarge ? 16 : 12),
+          minimumSize: const Size(double.infinity, 50),
+          alignment: Alignment.centerLeft,
+        ),
+        icon: Icon(icon, size: isLarge ? 24 : 20),
+        label: Text(
+          text, 
+          style: TextStyle(fontSize: isLarge ? 18 : 14, fontWeight: isLarge ? FontWeight.bold : FontWeight.normal),
+          overflow: TextOverflow.ellipsis,
+        ),
+        onPressed: (isEnabled && onPressed != null) ? onPressed : null,
+      ),
+    );
+  }
+
+  // ★ 新規: 汎用的なドロップダウン
+  Widget _buildDropdownSelector({
+    required String value,
+    required List<String> items,
+    required String prefix,
+    required Function(String?)? onChanged,
+    required MaterialColor color,
+  }) {
+    return Container(
+      height: 48,
+      margin: const EdgeInsets.only(bottom: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+      decoration: BoxDecoration(
+        color: color[50],
+        borderRadius: BorderRadius.circular(8.0),
+        border: Border.all(color: color.shade200)
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          items: items.map((String item) {
+            return DropdownMenuItem<String>(
+              value: item,
+              child: Text(
+                '$prefix $item',
+                style: TextStyle(color: color[800], fontWeight: FontWeight.w600, fontSize: 14.5),
+                overflow: TextOverflow.ellipsis,
+              )
+            );
+          }).toList(),
+          onChanged: onChanged,
+          icon: Icon(Icons.arrow_drop_down_rounded, color: color[700]),
+          isDense: true,
+          isExpanded: true,
+        ),
+      ),
+    );
+  }
+
+  // ★ 修正: 右カラムに移動
+  Widget _buildCaseSelector(ProjectState state, ProjectNotifier notifier, bool isProjectActive, bool isLoading) {
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+      decoration: BoxDecoration(
+        color: Colors.orange[50],
+        borderRadius: BorderRadius.circular(8.0),
+        border: Border.all(color: Colors.orange.shade200)
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: state.currentCaseNumber,
+          items: _caseNumbers.map((String caseNo) {
+            return DropdownMenuItem<String>(
+              value: caseNo,
+              child: Text(
+                '現在選択中の Case No.: $caseNo',
+                style: TextStyle(color: Colors.orange[800], fontWeight: FontWeight.w600, fontSize: 14.5),
+              )
+            );
+          }).toList(),
+          onChanged: isLoading || !isProjectActive ? null : (String? newValue) => notifier.updateCaseNumber(newValue ?? '#1'),
+          icon: Icon(Icons.arrow_drop_down_rounded, color: Colors.orange[700]),
+          isDense: true,
+          isExpanded: true,
+        ),
+      ),
     );
   }
 
@@ -241,12 +469,15 @@ class HomePage extends ConsumerWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'プロジェクトコード: ${state.projectTitle.isEmpty ? '未選択' : state.projectTitle}',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: state.projectTitle.isEmpty ? Colors.grey : Colors.indigo[800],
+                      Flexible( // ★ タイトルが長い場合に備える
+                        child: Text(
+                          'プロジェクトコード: ${state.projectTitle.isEmpty ? '未選択' : state.projectTitle}',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: state.projectTitle.isEmpty ? Colors.grey : Colors.indigo[800],
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       Container(
@@ -270,12 +501,7 @@ class HomePage extends ConsumerWidget {
                         padding: const EdgeInsets.only(top: 4.0),
                         child: Text('JSON保存パス: ${p.basename(p.dirname(p.dirname(state.jsonSavePath!)))}/...', style: const TextStyle(fontSize: 13, color: Colors.green)),
                       ),
-                  // Case No.の表示を追加
-                  if (state.projectTitle.isNotEmpty) // プロジェクトが有効な場合
-                     Padding(
-                        padding: const EdgeInsets.only(top: 4.0),
-                        child: Text('現在のCase No.: ${state.currentCaseNumber}', style: const TextStyle(fontSize: 13, color: Colors.orange)),
-                      ),
+                  // ★ Case No.の表示は右カラムの別ウィジェットに移動
                 ],
               ),
       ),
@@ -291,253 +517,16 @@ class HomePage extends ConsumerWidget {
     }
   }
 
-  Widget _buildCompanySelector(ProjectState state, ProjectNotifier notifier, List<String> companies, bool isLoading) {
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 12.0),
-      decoration: BoxDecoration(
-        color: Colors.indigo[50],
-        borderRadius: BorderRadius.circular(8.0),
-        border: Border.all(color: Colors.indigo.shade200)
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: state.selectedCompany,
-          items: companies.map((String company) {
-            return DropdownMenuItem<String>(
-              value: company,
-              child: Text(
-                '会社: $company',
-                style: TextStyle(color: Colors.indigo[800], fontWeight: FontWeight.w600, fontSize: 14.5),
-                overflow: TextOverflow.ellipsis,
-              )
-            );
-          }).toList(),
-          onChanged: isLoading ? null : (String? newValue) => notifier.updateSelection(company: newValue),
-          icon: Icon(Icons.arrow_drop_down_rounded, color: Colors.indigo[700]),
-          isDense: true,
-          isExpanded: true,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMatchingPatternSelector(ProjectState state, ProjectNotifier notifier, List<String> patterns, bool isLoading) {
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 12.0),
-      decoration: BoxDecoration(
-        color: Colors.green[50],
-        borderRadius: BorderRadius.circular(8.0),
-        border: Border.all(color: Colors.green.shade200)
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: state.selectedMatchingPattern,
-          items: patterns.map((String pattern) {
-            return DropdownMenuItem<String>(
-              value: pattern,
-              child: Text(
-                '照合パターン: $pattern',
-                style: TextStyle(color: Colors.green[800], fontWeight: FontWeight.w600, fontSize: 14.5),
-                overflow: TextOverflow.ellipsis,
-              )
-            );
-          }).toList(),
-          onChanged: isLoading ? null : (String? newValue) => notifier.updateSelection(matchingPattern: newValue),
-          icon: Icon(Icons.arrow_drop_down_rounded, color: Colors.green[700]),
-          isDense: true,
-          isExpanded: true,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOCRAndMatchingButtons(BuildContext context, WidgetRef ref, ProjectState state, bool isProjectActive, bool isLoading) {
-     final notifier = ref.read(projectProvider.notifier);
-     // Case No.によるフィルタリングはUI上では行わず、データが存在するかで判断
-     final hasNifudaData = state.nifudaData.length > 1;
-     final hasProductData = state.productListKariData.length > 1;
-
-     return Column(
-       children: [
-         // 荷札・製品リスト OCR
-         Row(
-           children: [
-             Expanded(
-               child: ElevatedButton.icon(
-                 style: ElevatedButton.styleFrom(
-                    backgroundColor: isProjectActive ? Colors.deepOrange.shade600 : Colors.grey.shade400,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12)
-                 ),
-                 icon: const Icon(Icons.camera_alt),
-                 label: Text('荷札撮影 (${state.currentCaseNumber})', style: const TextStyle(fontSize: 16)),
-                 onPressed: isProjectActive && !isLoading ? () async {
-                   if (state.projectFolderPath == null) {
-                       _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
-                       return;
-                   }
-                   final newRows = await captureProcessAndConfirmNifudaAction(
-                      context,
-                      state.projectFolderPath!,
-                      state.currentCaseNumber, // ★ Case No.を渡す
-                   );
-                   if (newRows != null && newRows.isNotEmpty) {
-                     if (state.currentProjectId != null) {
-                         await notifier.addNifudaRows(newRows);
-                     } else {
-                         // Stateのみ更新 (一時的なデータとして)
-                         final currentCaseNumber = state.currentCaseNumber;
-                         final newRowsWithCase = newRows.map((row) => [...row, currentCaseNumber]).toList();
-                         // ★ 修正: public getter を使用
-                         final currentData = state.nifudaData.isEmpty ? [notifier.nifudaHeader] : state.nifudaData;
-                         final updatedList = List<List<String>>.from(currentData)..addAll(newRowsWithCase);
-                         notifier.state = state.copyWith(nifudaData: updatedList, inspectionStatus: STATUS_IN_PROGRESS);
-                         showCustomSnackBar(context, '荷札データを一時的に追加しました (DB未保存)');
-                     }
-                   }
-                 } : null,
-               ),
-             ),
-             const SizedBox(width: 8),
-             Expanded(
-               child: ElevatedButton.icon(
-                 style: ElevatedButton.styleFrom(
-                    backgroundColor: isProjectActive ? Colors.pink.shade600 : Colors.grey.shade400,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12)
-                 ),
-                 icon: const Icon(Icons.scanner),
-                 label: const Text('製品リストスキャン', style: const TextStyle(fontSize: 16)),
-                 onPressed: isProjectActive && !isLoading ? () async {
-                   if (state.projectFolderPath == null) {
-                       _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
-                       return;
-                   }
-                   final newRows = await captureProcessAndConfirmProductListAction(
-                      context,
-                      state.selectedCompany,
-                      notifier.setLoading,
-                      state.projectFolderPath!,
-                   );
-                   if (newRows != null && newRows.isNotEmpty) {
-                     if (state.currentProjectId != null) {
-                         await notifier.addProductListRows(newRows);
-                     } else {
-                         // Stateのみ更新 (一時的なデータとして)
-                         final newRowsWithMatchedCase = newRows.map((row) => [...row, '']).toList(); // 照合済みCase列追加
-                         // ★ 修正: public getter を使用
-                         final currentData = state.productListKariData.isEmpty ? [notifier.productListHeader] : state.productListKariData;
-                         final updatedList = List<List<String>>.from(currentData)..addAll(newRowsWithMatchedCase);
-                         notifier.state = state.copyWith(productListKariData: updatedList, inspectionStatus: STATUS_IN_PROGRESS);
-                         showCustomSnackBar(context, '製品リストデータを一時的に追加しました (DB未保存)');
-                     }
-                   }
-                 } : null,
-               ),
-             ),
-           ],
-         ),
-         const SizedBox(height: 8),
-
-         // 照合実行ボタン
-         ElevatedButton.icon(
-           style: ElevatedButton.styleFrom(
-              backgroundColor: hasNifudaData && hasProductData ? Colors.purple.shade600 : Colors.grey.shade400,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              minimumSize: const Size(double.infinity, 50),
-           ),
-           icon: const Icon(Icons.rule),
-           label: Text('照合実行 (${state.currentCaseNumber})', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-           onPressed: hasNifudaData && hasProductData && !isLoading ? () async {
-             if (state.projectFolderPath == null) {
-                 _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
-                 return;
-             }
-             final newStatus = await startMatchingAndShowResultsAction(
-               context,
-               state.nifudaData,
-               state.productListKariData,
-               state.selectedMatchingPattern,
-               state.projectTitle,
-               state.projectFolderPath!,
-               state.currentCaseNumber, // ★ Case No.を渡す
-             );
-             if (newStatus != null) {
-               // updateProjectStatus が DB ID なしでも State を更新するように修正済み
-               await notifier.updateProjectStatus(newStatus);
-             }
-           } : null,
-         ),
-       ],
-     );
-  }
-
-  Widget _buildDataPreview(BuildContext context, WidgetRef ref, ProjectState state, bool isProjectActive) {
-     final hasNifudaData = state.nifudaData.length > 1;
-     final hasProductData = state.productListKariData.length > 1;
-     final notifier = ref.read(projectProvider.notifier);
-
-     return Column(
-       crossAxisAlignment: CrossAxisAlignment.start,
-       children: [
-         const Text('データプレビュー', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-         const SizedBox(height: 8),
-         Row(
-           children: [
-             // 荷札リスト表示
-             Expanded(
-               child: ElevatedButton.icon(
-                 style: ElevatedButton.styleFrom(
-                   backgroundColor: hasNifudaData ? Colors.blue.shade600 : Colors.grey.shade400,
-                   foregroundColor: Colors.white,
-                   padding: const EdgeInsets.symmetric(vertical: 12)
-                 ),
-                 icon: const Icon(Icons.list),
-                 label: Text('荷札リスト(${state.currentCaseNumber})', style: const TextStyle(fontSize: 14)),
-                 onPressed: hasNifudaData && isProjectActive ? () => showAndExportNifudaListAction(
-                   context,
-                   state.nifudaData,
-                   state.projectTitle,
-                   state.projectFolderPath!,
-                   state.currentCaseNumber, // ★ Case No.を渡す
-                 ) : null,
-               ),
-             ),
-             const SizedBox(width: 8),
-             // 製品リスト表示
-             Expanded(
-               child: ElevatedButton.icon(
-                 style: ElevatedButton.styleFrom(
-                   backgroundColor: hasProductData ? Colors.teal.shade600 : Colors.grey.shade400,
-                   foregroundColor: Colors.white,
-                   padding: const EdgeInsets.symmetric(vertical: 12)
-                 ),
-                 icon: const Icon(Icons.list_alt),
-                 label: const Text('製品リスト(全体)', style: const TextStyle(fontSize: 14)),
-                 onPressed: hasProductData && isProjectActive ? () => showAndExportProductListAction(
-                   context,
-                   state.productListKariData,
-                   state.projectFolderPath!,
-                 ) : null,
-               ),
-             ),
-           ],
-         ),
-         const SizedBox(height: 8),
-         // データサマリー
-         Row(
-           mainAxisAlignment: MainAxisAlignment.spaceAround,
-           children: [
-              Text('荷札データ(全体): ${state.nifudaData.length - (state.nifudaData.isNotEmpty ? 1: 0)}件', style: TextStyle(color: hasNifudaData ? Colors.blue.shade800 : Colors.grey)), // ヘッダー分を引く
-              Text('製品リスト: ${state.productListKariData.length - (state.productListKariData.isNotEmpty ? 1: 0)}件', style: TextStyle(color: hasProductData ? Colors.teal.shade800 : Colors.grey)), // ヘッダー分を引く
-           ],
-         )
-       ],
-     );
-  }
+  // ★ 削除 (新しい _buildDropdownSelector に置き換え)
+  // Widget _buildCompanySelector(...)
+  // ★ 削除 (新しい _buildDropdownSelector に置き換え)
+  // Widget _buildMatchingPatternSelector(...)
+  // ★ 削除 (新しい _buildLeftColumn に統合)
+  // Widget _buildOCRAndMatchingButtons(...)
+  // ★ 削除 (新しい _buildLeftColumn に統合)
+  // Widget _buildDataPreview(...)
+  // ★ 削除 (新しい _buildLeftColumn に統合)
+  // Widget _buildActionButtons(...)
 
 
   void _showCreateProjectDialog(BuildContext context, ProjectNotifier notifier) {

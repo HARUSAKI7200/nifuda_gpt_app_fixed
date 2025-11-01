@@ -89,6 +89,101 @@ void _hideLoadingDialog(BuildContext context) {
 // --- End Utility Functions ---
 
 
+// ★★★ ここから追加 (Gemini版の荷札OCR) ★★★
+// (home_actions.dart の captureProcessAndConfirmNifudaAction をモデルにする)
+Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
+    BuildContext context,
+    String projectFolderPath,
+    String currentCaseNumber,
+) async {
+  final List<Map<String, dynamic>>? allGeminiResults =
+      await Navigator.push<List<Map<String, dynamic>>>(
+    context,
+    MaterialPageRoute(builder: (_) => CameraCapturePage(
+        overlayText: '荷札を枠に合わせて撮影 (Gemini)',
+        isProductListOcr: false, // 荷札なので false
+        projectFolderPath: projectFolderPath,
+        caseNumber: currentCaseNumber,
+        // ★ 修正: aiService に gemini_service の関数を渡す
+        aiService: sendImageToGemini, // (gemini_service.dart で新設)
+    )),
+  );
+  if (allGeminiResults == null || allGeminiResults.isEmpty) {
+    if (context.mounted) {
+      showCustomSnackBar(context, '荷札の撮影またはOCR処理がキャンセルされました。');
+      FlutterLogs.logThis(
+        tag: 'OCR_ACTION_GEMINI',
+        subTag: 'NIFUDA_CANCEL',
+        logMessage: 'Nifuda OCR (Gemini) was cancelled by user.',
+        level: LogLevel.WARNING,
+      );
+    }
+    return null;
+  }
+  if (!context.mounted) return null;
+  List<List<String>> allConfirmedNifudaRows = [];
+  int imageIndex = 0;
+  for (final geminiResult in allGeminiResults) {
+    imageIndex++;
+    if (!context.mounted) break;
+    if (context.mounted) _showLoadingDialog(context, '$imageIndex / ${allGeminiResults.length} 枚目の結果を確認中...');
+    final Map<String, dynamic>? confirmedResultMap = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NifudaOcrConfirmPage(
+          extractedData: geminiResult,
+          imageIndex: imageIndex,
+          totalImages: allGeminiResults.length,
+        ),
+      ),
+    );
+    if (context.mounted) _hideLoadingDialog(context);
+    if (confirmedResultMap != null) {
+      // ★ 修正: nifuda_ocr_confirm_page.dart の nifudaFields を参照
+      List<String> confirmedRowAsList = NifudaOcrConfirmPage.nifudaFields
+          .map((field) => confirmedResultMap[field]?.toString() ?? '')
+          .toList();
+      allConfirmedNifudaRows.add(confirmedRowAsList);
+    } else {
+      if (context.mounted) {
+         final proceed = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => AlertDialog(
+                  title: Text('$imageIndex枚目の確認が破棄されました'),
+                  content: const Text('次の画像の確認に進みますか？\n「いいえ」を選択すると処理を中断します。'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('いいえ (中断)')),
+                    TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('はい (次へ)')),
+                  ],
+                ));
+        if (proceed != true) {
+           if(context.mounted) showCustomSnackBar(context, '荷札確認処理が中断されました。');
+           FlutterLogs.logThis(
+             tag: 'OCR_ACTION_GEMINI',
+             subTag: 'NIFUDA_CONFIRM_INTERRUPTED',
+             logMessage: 'Nifuda confirmation (Gemini) interrupted after $imageIndex images.',
+             level: LogLevel.WARNING,
+           );
+           return allConfirmedNifudaRows.isNotEmpty ? allConfirmedNifudaRows : null;
+        }
+      } else {
+        break;
+      }
+    }
+  }
+  if (allConfirmedNifudaRows.isNotEmpty) {
+     FlutterLogs.logInfo('OCR_ACTION_GEMINI', 'NIFUDA_CONFIRM_SUCCESS', '${allConfirmedNifudaRows.length} Nifuda rows confirmed (Gemini).');
+     return allConfirmedNifudaRows;
+  } else {
+    if (context.mounted) showCustomSnackBar(context, '有効な荷札データが1件も確定されませんでした。');
+    return null;
+  }
+}
+// ★★★ ここまで追加 ★★★
+
+
+
 // ★★★ captureProcessAndConfirmProductListActionGemini (Gemini版の製品リストOCR) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   BuildContext context,

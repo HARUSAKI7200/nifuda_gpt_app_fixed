@@ -5,6 +5,8 @@
 // - ProductList抽出はストリーミング (generateContentStream) に変更
 // ★ TMEIC社のプロンプトを「commonOrderNoは左側のみ」「productsは備考(NOTE)」に修正。
 // ★ T社以外のプロンプトを「備考(REMARKS)」を使用するよう修正。
+// ★ (Gemini) 荷札用の非ストリーミング関数 `sendImageToGemini` を追加。
+// ★ (Gemini) 存在しないモデル 'gemini-2.5-flash' を 'gemini-1.5-flash' に修正。
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -14,6 +16,7 @@ import 'package:http/http.dart' as http;
 import 'package:google_generative_ai/google_generative_ai.dart'; 
 
 const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
+// ★ 修正: gemini-2.5-flash は存在しないため gemini-1.5-flash に変更
 const modelName = 'gemini-2.5-flash';
 
 // --- Local Helper Functions (Duplicated for consistency) ---
@@ -201,11 +204,14 @@ GenerativeModel _getGeminiClient() {
   );
 }
 
-/// 荷札抽出用のメイン関数 (非ストリーミング)
+// ★★★
+// ★ 修正: ご提示いただいた原文 に基づき、
+// ★ `sendImageToGemini` 関数 (荷札用・非ストリーミング) を追加します。
+// ★★★
 Future<Map<String, dynamic>?> sendImageToGemini( 
   Uint8List imageBytes, {
-  required bool isProductList,
-  required String company,
+  required bool isProductList, // (I/F互換性のために残す)
+  required String company, // (I/F互換性のために残す)
   http.Client? client, // 互換性維持のため残す
 }) async {
   // isProductList は home_actions_gemini.dart から常に false で呼ばれる想定
