@@ -48,8 +48,9 @@ class MatchingResultPage extends ConsumerWidget {
 
     // ★ 修正: map の結果を List<String> にする
     return allRows.map((row) {
-      final nifuda = row['nifuda'] as Map<String, dynamic>? ?? {}; // null チェック追加
-      final product = row['product'] as Map<String, dynamic>? ?? {}; // null チェック追加
+      // ★★★ バグ修正: as Map<String, dynamic>? ?? {} を as Map? ?? {} に変更
+      final nifuda = row['nifuda'] as Map? ?? {}; // null チェック追加
+      final product = row['product'] as Map? ?? {}; // null チェック追加
       final status = row['照合ステータス'] as String? ?? '';
 
       // ★ 修正: nifuda Mapから 'Case No.' を取得
@@ -127,7 +128,8 @@ class MatchingResultPage extends ConsumerWidget {
     List<Future<int>> updateFutures = [];
 
     for (final matchedRow in matchedRows) {
-        final productMap = matchedRow['product'] as Map<String, dynamic>? ?? {};
+        // ★★★ バグ修正(予防): as Map<String, dynamic>? ?? {} を as Map? ?? {} に変更
+        final productMap = matchedRow['product'] as Map? ?? {};
         final productKey = (productMap['ORDER No.']?.toString() ?? '') + (productMap['ITEM OF SPARE']?.toString() ?? '');
 
         final dbRow = productDbMap[productKey];
@@ -183,8 +185,9 @@ class MatchingResultPage extends ConsumerWidget {
                       final status = row['照合ステータス'] as String? ?? '';
                       final isMatched = status.contains('一致') || status.contains('再');
                       final isSkipped = status.contains('スキップ');
-                      final nifuda = row['nifuda'] as Map<String, dynamic>? ?? {};
-                      final product = row['product'] as Map<String, dynamic>? ?? {};
+                      // ★★★ バグ修正: as Map<String, dynamic>? ?? {} を as Map? ?? {} に変更
+                      final nifuda = row['nifuda'] as Map? ?? {};
+                      final product = row['product'] as Map? ?? {};
 
                       return DataRow(
                         color: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
@@ -230,7 +233,7 @@ class MatchingResultPage extends ConsumerWidget {
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
                       icon: const Icon(Icons.share),
-                      label: const Text('検品完了＆共有', style: TextStyle(fontSize: 16)),
+                      label: const Text('検品完了＆共有', style: const TextStyle(fontSize: 16)),
                       onPressed: () async {
                         await _updateMatchedProducts(context, ref);
 

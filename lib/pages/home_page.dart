@@ -517,18 +517,7 @@ class HomePage extends ConsumerWidget {
     }
   }
 
-  // ★ 削除 (新しい _buildDropdownSelector に置き換え)
-  // Widget _buildCompanySelector(...)
-  // ★ 削除 (新しい _buildDropdownSelector に置き換え)
-  // Widget _buildMatchingPatternSelector(...)
-  // ★ 削除 (新しい _buildLeftColumn に統合)
-  // Widget _buildOCRAndMatchingButtons(...)
-  // ★ 削除 (新しい _buildLeftColumn に統合)
-  // Widget _buildDataPreview(...)
-  // ★ 削除 (新しい _buildLeftColumn に統合)
-  // Widget _buildActionButtons(...)
-
-
+  // ★ 修正: 特殊な空白文字(U+00A0)を除去し、floatingLabelBehaviorを追加
   void _showCreateProjectDialog(BuildContext context, ProjectNotifier notifier) {
     final projectCodeController = TextEditingController();
     // ★ 修正: ベースパスのみを初期値とする
@@ -546,10 +535,16 @@ class HomePage extends ConsumerWidget {
                 controller: projectCodeController,
                 decoration: const InputDecoration(labelText: '依頼No (プロジェクトコード)'),
               ),
+              // ★ 修正: 2つのTextField間にスペースを追加
+              const SizedBox(height: 16), 
               TextField(
                 controller: projectFolderPathController,
                 readOnly: true, // ベースパスは固定
-                decoration: const InputDecoration(labelText: '保存ベースフォルダ'),
+                decoration: const InputDecoration(
+                  labelText: '保存ベースフォルダ',
+                  // ★ 修正: ラベルが常に浮くように設定
+                  floatingLabelBehavior: FloatingLabelBehavior.always, 
+                ),
               ),
             ],
           ),
@@ -611,3 +606,4 @@ class HomePage extends ConsumerWidget {
     );
   }
 }
+

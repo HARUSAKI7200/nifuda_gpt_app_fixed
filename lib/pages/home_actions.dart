@@ -701,32 +701,6 @@ Future<List<List<String>>?> _processRawProductResults(
   }
 }
 
-// ★★★ showAndExportProductListAction (変更なし) ★★★
-void showAndExportProductListAction(
-  BuildContext context,
-  List<List<String>> productListData,
-  String projectFolderPath,
-) {
-    if (productListData.isEmpty) {
-       _showErrorDialog(context, 'データなし', '表示する製品リストデータがありません。');
-       return;
-    }
-    if (productListData.length <= 1) {
-       _showErrorDialog(context, 'データなし', '表示する製品リストデータがありません。');
-       return;
-    }
-    showDialog(
-      context: context,
-      builder: (_) => ExcelPreviewDialog(
-        title: '製品リスト',
-        data: productListData,
-        headers: productListData.first,
-        projectFolderPath: projectFolderPath,
-        subfolder: '製品リスト',
-      ),
-    );
-}
-
 // ★★★ startMatchingAndShowResultsAction (修正: Case No.連携) ★★★
 Future<String?> startMatchingAndShowResultsAction(
   BuildContext context,
@@ -875,7 +849,7 @@ Future<String?> exportAllProjectDataAction({
     final allUnmatchedData = (matchingResults['unmatched'] as List).cast<Map<String, dynamic>>();
 
     final matchingHeaders = [
-        '照合結果', '荷札_製番', '荷札_項目番号', '荷札_品名', '製品_ORDER No.', '製品_品名記号', '製品_製品コード番号', '製品_照合済Case', '照合Case'
+        '照合結果', '荷札_製番', '荷札_項目番号', '荷札_品名', '製品_ORDER No.', '製品_品名記号', '製品_製品コード番号', '照合済Case', '照合Case'
     ];
 
     // ★ 修正: 型を List<List<String>> に合わせる, null チェック強化
@@ -883,14 +857,23 @@ Future<String?> exportAllProjectDataAction({
       ...allMatchedData.map((m) => <String>[
           '照合成功',
           m['nifuda']?['製番']?.toString() ?? '', m['nifuda']?['項目番号']?.toString() ?? '', m['nifuda']?['品名']?.toString() ?? '',
-          m['product']?['ORDER No.']?.toString() ?? '', m['product']?['品名記D~H号']?.toString() ?? '', m['product']?['製品コード番号']?.toString() ?? '',
+          m['product']?['ORDER No.']?.toString() ?? '', 
+          // ★★★ バグ修正 1 ★★★
+          // '品名記D~H号' -> '品名記号'
+          m['product']?['品名記号']?.toString() ?? '', 
+          m['product']?['製品コード番号']?.toString() ?? '',
           m['product']?['照合済Case']?.toString() ?? '', m['nifuda']?['Case No.']?.toString() ?? '',
       ]),
       ...allUnmatchedData.map((u) => <String>[
           '照合失敗',
           u['nifuda']?['製番']?.toString() ?? '', u['nifuda']?['項目番号']?.toString() ?? '', u['nifuda']?['品名']?.toString() ?? '',
-          '', '', '', '',
-          u['nifuda']?['Case No.']?.toString() ?? '',
+          // ★★★ バグ修正 2 ★★★
+          // 'unmatched' の場合も9列にする (product側 4列 + case 1列)
+          '', // 製品_ORDER No.
+          '', // 製品_品名記号
+          '', // 製品_製品コード番号
+          '', // 照合済Case
+          u['nifuda']?['Case No.']?.toString() ?? '', // 照合Case
       ]),
     ];
 
