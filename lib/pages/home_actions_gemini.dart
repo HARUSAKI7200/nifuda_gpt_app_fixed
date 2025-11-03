@@ -184,7 +184,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
 
 
 
-// ★★★ captureProcessAndConfirmProductListActionGemini (Gemini版の製品リストOCR) ★★★
+// ★★★ captureProcessAndConfirmProductListActionGemini (★ 修正: プレビュー遷移のロジック変更) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   BuildContext context,
   String selectedCompany,
@@ -217,31 +217,41 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   // 画像保存は home_actions.dart の関数を流用する場合はアンコメント
   // unawaited(_saveScannedProductImages(context, projectFolderPath, imageFilePaths));
 
-  List<Uint8List> rawImageBytesList = [];
+  // ★★★ 修正ここから (スキャン後の処理フロー変更) ★★★
+  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中... (1/${imageFilePaths.length})');
+
+  Uint8List firstImageBytes;
   const int PERSPECTIVE_WIDTH = 1920;
   try {
-    for (var path in imageFilePaths) {
-      final file = File(path);
-      final rawBytes = await file.readAsBytes();
-      final originalImage = img.decodeImage(rawBytes);
-      if (originalImage == null) continue;
-      // リサイズ処理 (home_actions.dartから流用)
-      img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
-      // シャープ化処理 (home_actions.dartから流用する場合はアンコメント)
-      // normalizedImage = _applySharpeningFilter(normalizedImage);
-      rawImageBytesList.add(Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100)));
+    // 1. 1枚目の画像だけを先に処理する
+    final path = imageFilePaths.first;
+    final file = File(path);
+    final rawBytes = await file.readAsBytes();
+    final originalImage = img.decodeImage(rawBytes);
+    
+    if (originalImage == null) {
+      if (context.mounted) _hideLoadingDialog(context);
+      _showErrorDialog(context, '画像処理エラー', '1枚目の画像をデコードできませんでした。');
+      return null;
     }
+    
+    img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
+    // (Gemini版はシャープ化なし)
+    
+    firstImageBytes = Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100));
+
   } catch (e, s) {
-    _logError('IMAGE_PROC', 'Image read/resize error (Gemini)', e, s);
+    _logError('IMAGE_PROC', 'Image read/resize error (Gemini First Image)', e, s);
+    if (context.mounted) _hideLoadingDialog(context);
     if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはリサイズに失敗しました: $e');
     return null;
+  } finally {
+     // 3. 1枚目の処理が終わったら、プレビュー遷移の前にダイアログを消す
+     if (context.mounted) _hideLoadingDialog(context);
   }
-  if (rawImageBytesList.isEmpty) {
-      if(context.mounted) _showErrorDialog(context, '画像処理エラー', '有効な画像が読み込めませんでした。');
-      return null;
-  }
+  // ★★★ 修正ここまで ★★★
 
-  // マスク処理 (home_actions.dartから流用)
+
   String template;
   switch (selectedCompany) {
     case 'T社': template = 't'; break;
@@ -249,7 +259,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     case '動的マスク処理': template = 'dynamic'; break;
     default: if(context.mounted) _showErrorDialog(context, 'テンプレートエラー', '無効な会社名が選択されました。'); return null;
   }
-  final Uint8List firstImageBytes = rawImageBytesList.first;
+
   if (!context.mounted) return null;
 
   final MaskPreviewResult? previewResult = await Navigator.push<MaskPreviewResult>(
@@ -257,7 +267,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       previewImageBytes: firstImageBytes,
       maskTemplate: template,
       imageIndex: 1,
-      totalImages: rawImageBytesList.length
+      // ★★★ ここを修正 (Null安全エラーの解決) ★★★
+      totalImages: imageFilePaths!.length, // ★ 修正: !.length に変更
     )),
   );
 
@@ -269,26 +280,34 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   final List<Rect> dynamicMasks = previewResult.dynamicMasks;
 
   List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
-  if (rawImageBytesList.length > 1) {
-    // 複数枚のマスク処理 (home_actions.dartから流用)
-    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${rawImageBytesList.length})');
+  if (imageFilePaths.length > 1) {
+    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths.length})');
     try {
-      for (int i = 1; i < rawImageBytesList.length; i++) {
+      // ★ 修正: ループを i = 1 (2枚目) から開始
+      for (int i = 1; i < imageFilePaths.length; i++) {
         if (!context.mounted) break;
         if(i > 1 && context.mounted) {
             Navigator.pop(context);
-           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${rawImageBytesList.length})');
+           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${imageFilePaths.length})');
         }
 
-        final image = img.decodeImage(rawImageBytesList[i])!;
-        img.Image maskedImage;
+        // ★ 修正: 2枚目以降の画像をここで読み込み、処理する
+        final path = imageFilePaths[i];
+        final file = File(path);
+        final rawBytes = await file.readAsBytes();
+        final originalImage = img.decodeImage(rawBytes);
+        
+        if (originalImage == null) continue;
 
+        img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
+        
+        img.Image maskedImage;
         if (template == 't') {
-            maskedImage = applyMaskToImage(image, template: 't');
+            maskedImage = applyMaskToImage(normalizedImage, template: 't');
         } else if (template == 'dynamic' && dynamicMasks.isNotEmpty) {
-            maskedImage = applyMaskToImage(image, template: 'dynamic', dynamicMaskRects: dynamicMasks);
+            maskedImage = applyMaskToImage(normalizedImage, template: 'dynamic', dynamicMaskRects: dynamicMasks);
         } else {
-            maskedImage = image;
+            maskedImage = normalizedImage;
         }
         finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
       }
@@ -302,7 +321,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     return null;
   }
 
-  // ★ Geminiへのリクエスト送信
+  // ★ Geminiへのリクエスト送信 (以降は変更なし)
   List<Map<String, dynamic>?> allAiRawResults = [];
   final String companyForGemini = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany;
 
@@ -386,7 +405,8 @@ Future<List<List<String>>?> _processRawProductResultsGemini(
 
               if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
                  if (commonOrderNo.endsWith('-') || commonOrderNo.endsWith(' ')) {
-                     finalOrderNo = '$commonOrderNo$remarks';
+                     // ★★★ ここを修正 (タイポ修正) ★★★
+                     finalOrderNo = '$commonOrderNo$remarks'; // 'commonMOrderNo' -> 'commonOrderNo'
                  } else {
                      finalOrderNo = '$commonOrderNo $remarks';
                  }

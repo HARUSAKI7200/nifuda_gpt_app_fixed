@@ -16,8 +16,7 @@ import 'package:http/http.dart' as http;
 import 'package:google_generative_ai/google_generative_ai.dart'; 
 
 const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
-// ★ 修正: gemini-2.5-flash は存在しないため gemini-1.5-flash に変更
-const modelName = 'gemini-2.5-flash';
+const modelName = 'gemini-2.5-flash-preview-09-2025';
 
 // --- Local Helper Functions (Duplicated for consistency) ---
 

@@ -480,7 +480,7 @@ void showAndExportNifudaListAction(
   );
 }
 
-// ★★★ captureProcessAndConfirmProductListAction (変更なし) ★★★
+// ★★★ captureProcessAndConfirmProductListAction (★ 修正: プレビュー遷移のロジック変更) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
@@ -512,27 +512,42 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   unawaited(_saveScannedProductImages(context, projectFolderPath, imageFilePaths));
 
-  List<Uint8List> rawImageBytesList = [];
+  // ★★★ 修正ここから (スキャン後の処理フロー変更) ★★★
+
+  // 1. スキャン直後にローディングダイアログを表示
+  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中... (1/${imageFilePaths.length})');
+
+  Uint8List firstImageBytes;
   const int PERSPECTIVE_WIDTH = 1920;
   try {
-    for (var path in imageFilePaths) {
-      final file = File(path);
-      final rawBytes = await file.readAsBytes();
-      final originalImage = img.decodeImage(rawBytes);
-      if (originalImage == null) continue;
-      img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
-      normalizedImage = _applySharpeningFilter(normalizedImage);
-      rawImageBytesList.add(Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100)));
+    // 2. 1枚目の画像だけを先に処理する
+    final path = imageFilePaths.first;
+    final file = File(path);
+    final rawBytes = await file.readAsBytes();
+    final originalImage = img.decodeImage(rawBytes);
+    
+    if (originalImage == null) {
+      if (context.mounted) _hideLoadingDialog(context);
+      _showErrorDialog(context, '画像処理エラー', '1枚目の画像をデコードできませんでした。');
+      return null;
     }
+    
+    img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
+    normalizedImage = _applySharpeningFilter(normalizedImage);
+    
+    firstImageBytes = Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100));
+
   } catch (e, s) {
-    _logError('IMAGE_PROC', 'Image read/resize error', e, s);
+    _logError('IMAGE_PROC', 'Image read/resize error (First Image)', e, s);
+    if (context.mounted) _hideLoadingDialog(context);
     if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはリサイズに失敗しました: $e');
     return null;
+  } finally {
+     // 3. 1枚目の処理が終わったら、プレビュー遷移の前にダイアログを消す
+     if (context.mounted) _hideLoadingDialog(context);
   }
-  if (rawImageBytesList.isEmpty) {
-      if(context.mounted) _showErrorDialog(context, '画像処理エラー', '有効な画像が読み込めませんでした。');
-      return null;
-  }
+  // ★★★ 修正ここまで ★★★
+
 
   String template;
   switch (selectedCompany) {
@@ -541,15 +556,16 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     case '動的マスク処理': template = 'dynamic'; break;
     default: if(context.mounted) _showErrorDialog(context, 'テンプレートエラー', '無効な会社名が選択されました。'); return null;
   }
-  final Uint8List firstImageBytes = rawImageBytesList.first;
-  if (!context.mounted) return null;
 
+  // 4. 準備できた1枚目の画像でプレビュー画面に遷移
+  if (!context.mounted) return null;
   final MaskPreviewResult? previewResult = await Navigator.push<MaskPreviewResult>(
     context, MaterialPageRoute(builder: (_) => ProductListMaskPreviewPage(
-      previewImageBytes: firstImageBytes,
+      previewImageBytes: firstImageBytes, // 処理済みの1枚目を渡す
       maskTemplate: template,
       imageIndex: 1,
-      totalImages: rawImageBytesList.length
+      // ★★★ ここを修正 (Null安全エラーの解決) ★★★
+      totalImages: imageFilePaths!.length, // ★ 修正: !.length に変更
     )),
   );
 
@@ -560,27 +576,40 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   final List<Rect> dynamicMasks = previewResult.dynamicMasks;
 
-  List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
-  if (rawImageBytesList.length > 1) {
-    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${rawImageBytesList.length})');
+  // 5. プレビュー確定後、残りの画像を処理する
+  List<Uint8List> finalImagesToSend = [previewResult.imageBytes]; // プレビュー画面が返した1枚目（マスク適用済み）
+  
+  if (imageFilePaths.length > 1) {
+    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths.length})');
     try {
-      for (int i = 1; i < rawImageBytesList.length; i++) {
+      // ★ 修正: ループを i = 1 (2枚目) から開始
+      for (int i = 1; i < imageFilePaths.length; i++) {
         if (!context.mounted) break;
         if(i > 1 && context.mounted) {
             Navigator.pop(context);
-           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${rawImageBytesList.length})');
+           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${imageFilePaths.length})');
         }
 
-        final image = img.decodeImage(rawImageBytesList[i])!;
-        img.Image maskedImage;
+        // ★ 修正: 2枚目以降の画像をここで読み込み、処理する
+        final path = imageFilePaths[i];
+        final file = File(path);
+        final rawBytes = await file.readAsBytes();
+        final originalImage = img.decodeImage(rawBytes);
 
+        if (originalImage == null) continue;
+
+        // リサイズとシャープ化
+        img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
+        normalizedImage = _applySharpeningFilter(normalizedImage);
+        
+        // マスク適用
+        img.Image maskedImage;
         if (template == 't') {
-            maskedImage = applyMaskToImage(image, template: 't');
+            maskedImage = applyMaskToImage(normalizedImage, template: 't');
         } else if (template == 'dynamic' && dynamicMasks.isNotEmpty) {
-            // ★ 修正: dynamicMasks -> dynamicMaskRects
-            maskedImage = applyMaskToImage(image, template: 'dynamic', dynamicMaskRects: dynamicMasks);
+            maskedImage = applyMaskToImage(normalizedImage, template: 'dynamic', dynamicMaskRects: dynamicMasks);
         } else {
-            maskedImage = image;
+            maskedImage = normalizedImage;
         }
         finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
       }
@@ -594,6 +623,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     return null;
   }
 
+  // --- (以降のAI送信処理は変更なし) ---
   List<Map<String, dynamic>?> allAiRawResults = [];
   final String companyForGpt = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany;
 

@@ -1,7 +1,9 @@
 // lib/utils/gpt_service.dart
 //
 // 修正方針：
-// - GPTモデルは「gpt-5-mini」を前提とし、画像非対応時のフォールバックを維持。
+// - ★★★ 修正: GPTモデルを「gpt-5-mini」に戻す ★★★
+// - 荷札抽出時のフォールバックロジックを削除。
+// - gpt-5(-mini) が "temperature: 0.0" に非対応なため、temperatureの指定自体を削除 (維持)
 // - SDKのChatCompletionResponseFormatエラーをResponseFormat(type: ResponseFormatType.jsonObject)に修正。
 // - ストリーミング応答のNull安全性を強化。
 // - 欠落していた `package:flutter/foundation.dart` のインポートを追加。
@@ -215,7 +217,9 @@ Future<CreateChatCompletionResponse> _openAICreateVisionChat({
           ]),
         ),
       ],
-      temperature: 0.0,
+      // ★ 修正: temperature: 0.0 を削除
+      // ★ ログに基づき、gpt-5(-mini) は temperature: 1 (デフォルト) のみをサポート
+      // temperature: 0.0,
       // ★ 正式：JSONモードを指定（factory）
       responseFormat: ResponseFormat.jsonObject(),
     ),
@@ -248,7 +252,9 @@ Stream<CreateChatCompletionStreamResponse> _openAICreateVisionChatStream({
           ]),
         ),
       ],
-      temperature: 0.0,
+      // ★ 修正: temperature: 0.0 を削除
+      // ★ ログに基づき、gpt-5(-mini) は temperature: 1 (デフォルト) のみをサポート
+      // temperature: 0.0,
       // ★ 正式：JSONモードを指定（factory）
       responseFormat: ResponseFormat.jsonObject(),
     ),
@@ -287,25 +293,22 @@ Future<Map<String, dynamic>?> sendImageToGPT(
   final String base64Image = base64Encode(imageBytes);
   final String dataUrl = 'data:$mime;base64,$base64Image';
 
-  // モデル：第一候補 gpt-5-mini（要求通り）
+  // ★★★ 修正: モデルを gpt-5-mini に変更 ★★★
   ChatCompletionModel primaryModel = ChatCompletionModel.modelId('gpt-5-mini');
-  // フォールバック：画像対応の gpt-4o-mini
-  final ChatCompletionModel fallbackVisionModel =
-      ChatCompletionModel.modelId('gpt-4o-mini');
-
+  
   // プロンプト（既存内容は変更しない）
   final String prompt = _buildNifudaPrompt();
 
   FlutterLogs.logInfo(
     'GPT_SERVICE',
     'REQUEST_SENT',
-    'Sending image to GPT (primary=gpt-5-mini) for Nifuda',
+    'Sending image to GPT (gpt-5-mini) for Nifuda', // ★ 修正
   );
 
   try {
     CreateChatCompletionResponse response;
 
-    // -------- 1回目: gpt-5-mini で送信 --------
+    // -------- gpt-5-mini で送信 (★ 修正: フォールバックなし) --------
     try {
       response = await _openAICreateVisionChat(
         model: primaryModel,
@@ -313,43 +316,16 @@ Future<Map<String, dynamic>?> sendImageToGPT(
         dataUrl: dataUrl,
       );
     } on OpenAIClientException catch (e, s) {
-      // statusCode はこの型に存在しないため、メッセージ文字列から推定
+      // ★ 修正: フォールバックロジックを削除し、エラーログと再スローに変更
       final String msg = e.message ?? e.toString();
-
       FlutterLogs.logThis(
         tag: 'GPT_SERVICE',
         subTag: 'PRIMARY_REQUEST_FAILED',
-        logMessage: 'Primary model (gpt-5-mini) failed: $msg\n$s',
+        logMessage: 'gpt-5-mini failed: $msg\n$s', // ★ 修正
         exception: Exception(msg),
         level: LogLevel.WARNING,
       );
-
-      // 画像非対応・コンテンツ型不一致などを示唆する語を検出
-      final String lmsg = msg.toLowerCase();
-      final bool maybeVisionUnsupported =
-          lmsg.contains('image') ||
-          lmsg.contains('vision') ||
-          lmsg.contains('content type') ||
-          lmsg.contains('unsupported') ||
-          lmsg.contains('unsuccessful') ||
-          lmsg.contains('bad request');
-
-      if (!maybeVisionUnsupported) {
-        rethrow; // 通信断など別要因は上位で処理
-      }
-
-      // -------- 2回目: フォールバック(gpt-4o-mini)で再試行 --------
-      FlutterLogs.logInfo(
-        'GPT_SERVICE',
-        'FALLBACK_TRY',
-        'Retrying with fallback vision model (gpt-4o-mini).',
-      );
-
-      response = await _openAICreateVisionChat(
-        model: fallbackVisionModel,
-        prompt: prompt,
-        dataUrl: dataUrl,
-      );
+      rethrow; // ★ 修正: 失敗したらそのままエラーを投げる
     }
 
     // 応答本文の抽出（通常は String）
@@ -411,7 +387,7 @@ Future<Map<String, dynamic>?> sendImageToGPT(
       return null;
     }
   } on OpenAIClientException catch (e, s) {
-    // HTTP例外（フォールバックも失敗）
+    // HTTP例外
     FlutterLogs.logThis(
       tag: 'GPT_SERVICE',
       subTag: 'API_REQUEST_FAILED',
@@ -448,15 +424,15 @@ Stream<String> sendImageToGPTStream(
   final String base64Image = base64Encode(imageBytes);
   final String dataUrl = 'data:$mime;base64,$base64Image';
   
-  // GPTは画像対応モデルを明示的に使用
-  final ChatCompletionModel visionModel = ChatCompletionModel.modelId('gpt-4o-mini');
+  // ★★★ 修正: モデルを gpt-5-mini に変更 ★★★
+  final ChatCompletionModel visionModel = ChatCompletionModel.modelId('gpt-5-mini');
   // ★ 修正されたプロンプトを使用
   final String prompt = _buildProductListPrompt(company);
 
   FlutterLogs.logInfo(
     'GPT_SERVICE',
     'STREAM_REQUEST_SENT',
-    'Sending image to GPT Stream (gpt-4o-mini) for Product List',
+    'Sending image to GPT Stream (gpt-5-mini) for Product List', // ★ 修正
   );
 
   try {
