@@ -137,8 +137,7 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
                     pathController: _path2Controller,
                     domainController: _domain2Controller,
                     userController: _user2Controller,
-                    // ★★★ ここを修正 ★★★
-                    passController: _pass2Controller, // _passController -> _pass2Controller
+                    passController: _pass2Controller,
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
@@ -184,7 +183,6 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
             TextFormField(
               controller: hostController,
               decoration: const InputDecoration(
-                // ★ 修正: ラベルと入力欄の隙間を確保
                 isDense: true, 
                 contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'ホスト名 または IPアドレス (*)',
@@ -197,10 +195,13 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
                 return null;
               },
             ),
+            
+            // ★★★ 隙間を追加 ★★★
+            const SizedBox(height: 12),
+            
             TextFormField(
               controller: shareController,
               decoration: const InputDecoration(
-                // ★ 修正: ラベルと入力欄の隙間を確保
                 isDense: true, 
                 contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: '共有名 (*)',
@@ -213,10 +214,13 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
                 return null;
               },
             ),
+
+            // ★★★ 隙間を追加 ★★★
+            const SizedBox(height: 12),
+
             TextFormField(
               controller: pathController,
               decoration: const InputDecoration(
-                // ★ 修正: ラベルと入力欄の隙間を確保
                 isDense: true, 
                 contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'フォルダパス (共有名以下)',
@@ -224,20 +228,26 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
               ),
               // パスは空欄でもOK
             ),
+
+            // ★★★ 隙間を追加 ★★★
+            const SizedBox(height: 12),
+
             TextFormField(
               controller: domainController,
               decoration: const InputDecoration(
-                // ★ 修正: ラベルと入力欄の隙間を確保
                 isDense: true, 
                 contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'ドメイン名 (空欄可)',
                 hintText: '例: WORKGROUP (通常は空欄)',
               ),
             ),
+
+            // ★★★ 隙間を追加 ★★★
+            const SizedBox(height: 12),
+
             TextFormField(
               controller: userController,
               decoration: const InputDecoration(
-                // ★ 修正: ラベルと入力欄の隙間を確保
                 isDense: true, 
                 contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'ユーザー名 (*)',
@@ -249,10 +259,13 @@ class _SmbSettingsPageState extends State<SmbSettingsPage> {
                 return null;
               },
             ),
+
+            // ★★★ 隙間を追加 ★★★
+            const SizedBox(height: 12),
+
             TextFormField(
               controller: passController,
               decoration: const InputDecoration(
-                // ★ 修正: ラベルと入力欄の隙間を確保
                 isDense: true, 
                 contentPadding: EdgeInsets.fromLTRB(12.0, 10.0, 12.0, 10.0),
                 labelText: 'パスワード (*)',
