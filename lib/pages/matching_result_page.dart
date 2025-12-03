@@ -91,6 +91,8 @@ class MatchingResultPage extends ConsumerWidget {
         rows: rowsWithoutHeader,
         projectFolderPath: projectFolderPath,
         subfolder: '照合結果/$currentCaseNumber',
+        // ★ 修正: この関数は単独で呼ばれる可能性があるため、権限チェックはスキップしない
+        skipPermissionCheck: false, 
       );
       if (!silent && context.mounted) {
         showCustomSnackBar(context, '照合結果を保存しました。ローカル: ${results['local']}, SMB: ${results['smb']}', durationSeconds: 5);
@@ -366,59 +368,114 @@ class MatchingResultPage extends ConsumerWidget {
                       ),
                     ),
             ),
-            // ★★★ 下部ボタン (SafeAreaの内側) ★★★
+            
+            // ★★★ 修正: 下部ボタンをご要望に合わせて3つに変更 ★★★
             Padding(
               padding: const EdgeInsets.all(16.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              child: Column(
                 children: [
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
-                        icon: const Icon(Icons.skip_next),
-                        label: Text('次のCase (${'#${(int.tryParse(currentCaseNumber.replaceAll('#', '')) ?? 1) + 1}'})へ', style: const TextStyle(fontSize: 16)),
-                        onPressed: () async {
-                           await _updateMatchedProducts(context, ref);
-                           _moveToNextCase(context, ref);
-                        },
-                      ),
+                  // 1. 次のCaseへ
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade700, 
+                      foregroundColor: Colors.white, 
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      minimumSize: const Size(double.infinity, 50), // 横幅最大
                     ),
+                    icon: const Icon(Icons.skip_next),
+                    label: Text('次のCase (${'#${(int.tryParse(currentCaseNumber.replaceAll('#', '')) ?? 1) + 1}'})へ', style: const TextStyle(fontSize: 16)),
+                    onPressed: () async {
+                       await _updateMatchedProducts(context, ref);
+                       _moveToNextCase(context, ref);
+                    },
                   ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 8.0),
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
-                        icon: const Icon(Icons.share),
-                        label: const Text('検品完了＆共有', style: const TextStyle(fontSize: 16)),
-                        onPressed: () async {
-                          await _updateMatchedProducts(context, ref);
-                          
-                          final newStatus = await exportAllProjectDataAction(
-                              context: context,
-                              projectTitle: projectTitle,
-                              projectFolderPath: projectFolderPath,
-                              nifudaData: nifudaData,
-                              productListData: productListKariData,
-                              matchingResults: matchingResults,
-                              currentCaseNumber: currentCaseNumber,
-                              jsonSavePath: projectState.jsonSavePath,
-                              inspectionStatus: STATUS_COMPLETED,
-                          );
+                  const SizedBox(height: 10), // ボタン間の隙間
 
-                          if (newStatus == STATUS_COMPLETED) {
-                             if (projectState.currentProjectId != null) {
-                                await notifier.updateProjectStatus(STATUS_COMPLETED);
-                             } else {
-                                notifier.updateProjectStatus(STATUS_COMPLETED);
-                             }
-                             if(context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
-                          }
-                        },
+                  // 2. 保存系ボタン (横並び)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      // 2a. 共有フォルダ(SMB)へ保存
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green.shade700, // 色変更
+                            foregroundColor: Colors.white, 
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold) // 文字サイズ調整
+                          ),
+                          icon: const Icon(Icons.cloud_upload_outlined, size: 20), // アイコン変更
+                          label: const Text('共有フォルダ(SMB)\nへ保存'), // テキスト変更
+                          onPressed: () async {
+                            // DB更新
+                            await _updateMatchedProducts(context, ref);
+                            
+                            // ★ 新しいSMB保存専用のアクションを呼び出す
+                            final newStatus = await exportDataToStorageAction(
+                                context: context,
+                                projectTitle: projectTitle,
+                                projectFolderPath: projectFolderPath,
+                                nifudaData: nifudaData,
+                                productListData: productListKariData,
+                                matchingResults: matchingResults,
+                                currentCaseNumber: currentCaseNumber,
+                                jsonSavePath: projectState.jsonSavePath,
+                                inspectionStatus: STATUS_COMPLETED,
+                            );
+
+                            if (newStatus == STATUS_COMPLETED) {
+                               if (projectState.currentProjectId != null) {
+                                  await notifier.updateProjectStatus(STATUS_COMPLETED);
+                               } else {
+                                  notifier.updateProjectStatus(STATUS_COMPLETED);
+                               }
+                               if(context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+                            }
+                          },
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 10), // ボタン間の隙間
+
+                      // 2b. アプリ(LINE/Gmail)で共有
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.indigo.shade700, // 色変更
+                            foregroundColor: Colors.white, 
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold) // 文字サイズ調整
+                          ),
+                          icon: const Icon(Icons.share, size: 20),
+                          label: const Text('アプリ(LINE/Gmail)\nで共有'), // テキスト変更
+                          onPressed: () async {
+                            // DB更新
+                            await _updateMatchedProducts(context, ref);
+                            
+                            // ★ 新しいアプリ共有専用のアクションを呼び出す
+                            final newStatus = await shareDataViaAppsAction(
+                                context: context,
+                                projectTitle: projectTitle,
+                                projectFolderPath: projectFolderPath, // 一時ファイル作成のベースとして使用
+                                nifudaData: nifudaData,
+                                productListData: productListKariData,
+                                matchingResults: matchingResults,
+                                currentCaseNumber: currentCaseNumber,
+                                jsonSavePath: projectState.jsonSavePath,
+                                inspectionStatus: STATUS_COMPLETED,
+                            );
+                            
+                            if (newStatus == STATUS_COMPLETED) {
+                               if (projectState.currentProjectId != null) {
+                                  await notifier.updateProjectStatus(STATUS_COMPLETED);
+                               } else {
+                                  notifier.updateProjectStatus(STATUS_COMPLETED);
+                               }
+                               if(context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+                            }
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

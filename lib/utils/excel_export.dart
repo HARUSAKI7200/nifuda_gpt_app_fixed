@@ -17,6 +17,7 @@ Future<Map<String, String>> exportToExcelStorage({
   required List<List<String>> rows,
   required String projectFolderPath,
   String? subfolder,
+  bool skipPermissionCheck = false, // ★ 修正: パラメータ追加
 }) async {
   if (!Platform.isAndroid) {
     throw Exception('このファイル保存機能はAndroid専用です。');
@@ -61,11 +62,14 @@ Future<Map<String, String>> exportToExcelStorage({
     if (kDebugMode) print('Sheet name is already "$sheetName", no rename needed.');
   }
 
-  // ★ 権限チェック
-  var status = await Permission.storage.request();
-  if (!status.isGranted) {
-    if (!await Permission.manageExternalStorage.request().isGranted) {
-       throw Exception('ストレージへのアクセス権限が拒否されました。');
+  // ★ 修正: スキップフラグで権限チェックを囲む
+  if (!skipPermissionCheck) {
+    if (kDebugMode) print('Requesting storage permission from excel_export...');
+    var status = await Permission.storage.request();
+    if (!status.isGranted) {
+      if (!await Permission.manageExternalStorage.request().isGranted) {
+         throw Exception('ストレージへのアクセス権限が拒否されました。');
+      }
     }
   }
 

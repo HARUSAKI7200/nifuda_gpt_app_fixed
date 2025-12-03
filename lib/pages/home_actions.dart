@@ -9,14 +9,14 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:path_provider/path_provider.dart'; // ★ 一時フォルダ取得のためにインポート
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:flutter_logs/flutter_logs.dart';
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:media_scanner/media_scanner.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:share_plus/share_plus.dart'; 
 import 'package:drift/drift.dart' show Value; // ProductMatcherで使用するため
 
 import '../utils/gpt_service.dart';
@@ -130,7 +130,7 @@ img.Image _applySharpeningFilter(img.Image image) {
 // --- End of Utility Functions ---
 
 
-// ★★★ _saveScannedProductImages (製品リスト画像はCase No.関係なし) ★★★
+// ★★★ _saveScannedProductImages (★ 修正: 権限リクエストの競合を修正) ★★★
 Future<void> _saveScannedProductImages(
     BuildContext context,
     String projectFolderPath,
@@ -140,11 +140,14 @@ Future<void> _saveScannedProductImages(
     return;
   }
   try {
-    var status = await Permission.storage.request();
-    if (!status.isGranted) {
-       status = await Permission.manageExternalStorage.request();
-    }
-    if (!status.isGranted) {
+    // ★ 修正: 必要な権限を同時にリクエスト
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.storage,
+      Permission.manageExternalStorage,
+    ].request();
+
+    // どちらの権限も許可されていない場合はエラー
+    if (!statuses[Permission.storage]!.isGranted && !statuses[Permission.manageExternalStorage]!.isGranted) {
       throw Exception('ストレージへのアクセス権限がありません。');
     }
 
@@ -204,34 +207,48 @@ Future<String?> saveProjectAction(
   String currentCaseNumber,
   String? existingJsonSavePath,
   void Function(String?) updateJsonSavePath,
+  // ★ 修正: 一時フォルダに保存するオプションを追加
+  { String? customSavePath } 
 ) async {
   try {
     String fileName = '$projectTitle.json';
     String saveFilePath;
-    String saveDirPath;
-    bool isNewSave = existingJsonSavePath == null;
 
-    if (isNewSave) {
-      // 2-2: DCIM/検品関係/プロジェクトコード/SAVES/YYYYMMDD/hhmmss/プロジェクトコード.json
-      final now = DateTime.now();
-      final timestamp = _formatTimestampForFilename(now);
-      final dateFolder = timestamp.substring(0, 8);
-      final timeFolder = timestamp.substring(9);
+    // ★ 修正: customSavePath (一時フォルダパスなど) が指定された場合
+    if (customSavePath != null) {
+      saveFilePath = customSavePath;
+      final saveDir = Directory(p.dirname(saveFilePath));
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+      }
+    } 
+    // (既存のロジック)
+    else {
+      String saveDirPath;
+      bool isNewSave = existingJsonSavePath == null;
 
-      final savesDir = p.join(currentProjectFolderPath, 'SAVES');
-      saveDirPath = p.join(savesDir, dateFolder, timeFolder);
-      saveFilePath = p.join(saveDirPath, fileName);
-    } else {
-      saveFilePath = existingJsonSavePath!;
-      saveDirPath = p.dirname(saveFilePath);
-      fileName = p.basename(saveFilePath);
+      if (isNewSave) {
+        final now = DateTime.now();
+        final timestamp = _formatTimestampForFilename(now);
+        final dateFolder = timestamp.substring(0, 8);
+        final timeFolder = timestamp.substring(9);
+
+        final savesDir = p.join(currentProjectFolderPath, 'SAVES');
+        saveDirPath = p.join(savesDir, dateFolder, timeFolder);
+        saveFilePath = p.join(saveDirPath, fileName);
+      } else {
+        saveFilePath = existingJsonSavePath!;
+        saveDirPath = p.dirname(saveFilePath);
+        fileName = p.basename(saveFilePath);
+      }
+
+      final saveDir = Directory(saveDirPath);
+
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+      }
     }
 
-    final saveDir = Directory(saveDirPath);
-
-    if (!await saveDir.exists()) {
-      await saveDir.create(recursive: true);
-    }
 
     final file = File(saveFilePath);
 
@@ -246,25 +263,26 @@ Future<String?> saveProjectAction(
     final jsonString = jsonEncode(projectData);
     await file.writeAsString(jsonString);
 
-    if (isNewSave) {
-        updateJsonSavePath(saveFilePath);
-    }
+    // ★ 修正: 一時フォルダ保存時は State (jsonSavePath) を更新しない
+    if (customSavePath == null) {
+      bool isNewSave = existingJsonSavePath == null;
+      if (isNewSave) {
+          updateJsonSavePath(saveFilePath);
+      }
 
-    if (context.mounted) {
-      final actionType = isNewSave ? '新規保存' : '上書き保存';
-      // メッセージ用に相対パスを生成 (SAVESフォルダからの相対パス)
-      // currentProjectFolderPath = .../DCIM/検品関係/プロジェクトコード
-      // baseSavesDir = .../DCIM/検品関係/SAVES
-      final baseSavesDir = p.join(p.dirname(currentProjectFolderPath), 'SAVES');
-      final relativePath = p.relative(saveFilePath, from: baseSavesDir);
-      showCustomSnackBar(context, 'プロジェクトを SAVES/$relativePath にて $actionType しました。', durationSeconds: 3);
-      FlutterLogs.logInfo('PROJECT_ACTION', 'SAVE_SUCCESS', 'Project $projectTitle $actionType to $saveFilePath');
+      if (context.mounted) {
+        final actionType = isNewSave ? '新規保存' : '上書き保存';
+        final baseSavesDir = p.join(p.dirname(currentProjectFolderPath), 'SAVES');
+        final relativePath = p.relative(saveFilePath, from: baseSavesDir);
+        showCustomSnackBar(context, 'プロジェクトを SAVES/$relativePath にて $actionType しました。', durationSeconds: 3);
+        FlutterLogs.logInfo('PROJECT_ACTION', 'SAVE_SUCCESS', 'Project $projectTitle $actionType to $saveFilePath');
+      }
     }
 
     return saveFilePath;
   } catch (e, s) {
     _logError('PROJECT_ACTION', 'SAVE_ERROR', e, s);
-    if (context.mounted) {
+    if (context.mounted && customSavePath == null) { // 一時保存中のエラーは握りつぶす
       showCustomSnackBar(context, 'プロジェクトの保存に失敗しました: $e', isError: true);
     }
     return null;
@@ -438,7 +456,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
   }
 }
 
-// ★★★ showAndExportNifudaListAction (修正: Case No.でフィルタリング) ★★★
+// ★★★ showAndExportNifudaListAction (★ エラー1 修正) ★★★
 void showAndExportNifudaListAction(
   BuildContext context,
   List<List<String>> nifudaData,
@@ -446,7 +464,7 @@ void showAndExportNifudaListAction(
   String projectFolderPath,
   String currentCaseNumber,
 ) {
-  // ★ 修正: 変数定義を追加
+  // ★ エラー1 修正: `caseNoColumnIndex` をここで定義
   // nifudaHeader: ['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード', 'Case No.']
   const int caseNoColumnIndex = 8;
 
@@ -457,6 +475,7 @@ void showAndExportNifudaListAction(
   final header = nifudaData.first;
   final filteredRows = nifudaData.sublist(1).where((row) {
     if (row.length > caseNoColumnIndex) {
+      // ★ ここがエラーだった
       return row[caseNoColumnIndex] == currentCaseNumber;
     }
     return false;
@@ -671,7 +690,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   return _processRawProductResults(context, allAiRawResults, selectedCompany);
 }
 
-// ★★★ _processRawProductResults (変更なし) ★★★
+// ★★★ _processRawProductResults (★ エラー2 修正) ★★★
 Future<List<List<String>>?> _processRawProductResults(
   BuildContext context,
   List<Map<String, dynamic>?> allAiRawResults,
@@ -703,6 +722,7 @@ Future<List<List<String>>?> _processRawProductResults(
                  if (commonOrderNo.endsWith('-') || commonOrderNo.endsWith(' ')) {
                      finalOrderNo = '$commonOrderNo$remarks';
                  } else {
+                     // ★ エラー2 修正: 'commonSorderNo' -> 'commonOrderNo'
                      finalOrderNo = '$commonOrderNo $remarks';
                  }
               }
@@ -731,7 +751,7 @@ Future<List<List<String>>?> _processRawProductResults(
   }
 }
 
-// ★★★ startMatchingAndShowResultsAction (修正: Case No.連携) ★★★
+// ★★★ startMatchingAndShowResultsAction (変更なし) ★★★
 Future<String?> startMatchingAndShowResultsAction(
   BuildContext context,
   List<List<String>> nifudaData,
@@ -819,77 +839,76 @@ Future<String?> startMatchingAndShowResultsAction(
   return null;
 }
 
-// ★★★ exportAllProjectDataAction (修正: productListData パラメータ名修正、型修正、nullチェック追加) ★★★
-Future<String?> exportAllProjectDataAction({
+
+// ★★★ 1. (新規) 共有フォルダ(SMB)への保存専用のアクション ★★★
+// (★ エラー3 修正)
+Future<String?> exportDataToStorageAction({
   required BuildContext context,
   required String projectTitle,
   required String projectFolderPath,
   required List<List<String>> nifudaData,
-  required List<List<String>> productListData, // ★ 修正: パラメータ名
+  required List<List<String>> productListData,
   required Map<String, dynamic> matchingResults,
   required String currentCaseNumber,
   required String? jsonSavePath,
   required String inspectionStatus,
 }) async {
   if (!context.mounted) return null;
-  _showLoadingDialog(context, '全データの検品完了＆共有処理を実行中...');
+  _showLoadingDialog(context, '共有フォルダ(SMB)へ保存中です...');
 
   try {
-    // 1. JSONデータの保存（最新状態に更新）
-    final jsonExporter = saveProjectAction(
+    // 1. 権限チェック (Androidのみ)
+    if (Platform.isAndroid) {
+      if (kDebugMode) print('Requesting permissions from exportDataToStorageAction...');
+      // ★ 修正: 権限を同時にリクエスト
+      Map<Permission, PermissionStatus> statuses = await [
+        Permission.storage,
+        Permission.manageExternalStorage,
+      ].request();
+
+      // どちらの権限も許可されていない場合はエラー
+      if (!statuses[Permission.storage]!.isGranted && !statuses[Permission.manageExternalStorage]!.isGranted) {
+        throw Exception('ストレージへのアクセス権限が拒否されました。 (Storage: ${statuses[Permission.storage]}, Manage: ${statuses[Permission.manageExternalStorage]})');
+      }
+      if (kDebugMode) print('Permissions granted: $statuses');
+    }
+
+    // 2. JSONデータの保存 (DCIM/検品関係/...)
+    final finalJsonPath = await saveProjectAction(
       context,
       projectFolderPath,
       projectTitle,
       nifudaData,
-      productListData, // ★ 修正: 正しいパラメータを渡す
+      productListData,
       currentCaseNumber,
       jsonSavePath,
-      (_) {},
+      (_) {}, // このアクションではStateを更新しない
     );
-    final finalJsonPath = await jsonExporter;
     if (finalJsonPath == null) {
        throw Exception('JSONデータファイルの最終保存に失敗しました。');
     }
 
-    // 2. Excelデータの作成とエクスポート（ローカル＆SMB）
+    // 3. Excelデータの作成とエクスポート（ローカル＆SMB）
     List<Future<Map<String, String>>> excelExports = [];
 
-    // 2-1. 荷札リスト Excel (Case No.ごとの全データ)
-    excelExports.add(exportToExcelStorage(
-      fileName: 'Nifuda_All_Cases.xlsx',
-      sheetName: '荷札リスト',
-      headers: nifudaData.first,
-      rows: nifudaData.sublist(1),
-      projectFolderPath: projectFolderPath,
-      subfolder: '最終エクスポート/Excel',
-    ));
+    final String excelSubfolder = '最終エクスポート/Excel';
+    final String excelBasePath = p.join(projectFolderPath, excelSubfolder);
+    
+    final nifudaFileName = 'Nifuda_All_Cases.xlsx';
+    final productListFileName = 'ProductList_All.xlsx';
+    final matchingResultFileName = 'MatchingResult_All.xlsx';
 
-    // 2-2. 製品リスト Excel (全データ + 照合済Case)
-    excelExports.add(exportToExcelStorage(
-      fileName: 'ProductList_All.xlsx',
-      sheetName: '製品リスト',
-      headers: productListData.first,
-      rows: productListData.sublist(1),
-      projectFolderPath: projectFolderPath,
-      subfolder: '最終エクスポート/Excel',
-    ));
-
-    // 2-3. 照合結果 Excel (全Caseの最新照合結果)
+    // (Excelデータの中身を準備)
     final allMatchedData = (matchingResults['matched'] as List).cast<Map<String, dynamic>>();
     final allUnmatchedData = (matchingResults['unmatched'] as List).cast<Map<String, dynamic>>();
-
     final matchingHeaders = [
         '照合結果', '荷札_製番', '荷札_項目番号', '荷札_品名', '製品_ORDER No.', '製品_品名記号', '製品_製品コード番号', '照合済Case', '照合Case'
     ];
-
-    // ★ 修正: 型を List<List<String>> に合わせる, null チェック強化
     final List<List<String>> matchingRows = [
       ...allMatchedData.map((m) => <String>[
           '照合成功',
           m['nifuda']?['製番']?.toString() ?? '', m['nifuda']?['項目番号']?.toString() ?? '', m['nifuda']?['品名']?.toString() ?? '',
           m['product']?['ORDER No.']?.toString() ?? '', 
-          // ★★★ バグ修正 1 ★★★
-          // '品名記D~H号' -> '品名記号'
           m['product']?['品名記号']?.toString() ?? '', 
           m['product']?['製品コード番号']?.toString() ?? '',
           m['product']?['照合済Case']?.toString() ?? '', m['nifuda']?['Case No.']?.toString() ?? '',
@@ -897,57 +916,223 @@ Future<String?> exportAllProjectDataAction({
       ...allUnmatchedData.map((u) => <String>[
           '照合失敗',
           u['nifuda']?['製番']?.toString() ?? '', u['nifuda']?['項目番号']?.toString() ?? '', u['nifuda']?['品名']?.toString() ?? '',
-          // ★★★ バグ修正 2 ★★★
-          // 'unmatched' の場合も9列にする (product側 4列 + case 1列)
-          '', // 製品_ORDER No.
-          '', // 製品_品名記号
-          '', // 製品_製品コード番号
-          '', // 照合済Case
+          '', '', '', '', // 製品データなし
           u['nifuda']?['Case No.']?.toString() ?? '', // 照合Case
       ]),
     ];
 
-
+    // 3-1. 荷札リスト Excel
     excelExports.add(exportToExcelStorage(
-      fileName: 'MatchingResult_All.xlsx',
+      fileName: nifudaFileName,
+      sheetName: '荷札リスト',
+      headers: nifudaData.first,
+      rows: nifudaData.sublist(1),
+      projectFolderPath: projectFolderPath,
+      subfolder: excelSubfolder,
+      skipPermissionCheck: true, // 権限チェック済み
+    ));
+
+    // 3-2. 製品リスト Excel
+    excelExports.add(exportToExcelStorage(
+      fileName: productListFileName,
+      sheetName: '製品リスト',
+      headers: productListData.first,
+      rows: productListData.sublist(1),
+      projectFolderPath: projectFolderPath,
+      subfolder: excelSubfolder,
+      skipPermissionCheck: true, // 権限チェック済み
+    ));
+
+    // 3-3. 照合結果 Excel
+    excelExports.add(exportToExcelStorage(
+      fileName: matchingResultFileName,
       sheetName: '照合結果',
       headers: matchingHeaders,
       rows: matchingRows,
       projectFolderPath: projectFolderPath,
-      subfolder: '最終エクスポート/Excel',
+      subfolder: excelSubfolder,
+      skipPermissionCheck: true, // 権限チェック済み
     ));
 
     final results = await Future.wait(excelExports);
 
-    // ★ 修正: Nullチェックを強化 (?.isNotEmpty ?? false)
+    // ★ エラー2&3 修正: Null安全チェック (?.isNotEmpty ?? false)
     String localMessages = results.map((r) => r['local']).where((m) => m?.isNotEmpty ?? false).join(', ');
     String smbMessages = results.map((r) => r['smb']).where((m) => m?.isNotEmpty ?? false).join('; ');
 
-    // 4. メッセージの作成とSnackbar表示
+    // 4. 完了ダイアログ表示
     _hideLoadingDialog(context);
 
-    String successMessage = "検品完了＆共有が完了しました。\n\n";
+    String successMessage = "検品完了＆共有フォルダ(SMB)への保存が完了しました。\n\n";
     successMessage += "・JSONデータ: " + p.basename(finalJsonPath) + "を最終保存\n";
     successMessage += "・Excelエクスポート結果: ローカル($localMessages), SMB($smbMessages)\n";
-    successMessage += "・画像フォルダ: 製品リスト画像、荷札画像(Case_#1〜#50)はプロジェクトフォルダ内に保存されています。";
 
     if (context.mounted) {
-       _showErrorDialog(context, '検品完了＆共有', successMessage);
+       _showErrorDialog(context, '共有フォルダ(SMB)へ保存', successMessage);
     }
 
-    FlutterLogs.logInfo('PROJECT_ACTION', 'EXPORT_ALL_SUCCESS', 'Project $projectTitle exported successfully.');
+    FlutterLogs.logInfo('PROJECT_ACTION', 'EXPORT_SMB_SUCCESS', 'Project $projectTitle exported to SMB.');
 
     return STATUS_COMPLETED;
 
   } catch (e, s) {
-    _hideLoadingDialog(context);
-    _logError('PROJECT_ACTION', 'EXPORT_ALL_FAIL', e, s);
+    if(context.mounted) _hideLoadingDialog(context);
+    _logError('PROJECT_ACTION', 'EXPORT_SMB_FAIL', e, s);
     if (context.mounted) {
-      _showErrorDialog(context, '共有エラー', '全データのエクスポートに失敗しました: ${e.toString()}');
+      _showErrorDialog(context, 'SMB保存エラー', '共有フォルダへの保存に失敗しました: ${e.toString()}');
     }
     return null;
   }
 }
+
+// ★★★ 2. (新規) アプリ(LINE/Gmail)での共有専用のアクション ★★★
+Future<String?> shareDataViaAppsAction({
+  required BuildContext context,
+  required String projectTitle,
+  required String projectFolderPath, // JSON保存パスの決定にのみ使用
+  required List<List<String>> nifudaData,
+  required List<List<String>> productListData,
+  required Map<String, dynamic> matchingResults,
+  required String currentCaseNumber,
+  required String? jsonSavePath, // JSON保存パスの決定にのみ使用
+  required String inspectionStatus,
+}) async {
+  if (!context.mounted) return null;
+  _showLoadingDialog(context, '共有ファイルを作成中です...');
+
+  // アプリの一時フォルダ(キャッシュ)を取得
+  final Directory tempDir = await getTemporaryDirectory();
+  final String tempPath = tempDir.path;
+
+  try {
+    // 1. JSONデータの保存 (一時フォルダへ)
+    final String tempJsonPath = p.join(tempPath, '$projectTitle.json');
+    final finalJsonPath = await saveProjectAction(
+      context,
+      projectFolderPath, // 元のプロジェクトパス
+      projectTitle,
+      nifudaData,
+      productListData,
+      currentCaseNumber,
+      jsonSavePath, // 既存のパス（今回は使われないがIF維持のため）
+      (_) {}, 
+      customSavePath: tempJsonPath, // ★ 一時フォルダのパスを指定
+    );
+    if (finalJsonPath == null) {
+       throw Exception('一時JSONデータファイルの作成に失敗しました。');
+    }
+
+    // 2. Excelデータの作成とエクスポート（一時フォルダへ）
+    // ★ SMB保存は実行されない (skipPermissionCheck=true かつ SMB設定がないため)
+    List<Future<Map<String, String>>> excelExports = [];
+
+    // ★ 一時フォルダにはサブフォルダを作らない
+    final String excelSubfolder = ''; 
+    final String excelBasePath = tempPath;
+    
+    final nifudaFileName = 'Nifuda_All_Cases.xlsx';
+    final productListFileName = 'ProductList_All.xlsx';
+    final matchingResultFileName = 'MatchingResult_All.xlsx';
+
+    // (Excelデータの中身を準備 - 上記関数からコピー)
+    final allMatchedData = (matchingResults['matched'] as List).cast<Map<String, dynamic>>();
+    final allUnmatchedData = (matchingResults['unmatched'] as List).cast<Map<String, dynamic>>();
+    final matchingHeaders = [
+        '照合結果', '荷札_製番', '荷札_項目番号', '荷札_品名', '製品_ORDER No.', '製品_品名記号', '製品_製品コード番号', '照合済Case', '照合Case'
+    ];
+    final List<List<String>> matchingRows = [
+      ...allMatchedData.map((m) => <String>[
+          '照合成功',
+          m['nifuda']?['製番']?.toString() ?? '', m['nifuda']?['項目番号']?.toString() ?? '', m['nifuda']?['品名']?.toString() ?? '',
+          m['product']?['ORDER No.']?.toString() ?? '', 
+          m['product']?['品名記号']?.toString() ?? '', 
+          m['product']?['製品コード番号']?.toString() ?? '',
+          m['product']?['照合済Case']?.toString() ?? '', m['nifuda']?['Case No.']?.toString() ?? '',
+      ]),
+      ...allUnmatchedData.map((u) => <String>[
+          '照合失敗',
+          u['nifuda']?['製番']?.toString() ?? '', u['nifuda']?['項目番号']?.toString() ?? '', u['nifuda']?['品名']?.toString() ?? '',
+          '', '', '', '', // 製品データなし
+          u['nifuda']?['Case No.']?.toString() ?? '', // 照合Case
+      ]),
+    ];
+
+    // 2-1. 荷札リスト Excel (一時フォルダへ)
+    excelExports.add(exportToExcelStorage(
+      fileName: nifudaFileName,
+      sheetName: '荷札リスト',
+      headers: nifudaData.first,
+      rows: nifudaData.sublist(1),
+      projectFolderPath: excelBasePath, // ★ 一時フォルダ
+      subfolder: excelSubfolder,       // ★ サブフォルダなし
+      skipPermissionCheck: true,     // 権限不要
+    ));
+
+    // 2-2. 製品リスト Excel (一時フォルダへ)
+    excelExports.add(exportToExcelStorage(
+      fileName: productListFileName,
+      sheetName: '製品リスト',
+      headers: productListData.first,
+      rows: productListData.sublist(1),
+      projectFolderPath: excelBasePath,
+      subfolder: excelSubfolder,
+      skipPermissionCheck: true,
+    ));
+
+    // 2-3. 照合結果 Excel (一時フォルダへ)
+    excelExports.add(exportToExcelStorage(
+      fileName: matchingResultFileName,
+      sheetName: '照合結果',
+      headers: matchingHeaders,
+      rows: matchingRows,
+      projectFolderPath: excelBasePath,
+      subfolder: excelSubfolder,
+      skipPermissionCheck: true,
+    ));
+
+    await Future.wait(excelExports);
+
+    // 3. 共有するファイルリストを作成 (すべて一時フォルダ内のパス)
+    final List<XFile> filesToShare = [
+      XFile(finalJsonPath), // 1. JSON
+      XFile(p.join(excelBasePath, nifudaFileName)), // 2. 荷札Excel
+      XFile(p.join(excelBasePath, productListFileName)), // 3. 製品リストExcel
+      XFile(p.join(excelBasePath, matchingResultFileName)), // 4. 照合結果Excel
+    ];
+
+    // 4. 共有シートを呼び出す (ローディングダイアログを閉じた後)
+    _hideLoadingDialog(context);
+
+    // ★ ご要望のメール件名・本文を使用
+    final shareResult = await Share.shareXFiles(
+      filesToShare,
+      subject: '検品データ共有: $projectTitle', // メール件名
+      text: '$projectTitle の検品データ（JSON, 荷札Excel, 製品リストExcel, 照合結果Excel）を共有します。', // メール本文
+    );
+
+    // 5. 完了ダイアログ表示
+    String successMessage = "検品完了＆アプリ共有が完了しました。\n\n";
+    successMessage += "・一時ファイルを作成し、共有ダイアログを起動しました。\n";
+    successMessage += "・共有ステータス: ${shareResult.status.name}";
+
+    if (context.mounted) {
+       _showErrorDialog(context, 'アプリ(LINE/Gmail)で共有', successMessage);
+    }
+
+    FlutterLogs.logInfo('PROJECT_ACTION', 'EXPORT_SHARE_SUCCESS', 'Project $projectTitle shared via Apps (Status: ${shareResult.status.name}).');
+
+    return STATUS_COMPLETED;
+
+  } catch (e, s) {
+    if(context.mounted) _hideLoadingDialog(context); // エラー時もダイアログを閉じる
+    _logError('PROJECT_ACTION', 'EXPORT_SHARE_FAIL', e, s);
+    if (context.mounted) {
+      _showErrorDialog(context, 'アプリ共有エラー', 'アプリでの共有に失敗しました: ${e.toString()}');
+    }
+    return null;
+  }
+}
+
 
 // ★★★ [FIX] showAndExportProductListAction (新規追加) ★★★
 // 製品リストのプレビューとエクスポート
