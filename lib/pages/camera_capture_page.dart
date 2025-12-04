@@ -14,7 +14,11 @@ import 'package:path/path.dart' as p;
 import 'package:media_scanner/media_scanner.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart'; // 画面向き固定用
+import 'package:path_provider/path_provider.dart'; // ★ 追加: 一時ファイル保存用
+
 import '../widgets/custom_snackbar.dart';
+import '../utils/keyword_detector.dart'; // ★ 追加: キーワード検出
+import '../utils/ocr_masker.dart'; // ★ 追加: 黒塗り処理
 
 // --- 設定値 ---
 class _CropConfig {
@@ -95,6 +99,26 @@ class _CameraCapturePageState extends State<CameraCapturePage>
 
   // プレビューのキー（実寸取得用）
   final GlobalKey _previewKey = GlobalKey();
+
+  // ★★★ 黒塗り対象のキーワードリスト ★★★
+  // ここに隠したい単語を追加してください
+  final List<String> _redactionKeywords = [
+  // 東芝・府中事業所関連 (主要グループ会社)
+    '東芝', // "東芝"を含むすべての社名に対応（誤検出に注意）
+    '東芝エネルギーシステムズ',
+    '東芝インフラシステムズ',
+    '東芝エレベータ',
+    '東芝プラントシステム',
+    '東芝インフラテクノサービス',
+    '東芝システムテクノロジー',
+    '東芝ITコントロールシステム',
+    '東芝EIコントロールシステム',
+    '東芝ディーエムエス',
+    
+    // 関連企業・組織 (府中事業所内)
+    'TMEIC',
+    '東芝三菱電機産業システム',
+  ];
 
   @override
   void initState() {
@@ -373,7 +397,7 @@ class _CameraCapturePageState extends State<CameraCapturePage>
     return Uint8List.fromList(img.encodeJpg(croppedImage, quality: 90));
   }
 
-  // ★ 修正: 撮影アクション (連続撮影対応)
+  // ★ 修正: 撮影アクション (連続撮影対応 + 自動黒塗り処理)
   Future<void> _onShootAndSend() async {
     if (_isTakingPicture) return; // 多重タップ防止
     final controller = _controller;
@@ -389,8 +413,7 @@ class _CameraCapturePageState extends State<CameraCapturePage>
       final XFile xfile = await controller.takePicture();
 
       // 2. トリミング (元画像 -> トリミング後のBytes)
-      //    (トリミングは重い処理なので、待機させる)
-      final croppedBytes = await _cropImageBytes(xfile);
+      final Uint8List? croppedBytes = await _cropImageBytes(xfile);
 
       if (croppedBytes == null) {
         if (mounted) {
@@ -399,27 +422,74 @@ class _CameraCapturePageState extends State<CameraCapturePage>
         return;
       }
 
-      // 3. 保存 (トリミング後のBytesを保存)
+      // ▼▼▼ 自動黒塗り処理の追加 ▼▼▼
+      Uint8List finalBytes;
+      try {
+        // (1) ML Kitに渡すため一時ファイルを作成
+        final tempDir = await getTemporaryDirectory();
+        final tempPath = '${tempDir.path}/temp_crop_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final tempFile = File(tempPath);
+        await tempFile.writeAsBytes(croppedBytes);
+
+        // (2) キーワード検出 (AI)
+        // ターゲットキーワードリスト (_redactionKeywords) を使用
+        final List<Rect> maskRects = await KeywordDetector.detectKeywords(tempPath, _redactionKeywords);
+
+        // (3) 黒塗り適用
+        if (maskRects.isNotEmpty) {
+          // バイトデータを画像オブジェクトに変換
+          final img.Image? originalImage = img.decodeImage(croppedBytes);
+          if (originalImage != null) {
+            // 黒塗り処理 (ocr_masker.dart を再利用)
+            final img.Image redactedImage = applyMaskToImage(
+              originalImage,
+              template: 'dynamic', // 動的マスクモード
+              dynamicMaskRects: maskRects,
+            );
+            // 画像をバイトデータに戻す
+            finalBytes = Uint8List.fromList(img.encodeJpg(redactedImage, quality: 90));
+          } else {
+            // デコード失敗時は元の画像を使用
+            finalBytes = croppedBytes;
+          }
+        } else {
+          // キーワードが見つからなければ元の画像を使用
+          finalBytes = croppedBytes;
+        }
+
+        // 一時ファイルを削除
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+
+      } catch (e) {
+        debugPrint('Auto-redaction failed: $e');
+        // 黒塗り処理に失敗しても、最低限元の画像で続行する
+        finalBytes = croppedBytes;
+      }
+      // ▲▲▲ 自動黒塗り処理終了 ▲▲▲
+
+
+      // 3. 保存 (黒塗り後のBytesを保存)
       final originalExtension = p.extension(xfile.path);
       //    (保存も待機)
       final savedPath =
-          await _saveImageToProjectFolder(croppedBytes, originalExtension);
+          await _saveImageToProjectFolder(finalBytes, originalExtension);
 
       if (savedPath == null) {
         if (mounted) {
-          showCustomSnackBar(context, 'トリミング画像の保存に失敗しました。', isError: true);
+          showCustomSnackBar(context, '画像の保存に失敗しました。', isError: true);
         }
         return;
       }
 
-      // 4. AI処理キューに追加
+      // 4. AI処理キューに追加 (黒塗り後の画像を送信)
       setState(() {
         _totalPhotosCount++; // 分母を増やす
       });
-      _imageQueue.add(croppedBytes);
+      _imageQueue.add(finalBytes);
       
       // 5. AI処理キューの起動（AI処理自体は待たない）
-      //    (asyncだけどawaitしない)
       _triggerAiProcessing(); 
 
     } catch (e, s) {
@@ -762,12 +832,10 @@ class _CameraCapturePageState extends State<CameraCapturePage>
                   Positioned.fill(child: _buildCropOverlay()),
 
                   // 3. UI要素
-                  // ★ 修正: 既存の閉じるボタンはAppBarに統合したため削除
-
                   // エラーメッセージ
                   if (_lastError != null)
                     Positioned(
-                      top: 0, // AppBarの下 (AppBarが透明なので 0 でもOK)
+                      top: 0, // AppBarの下
                       left: 0,
                       right: 0,
                       child: SafeArea(
