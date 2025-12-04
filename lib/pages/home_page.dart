@@ -4,9 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_logs/flutter_logs.dart';
 import '../state/project_state.dart';
-// ★ 修正: home_actions.dart 全体をインポート (エラーダイアログ用にも)
 import 'home_actions.dart';
-//import '../widgets/home_widgets.dart'; // home_widgets.dart が存在しないためコメントアウト
 import '../widgets/custom_snackbar.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
@@ -18,11 +16,9 @@ import 'directory_image_picker_page.dart'; // JSON読み込みに必要
 import 'package:drift/drift.dart' show Value;
 
 class HomePage extends ConsumerWidget {
-  // ★ 修正: const コンストラクタを削除 (List.generateを許可するため)
   HomePage({super.key});
 
   // Case No.のドロップダウンリストアイテム
-  // ★ 修正: class level final (non-const)
   final List<String> _caseNumbers = List.generate(50, (index) => '#${index + 1}');
 
   @override
@@ -38,7 +34,6 @@ class HomePage extends ConsumerWidget {
       data: (_) {
         final projectState = ref.watch(projectProvider);
         final notifier = ref.read(projectProvider.notifier);
-        // ★ 修正: isProjectActive は DB ID がなくても JSON ロード直後は true になるように title も見る
         final isProjectActive = projectState.currentProjectId != null || projectState.projectTitle.isNotEmpty;
         final isLoading = projectState.isLoading;
         
@@ -46,7 +41,6 @@ class HomePage extends ConsumerWidget {
         final List<String> matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）'];
         // マスク処理の選択肢
         final List<String> maskOptions = ['T社', 'マスク処理なし', '動的マスク処理'];
-
 
         return Scaffold(
           appBar: AppBar(
@@ -60,34 +54,57 @@ class HomePage extends ConsumerWidget {
                 ),
             ],
           ),
-          body: Padding(
-            padding: const EdgeInsets.all(16.0),
-            // ★ 修正: UI全体を2カラムレイアウト (Row) に変更
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // --- 左カラム (操作ボタン) ---
-                Expanded(
-                  flex: 1, // 左カラムを少し狭く
-                  child: SingleChildScrollView(
-                    child: _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns),
-                  ),
-                ),
-                
-                const SizedBox(width: 16),
-
-                // --- 右カラム (プロジェクト情報) ---
-                Expanded(
-                  flex: 1, // 右カラムを少し広く
-                  child: Column(
-                    children: [
-                      _buildProjectInfoCard(projectState, isLoading),
-                      const SizedBox(height: 16),
-                      _buildCaseSelector(projectState, notifier, isProjectActive, isLoading),
-                    ],
-                  ),
-                ),
-              ],
+          // ★★★ 修正: SafeAreaでOSのUI（ノッチやホームバー）との重なりを回避 ★★★
+          body: SafeArea(
+            // ★★★ 修正: LayoutBuilderで画面幅に応じたレイアウトを構築 ★★★
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // 横幅が 600px 未満ならスマホレイアウト（縦並び）
+                if (constraints.maxWidth < 600) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // スマホ: 先にプロジェクト情報を表示
+                        _buildProjectInfoSection(projectState, notifier, isProjectActive, isLoading),
+                        const SizedBox(height: 24),
+                        const Divider(thickness: 2),
+                        const SizedBox(height: 16),
+                        // その下に操作ボタン
+                        _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns),
+                      ],
+                    ),
+                  );
+                } else {
+                  // タブレット以上: 左右2カラムレイアウト（既存のロジック）
+                  return Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 左カラム (操作ボタン)
+                        Expanded(
+                          flex: 4, // ボタンエリアの比率を調整
+                          child: SingleChildScrollView(
+                            child: _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns),
+                          ),
+                        ),
+                        const SizedBox(width: 24),
+                        // 右カラム (プロジェクト情報)
+                        Expanded(
+                          flex: 5, // 情報エリアの比率を調整
+                          child: Column(
+                            children: [
+                              _buildProjectInfoSection(projectState, notifier, isProjectActive, isLoading),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+              },
             ),
           ),
         );
@@ -95,7 +112,24 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  // ★ 新規: 左カラムのUIを構築するメソッド
+  // ★ 追加: プロジェクト情報部分を共通ウィジェットとして切り出し
+  Widget _buildProjectInfoSection(
+    ProjectState projectState,
+    ProjectNotifier notifier,
+    bool isProjectActive,
+    bool isLoading
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildProjectInfoCard(projectState, isLoading),
+        const SizedBox(height: 16),
+        _buildCaseSelector(projectState, notifier, isProjectActive, isLoading),
+      ],
+    );
+  }
+
+  // 左カラムのUIを構築するメソッド
   Widget _buildLeftColumn(
     BuildContext context, 
     WidgetRef ref, 
@@ -187,7 +221,6 @@ class HomePage extends ConsumerWidget {
                 state.currentCaseNumber,
              );
              if (newRows != null && newRows.isNotEmpty) {
-                 // DB未保存（JSONのみ）の場合もStateは更新される
                  await notifier.addNifudaRows(newRows);
              }
           },
@@ -196,7 +229,7 @@ class HomePage extends ConsumerWidget {
         // 4. 荷札 (Gemini)
         _buildActionButton(
           text: '荷札を撮影して抽出 (Gemini)',
-          icon: Icons.camera_alt_outlined, // 別のアイコン
+          icon: Icons.camera_alt_outlined,
           color: Colors.orange.shade700,
           isEnabled: isProjectActive && !isLoading,
           onPressed: () async {
@@ -204,7 +237,6 @@ class HomePage extends ConsumerWidget {
                  _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
                  return;
              }
-             // ★ 新しい Gemini アクションを呼び出す
              final newRows = await captureProcessAndConfirmNifudaActionGemini(
                 context,
                 state.projectFolderPath!,
@@ -227,7 +259,7 @@ class HomePage extends ConsumerWidget {
              state.nifudaData,
              state.projectTitle,
              state.projectFolderPath!,
-             state.currentCaseNumber, // (ダイアログ側で Case No. フィルタリング)
+             state.currentCaseNumber,
           ),
         ),
 
@@ -268,7 +300,7 @@ class HomePage extends ConsumerWidget {
         // 8. 製品リスト (Gemini)
         _buildActionButton(
           text: '製品リストを撮影して抽出 (Gemini)',
-          icon: Icons.scanner_outlined, // 別のアイコン
+          icon: Icons.scanner_outlined,
           color: Colors.red.shade700,
           isEnabled: isProjectActive && !isLoading,
           onPressed: () async {
@@ -342,7 +374,7 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  // ★ 新規: 汎用的なアクションボタン
+  // 汎用的なアクションボタン
   Widget _buildActionButton({
     required String text,
     required IconData icon,
@@ -372,7 +404,7 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  // ★ 新規: 汎用的なドロップダウン
+  // 汎用的なドロップダウン
   Widget _buildDropdownSelector({
     required String value,
     required List<String> items,
@@ -411,7 +443,6 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  // ★ 修正: 右カラムに移動
   Widget _buildCaseSelector(ProjectState state, ProjectNotifier notifier, bool isProjectActive, bool isLoading) {
     return Container(
       height: 48,
@@ -469,7 +500,7 @@ class HomePage extends ConsumerWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Flexible( // ★ タイトルが長い場合に備える
+                      Flexible(
                         child: Text(
                           'プロジェクトコード: ${state.projectTitle.isEmpty ? '未選択' : state.projectTitle}',
                           style: TextStyle(
@@ -501,7 +532,6 @@ class HomePage extends ConsumerWidget {
                         padding: const EdgeInsets.only(top: 4.0),
                         child: Text('JSON保存パス: ${p.basename(p.dirname(p.dirname(state.jsonSavePath!)))}/...', style: const TextStyle(fontSize: 13, color: Colors.green)),
                       ),
-                  // ★ Case No.の表示は右カラムの別ウィジェットに移動
                 ],
               ),
       ),
@@ -517,10 +547,8 @@ class HomePage extends ConsumerWidget {
     }
   }
 
-  // ★ 修正: 特殊な空白文字(U+00A0)を除去し、floatingLabelBehaviorを追加
   void _showCreateProjectDialog(BuildContext context, ProjectNotifier notifier) {
     final projectCodeController = TextEditingController();
-    // ★ 修正: ベースパスのみを初期値とする
     final projectFolderPathController = TextEditingController(text: BASE_PROJECT_DIR);
 
     showDialog(
@@ -535,14 +563,12 @@ class HomePage extends ConsumerWidget {
                 controller: projectCodeController,
                 decoration: const InputDecoration(labelText: '依頼No (プロジェクトコード)'),
               ),
-              // ★ 修正: 2つのTextField間にスペースを追加
               const SizedBox(height: 16), 
               TextField(
                 controller: projectFolderPathController,
-                readOnly: true, // ベースパスは固定
+                readOnly: true,
                 decoration: const InputDecoration(
                   labelText: '保存ベースフォルダ',
-                  // ★ 修正: ラベルが常に浮くように設定
                   floatingLabelBehavior: FloatingLabelBehavior.always, 
                 ),
               ),
@@ -563,15 +589,13 @@ class HomePage extends ConsumerWidget {
                 Navigator.of(context).pop();
 
                 try {
-                  // ★ 修正: プロジェクトフォルダパスはベースパス + プロジェクトコードにする
                   final projectSpecificPath = p.join(BASE_PROJECT_DIR, projectCode);
                   await notifier.createProject(
                     projectCode: projectCode,
-                    projectFolderPath: projectSpecificPath, // ★ 修正
+                    projectFolderPath: projectSpecificPath,
                   );
                   showCustomSnackBar(context, 'プロジェクト「$projectCode」を作成しました。');
                 } catch (e) {
-                   // ★ 修正: _showErrorDialog を呼び出す (HomePage内に定義)
                    _showErrorDialog(context, '作成エラー', 'プロジェクトの作成に失敗しました: $e');
                 }
               },
@@ -583,8 +607,6 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  // ★ 追加: _showErrorDialog (home_actions.dartから移動または共有)
-  // HomePage内にプライベートメソッドとして定義
   void _showErrorDialog(BuildContext context, String title, String message) {
     if (!context.mounted) return;
     showDialog(
@@ -606,4 +628,3 @@ class HomePage extends ConsumerWidget {
     );
   }
 }
-

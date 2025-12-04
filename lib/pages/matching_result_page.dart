@@ -20,8 +20,7 @@ class MatchingResultPage extends ConsumerWidget {
   final List<List<String>> productListKariData;
   final String currentCaseNumber;
 
-  // ★ 表示するフィールドの対応表 (T社パターン)
-  // (表示順もここで決定)
+  // 表示するフィールドの対応表 (T社パターン)
   static const Map<String, String> _displayFieldsMap = {
     '製番': 'ORDER No.',
     '項目番号': 'ITEM OF SPARE',
@@ -30,10 +29,8 @@ class MatchingResultPage extends ConsumerWidget {
     '個数': '注文数',
     '図書番号': '製品コード番号', // (比較ロジック側で '手配コード' も考慮)
     '手配コード': '製品コード番号',
-    // ★ '記事' も表示対象に含める (荷札側には存在しないフィールド)
     '記事': '記事', 
   };
-  // ★ 表示順を固定するためのキーリスト
   static const List<String> _nifudaFieldKeys = [
     '製番', '項目番号', '品名', '形式', '個数', '図書番号', '手配コード', '記事'
   ];
@@ -91,7 +88,6 @@ class MatchingResultPage extends ConsumerWidget {
         rows: rowsWithoutHeader,
         projectFolderPath: projectFolderPath,
         subfolder: '照合結果/$currentCaseNumber',
-        // ★ 修正: この関数は単独で呼ばれる可能性があるため、権限チェックはスキップしない
         skipPermissionCheck: false, 
       );
       if (!silent && context.mounted) {
@@ -159,22 +155,19 @@ class MatchingResultPage extends ConsumerWidget {
     }
   }
 
-  // ★★★ UI変更: ご要望の「Excel風」テーブルを生成 ★★★
+  // ★★★ UI変更: 「Excel風」テーブルを生成 ★★★
 
   // 1. カラム (ヘッダー行) を生成
   List<DataColumn> _buildColumns() {
     List<DataColumn> columns = [];
-    // 1列目: 項目名 (固定)
     columns.add(const DataColumn(
       label: Text('項目', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
     ));
     
-    // 2列目: 照合結果 (固定)
     columns.add(const DataColumn(
       label: Text('照合結果', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
     ));
     
-    // 3列目以降: 荷札/製品のフィールド
     columns.addAll(_nifudaFieldKeys.map((nifudaField) {
       return DataColumn(label: Text(nifudaField, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)));
     }));
@@ -186,11 +179,9 @@ class MatchingResultPage extends ConsumerWidget {
   List<DataRow> _buildDataRows() {
     final List<DataRow> dataRows = [];
     
-    // 照合結果を「一致」「それ以外」に振り分け
     final List<Map<String, dynamic>> matchedRows = (matchingResults['matched'] as List<dynamic>).cast<Map<String, dynamic>>();
     final List<Map<String, dynamic>> unmatchedRows = (matchingResults['unmatched'] as List<dynamic>).cast<Map<String, dynamic>>();
     
-    // 表示順を「不一致/未検出」→「一致」の順に変更
     final List<Map<String, dynamic>> allRows = [...unmatchedRows, ...matchedRows];
 
     if (allRows.isEmpty) {
@@ -206,7 +197,6 @@ class MatchingResultPage extends ConsumerWidget {
       final isMatched = status.contains('一致') || status.contains('再');
       final isError = status.contains('未検出') || status.contains('失敗') || status.contains('不一致');
 
-      // --- 行の背景色 ---
       Color rowColor = Colors.white;
       if (isMatched) {
         rowColor = Colors.green.shade50;
@@ -218,12 +208,9 @@ class MatchingResultPage extends ConsumerWidget {
 
       // --- 荷札の行 ---
       final List<DataCell> nifudaCells = [];
-      // 1列目: 「荷札」ラベル
       nifudaCells.add(DataCell(Text('荷札', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.indigo.shade700))));
-      // 2列目: 照合ステータス
       nifudaCells.add(DataCell(Text(status, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isError ? Colors.red.shade700 : (isMatched ? Colors.green.shade700 : Colors.orange.shade700)))));
 
-      // 3列目以降: 値
       if (nifuda.isEmpty) {
         nifudaCells.addAll(_nifudaFieldKeys.map((_) => DataCell(_buildValueCell('---', true, false, rowColor))));
       } else {
@@ -237,12 +224,9 @@ class MatchingResultPage extends ConsumerWidget {
 
       // --- 製品リストの行 ---
       final List<DataCell> productCells = [];
-      // 1列目: 「リスト」ラベル
       productCells.add(DataCell(Text('リスト', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal.shade700))));
-      // 2列目: 詳細 (不一致理由など)
       productCells.add(DataCell(Text(row['詳細']?.toString() ?? '', style: const TextStyle(fontSize: 10, color: Colors.black54))));
 
-      // 3列目以降: 値
       if (product.isEmpty) {
         productCells.addAll(_nifudaFieldKeys.map((_) => DataCell(_buildValueCell('---', true, true, rowColor))));
       } else {
@@ -277,7 +261,7 @@ class MatchingResultPage extends ConsumerWidget {
     return dataRows;
   }
 
-  // ★★★ 修正: 不一致の場合にセルをハイライトするヘルパー (枠線追加) ★★★
+  // 不一致の場合にセルをハイライトするヘルパー
   Widget _buildValueCell(String text, bool isMismatch, bool isProductRow, Color rowColor) {
     Color textColor = isProductRow ? Colors.teal.shade900 : Colors.indigo.shade900;
     Color highlightColor = Colors.transparent;
@@ -290,17 +274,16 @@ class MatchingResultPage extends ConsumerWidget {
     }
 
     return Container(
-      // 枠線 (セルの区切り)
       decoration: BoxDecoration(
-         color: isMismatch ? highlightColor : rowColor, // 不一致セルの背景色
+         color: isMismatch ? highlightColor : rowColor,
          border: Border(
            left: BorderSide(color: Colors.grey.shade300, width: 0.5),
            right: BorderSide(color: Colors.grey.shade300, width: 0.5),
          )
       ),
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6), // セルのパディング
-      width: double.infinity, // セルの幅を最大に
-      height: double.infinity, // セルの高さを最大に
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+      width: double.infinity,
+      height: double.infinity,
       alignment: Alignment.centerLeft,
       child: Text(
         text.isEmpty ? '---' : text, 
@@ -322,9 +305,13 @@ class MatchingResultPage extends ConsumerWidget {
     final headers = _excelHeaders;
     final data = _excelData;
 
-    // ★ UI変更: ここでカラムと行を生成
     final List<DataColumn> columns = _buildColumns();
     final List<DataRow> rows = _buildDataRows();
+
+    // ★ 現在の画面幅を取得
+    final screenWidth = MediaQuery.of(context).size.width;
+    // ★ 幅が狭いかどうか判定 (400px以下を基準とする)
+    final isSmallScreen = screenWidth < 400;
 
     return Scaffold(
       appBar: AppBar(
@@ -336,40 +323,37 @@ class MatchingResultPage extends ConsumerWidget {
             ),
         ],
       ),
-      // ★★★ 修正: body を SafeArea でラップ (OSバーとの重複回避) ★★★
+      // ★★★ 修正: SafeAreaでOSのUI（ノッチやホームバー）との重なりを回避 ★★★
       body: SafeArea(
         child: Column(
           children: [
-            // ★★★ UIを Excel風のテーブルに変更 ★★★
             Expanded(
               child: rows.isEmpty
                   ? const Center(child: Text('照合結果がありません。'))
-                  : SingleChildScrollView( // 縦スクロール
-                      child: SingleChildScrollView( // 横スクロール
+                  : SingleChildScrollView(
+                      child: SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: DataTable(
                           columns: columns,
                           rows: rows,
                           horizontalMargin: 8,
-                          columnSpacing: 0, // 枠線で区切るためスペース0
+                          columnSpacing: 0,
                           dataRowMinHeight: 32,
-                          dataRowMaxHeight: 32, // 高さを固定
-                          // ★ 枠線 (ヘッダーと本体の区切り)
+                          dataRowMaxHeight: 32,
                           decoration: BoxDecoration(
                             border: Border(
                               top: BorderSide(color: Colors.grey.shade400, width: 1.0),
                               bottom: BorderSide(color: Colors.grey.shade400, width: 1.0),
                             ),
                           ),
-                          // ★ 枠線 (各行の区切り)
-                          dataRowColor: MaterialStateProperty.resolveWith<Color?>((states) => Colors.transparent), // 行のデフォルト色は使わない
+                          dataRowColor: MaterialStateProperty.resolveWith<Color?>((states) => Colors.transparent),
                           dataTextStyle: const TextStyle(fontSize: 12, color: Colors.black87),
                         ),
                       ),
                     ),
             ),
             
-            // ★★★ 修正: 下部ボタンをご要望に合わせて3つに変更 ★★★
+            // ★★★ 修正: 下部ボタンを画面幅に応じてレスポンシブ化 ★★★
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -380,7 +364,7 @@ class MatchingResultPage extends ConsumerWidget {
                       backgroundColor: Colors.blue.shade700, 
                       foregroundColor: Colors.white, 
                       padding: const EdgeInsets.symmetric(vertical: 12),
-                      minimumSize: const Size(double.infinity, 50), // 横幅最大
+                      minimumSize: const Size(double.infinity, 50),
                     ),
                     icon: const Icon(Icons.skip_next),
                     label: Text('次のCase (${'#${(int.tryParse(currentCaseNumber.replaceAll('#', '')) ?? 1) + 1}'})へ', style: const TextStyle(fontSize: 16)),
@@ -389,100 +373,109 @@ class MatchingResultPage extends ConsumerWidget {
                        _moveToNextCase(context, ref);
                     },
                   ),
-                  const SizedBox(height: 10), // ボタン間の隙間
+                  const SizedBox(height: 10),
 
-                  // 2. 保存系ボタン (横並び)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      // 2a. 共有フォルダ(SMB)へ保存
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green.shade700, // 色変更
-                            foregroundColor: Colors.white, 
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold) // 文字サイズ調整
-                          ),
-                          icon: const Icon(Icons.cloud_upload_outlined, size: 20), // アイコン変更
-                          label: const Text('共有フォルダ(SMB)\nへ保存'), // テキスト変更
-                          onPressed: () async {
-                            // DB更新
-                            await _updateMatchedProducts(context, ref);
-                            
-                            // ★ 新しいSMB保存専用のアクションを呼び出す
-                            final newStatus = await exportDataToStorageAction(
-                                context: context,
-                                projectTitle: projectTitle,
-                                projectFolderPath: projectFolderPath,
-                                nifudaData: nifudaData,
-                                productListData: productListKariData,
-                                matchingResults: matchingResults,
-                                currentCaseNumber: currentCaseNumber,
-                                jsonSavePath: projectState.jsonSavePath,
-                                inspectionStatus: STATUS_COMPLETED,
-                            );
-
-                            if (newStatus == STATUS_COMPLETED) {
-                               if (projectState.currentProjectId != null) {
-                                  await notifier.updateProjectStatus(STATUS_COMPLETED);
-                               } else {
-                                  notifier.updateProjectStatus(STATUS_COMPLETED);
-                               }
-                               if(context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
-                            }
-                          },
+                  // 2. 保存系ボタン
+                  // ★ 修正: 画面幅に応じて Row(横並び) か Column(縦並び) か切り替える
+                  isSmallScreen
+                  ? Column( // スマホ（極小画面）用: 縦並び
+                      children: [
+                        _buildSaveButton(
+                          context, ref, notifier, projectState, 
+                          '共有フォルダ(SMB)\nへ保存', Icons.cloud_upload_outlined, Colors.green.shade700, 
+                          true // isSMB
                         ),
-                      ),
-                      const SizedBox(width: 10), // ボタン間の隙間
-
-                      // 2b. アプリ(LINE/Gmail)で共有
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.indigo.shade700, // 色変更
-                            foregroundColor: Colors.white, 
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold) // 文字サイズ調整
-                          ),
-                          icon: const Icon(Icons.share, size: 20),
-                          label: const Text('アプリ(LINE/Gmail)\nで共有'), // テキスト変更
-                          onPressed: () async {
-                            // DB更新
-                            await _updateMatchedProducts(context, ref);
-                            
-                            // ★ 新しいアプリ共有専用のアクションを呼び出す
-                            final newStatus = await shareDataViaAppsAction(
-                                context: context,
-                                projectTitle: projectTitle,
-                                projectFolderPath: projectFolderPath, // 一時ファイル作成のベースとして使用
-                                nifudaData: nifudaData,
-                                productListData: productListKariData,
-                                matchingResults: matchingResults,
-                                currentCaseNumber: currentCaseNumber,
-                                jsonSavePath: projectState.jsonSavePath,
-                                inspectionStatus: STATUS_COMPLETED,
-                            );
-                            
-                            if (newStatus == STATUS_COMPLETED) {
-                               if (projectState.currentProjectId != null) {
-                                  await notifier.updateProjectStatus(STATUS_COMPLETED);
-                               } else {
-                                  notifier.updateProjectStatus(STATUS_COMPLETED);
-                               }
-                               if(context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
-                            }
-                          },
+                        const SizedBox(height: 10),
+                        _buildSaveButton(
+                          context, ref, notifier, projectState, 
+                          'アプリ(LINE/Gmail)\nで共有', Icons.share, Colors.indigo.shade700, 
+                          false // isAppShare
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    )
+                  : Row( // タブレット/通常スマホ用: 横並び
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        Expanded(
+                          child: _buildSaveButton(
+                            context, ref, notifier, projectState, 
+                            '共有フォルダ(SMB)\nへ保存', Icons.cloud_upload_outlined, Colors.green.shade700, 
+                            true
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _buildSaveButton(
+                            context, ref, notifier, projectState, 
+                            'アプリ(LINE/Gmail)\nで共有', Icons.share, Colors.indigo.shade700, 
+                            false
+                          ),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  // ★ 追加: ボタン生成ロジックの共通化 (コード重複削減)
+  Widget _buildSaveButton(
+    BuildContext context, WidgetRef ref, ProjectNotifier notifier, ProjectState projectState,
+    String label, IconData icon, Color bgColor, bool isSMB
+  ) {
+    return ElevatedButton.icon(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: bgColor,
+        foregroundColor: Colors.white, 
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        minimumSize: const Size(double.infinity, 50), // 縦並びのときも幅いっぱいに
+        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)
+      ),
+      icon: Icon(icon, size: 20),
+      label: Text(label, textAlign: TextAlign.center), // 改行に対応するため中央揃え
+      onPressed: () async {
+        await _updateMatchedProducts(context, ref);
+        
+        final String? newStatus;
+        if (isSMB) {
+          newStatus = await exportDataToStorageAction(
+              context: context,
+              projectTitle: projectTitle,
+              projectFolderPath: projectFolderPath,
+              nifudaData: nifudaData,
+              productListData: productListKariData,
+              matchingResults: matchingResults,
+              currentCaseNumber: currentCaseNumber,
+              jsonSavePath: projectState.jsonSavePath,
+              inspectionStatus: STATUS_COMPLETED,
+          );
+        } else {
+          newStatus = await shareDataViaAppsAction(
+              context: context,
+              projectTitle: projectTitle,
+              projectFolderPath: projectFolderPath,
+              nifudaData: nifudaData,
+              productListData: productListKariData,
+              matchingResults: matchingResults,
+              currentCaseNumber: currentCaseNumber,
+              jsonSavePath: projectState.jsonSavePath,
+              inspectionStatus: STATUS_COMPLETED,
+          );
+        }
+
+        if (newStatus == STATUS_COMPLETED) {
+           if (projectState.currentProjectId != null) {
+              await notifier.updateProjectStatus(STATUS_COMPLETED);
+           } else {
+              notifier.updateProjectStatus(STATUS_COMPLETED);
+           }
+           if(context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      },
     );
   }
 
