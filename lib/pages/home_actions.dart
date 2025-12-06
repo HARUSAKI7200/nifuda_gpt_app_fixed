@@ -183,6 +183,7 @@ Future<void> _saveScannedProductImages(
   }
 }
 
+// ★★★ 修正: JSON保存ロジック (ケースごとにグループ化して保存) ★★★
 Future<String?> saveProjectAction(
   BuildContext context,
   String currentProjectFolderPath,
@@ -234,11 +235,48 @@ Future<String?> saveProjectAction(
 
     final file = File(saveFilePath);
 
+    // --- データをケースごとに整理 ---
+    // Nifuda Header: 0:製番, 1:項目番号, ... 8:Case No.
+    // Product Header: 0:ORDER No., ..., 8:照合済Case
+
+    Map<String, dynamic> casesMap = {};
+
+    // 1. 荷札データをグループ化 (ヘッダー[0]はスキップ)
+    if (nifudaData.length > 1) {
+      for (int i = 1; i < nifudaData.length; i++) {
+        final row = nifudaData[i];
+        String caseNo = (row.length > 8) ? row[8] : 'Unknown';
+        if (caseNo.isEmpty) caseNo = 'Unknown';
+
+        if (!casesMap.containsKey(caseNo)) {
+          casesMap[caseNo] = {'nifuda': [], 'products': []};
+        }
+        casesMap[caseNo]!['nifuda'].add(row);
+      }
+    }
+
+    // 2. 製品リストデータをグループ化 (ヘッダー[0]はスキップ)
+    if (productListKariData.length > 1) {
+      for (int i = 1; i < productListKariData.length; i++) {
+        final row = productListKariData[i];
+        String matchedCase = (row.length > 8) ? row[8] : '';
+        String groupKey = matchedCase.isNotEmpty ? matchedCase : 'Unmatched';
+
+        if (!casesMap.containsKey(groupKey)) {
+          casesMap[groupKey] = {'nifuda': [], 'products': []};
+        }
+        casesMap[groupKey]!['products'].add(row);
+      }
+    }
+
     final projectData = {
       'projectTitle': projectTitle,
       'projectFolderPath': currentProjectFolderPath,
-      'nifudaData': nifudaData,
-      'productListKariData': productListKariData,
+      // ヘッダー情報を保存
+      'nifudaHeader': nifudaData.isNotEmpty ? nifudaData[0] : [],
+      'productListHeader': productListKariData.isNotEmpty ? productListKariData[0] : [],
+      // グループ化したデータ
+      'cases': casesMap, 
       'currentCaseNumber': currentCaseNumber,
     };
 
@@ -255,8 +293,8 @@ Future<String?> saveProjectAction(
         final actionType = isNewSave ? '新規保存' : '上書き保存';
         final baseSavesDir = p.join(p.dirname(currentProjectFolderPath), 'SAVES');
         final relativePath = p.relative(saveFilePath, from: baseSavesDir);
-        showCustomSnackBar(context, 'プロジェクトを SAVES/$relativePath にて $actionType しました。', durationSeconds: 3);
-        FlutterLogs.logInfo('PROJECT_ACTION', 'SAVE_SUCCESS', 'Project $projectTitle $actionType to $saveFilePath');
+        showCustomSnackBar(context, 'プロジェクトを SAVES/$relativePath にて $actionType しました。\n(全ケース統合保存)', durationSeconds: 3);
+        FlutterLogs.logInfo('PROJECT_ACTION', 'SAVE_SUCCESS', 'Project $projectTitle $actionType to $saveFilePath (Structured)');
       }
     }
 
@@ -270,6 +308,7 @@ Future<String?> saveProjectAction(
   }
 }
 
+// ★★★ 修正: JSON読み込みロジック (新旧フォーマット対応) ★★★
 Future<Map<String, dynamic>?> loadProjectAction(
   BuildContext context,
   void Function(String?) updateJsonSavePath,
@@ -311,10 +350,53 @@ Future<Map<String, dynamic>?> loadProjectAction(
     final jsonString = await file.readAsString();
     final Map<String, dynamic> loadedData = jsonDecode(jsonString) as Map<String, dynamic>;
 
-    if (loadedData['projectTitle'] == null ||
-        loadedData['nifudaData'] is! List ||
-        loadedData['productListKariData'] is! List) {
-      throw Exception('ファイルの構造が不正です。');
+    if (loadedData['projectTitle'] == null) {
+      throw Exception('ファイルの構造が不正です(projectTitle欠落)。');
+    }
+
+    // データを復元 (フラットなリストに戻す)
+    List<List<String>> nifudaData = [];
+    List<List<String>> productListKariData = [];
+
+    if (loadedData.containsKey('cases')) {
+      // ★ 新フォーマット (ケースごとにグループ化されている場合)
+      
+      // ヘッダー復元
+      if (loadedData['nifudaHeader'] != null) {
+        nifudaData.add(List<String>.from(loadedData['nifudaHeader']));
+      }
+      if (loadedData['productListHeader'] != null) {
+        productListKariData.add(List<String>.from(loadedData['productListHeader']));
+      }
+
+      // ケースデータを展開してリストに追加
+      final Map<String, dynamic> cases = loadedData['cases'];
+      // Case No.順にソートして読み込む (オプション)
+      final sortedKeys = cases.keys.toList()..sort(); 
+
+      for (var key in sortedKeys) {
+        final caseData = cases[key];
+        if (caseData is Map) {
+          if (caseData['nifuda'] != null) {
+            for (var row in caseData['nifuda']) {
+              nifudaData.add(List<String>.from(row));
+            }
+          }
+          if (caseData['products'] != null) {
+            for (var row in caseData['products']) {
+              productListKariData.add(List<String>.from(row));
+            }
+          }
+        }
+      }
+    } else {
+      // ★ 旧フォーマット (フラットなリスト)
+      if (loadedData['nifudaData'] is List) {
+        nifudaData = (loadedData['nifudaData'] as List).map((e) => List<String>.from(e)).toList();
+      }
+      if (loadedData['productListKariData'] is List) {
+        productListKariData = (loadedData['productListKariData'] as List).map((e) => List<String>.from(e)).toList();
+      }
     }
 
     updateJsonSavePath(filePath);
@@ -327,8 +409,8 @@ Future<Map<String, dynamic>?> loadProjectAction(
     return {
       'projectTitle': projectTitle,
       'currentProjectFolderPath': projectFolderPath,
-      'nifudaData': (loadedData['nifudaData'] as List).map((e) => List<String>.from(e)).toList(),
-      'productListKariData': (loadedData['productListKariData'] as List).map((e) => List<String>.from(e)).toList(),
+      'nifudaData': nifudaData,
+      'productListKariData': productListKariData,
       'currentCaseNumber': loadedData['currentCaseNumber'] ?? '#1',
     };
   } catch (e, s) {
@@ -534,6 +616,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       previewImageBytes: firstImageBytes,
       maskTemplate: template,
       imageIndex: 1,
+      // ★ 修正: imageFilePaths! で強制アンラップ
       totalImages: imageFilePaths!.length, 
     )),
   );
