@@ -539,7 +539,7 @@ void showAndExportNifudaListAction(
   );
 }
 
-// ★★★ captureProcessAndConfirmProductListAction (プレビュー遷移ロジック修正済み) ★★★
+// ★★★ captureProcessAndConfirmProductListAction (リサイズ撤廃修正済み) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
@@ -574,7 +574,10 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中... (1/${imageFilePaths.length})');
 
   Uint8List firstImageBytes;
-  const int PERSPECTIVE_WIDTH = 1920;
+  
+  // ★★★ 修正: リサイズ定数を削除 ★★★
+  // const int PERSPECTIVE_WIDTH = 1920; 
+
   try {
     final path = imageFilePaths.first;
     final file = File(path);
@@ -587,15 +590,19 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       return null;
     }
     
-    img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
-    normalizedImage = _applySharpeningFilter(normalizedImage);
+    // ★★★ 修正: リサイズ・シャープニングを廃止し、オリジナル画像をそのまま使用 ★★★
+    // img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
+    // normalizedImage = _applySharpeningFilter(normalizedImage);
     
-    firstImageBytes = Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100));
+    // firstImageBytes = Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100));
+    
+    // 元画像をそのまま最高画質でエンコード
+    firstImageBytes = Uint8List.fromList(img.encodeJpg(originalImage, quality: 100));
 
   } catch (e, s) {
     _logError('IMAGE_PROC', 'Image read/resize error (First Image)', e, s);
     if (context.mounted) _hideLoadingDialog(context);
-    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはリサイズに失敗しました: $e');
+    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはエンコードに失敗しました: $e');
     return null;
   } finally {
      if (context.mounted) _hideLoadingDialog(context);
@@ -647,16 +654,17 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
         if (originalImage == null) continue;
 
-        img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
-        normalizedImage = _applySharpeningFilter(normalizedImage);
+        // ★★★ 修正: 2枚目以降もリサイズ・シャープニングを廃止 ★★★
+        // img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
+        // normalizedImage = _applySharpeningFilter(normalizedImage);
         
         img.Image maskedImage;
         if (template == 't') {
-            maskedImage = applyMaskToImage(normalizedImage, template: 't');
+            maskedImage = applyMaskToImage(originalImage, template: 't'); // normalizedImage -> originalImage
         } else if (template == 'dynamic' && dynamicMasks.isNotEmpty) {
-            maskedImage = applyMaskToImage(normalizedImage, template: 'dynamic', dynamicMaskRects: dynamicMasks);
+            maskedImage = applyMaskToImage(originalImage, template: 'dynamic', dynamicMaskRects: dynamicMasks); // normalizedImage -> originalImage
         } else {
-            maskedImage = normalizedImage;
+            maskedImage = originalImage; // normalizedImage -> originalImage
         }
         finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
       }

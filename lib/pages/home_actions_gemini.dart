@@ -6,33 +6,20 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:path/path.dart' as p;
-import 'package:flutter_image_compress/flutter_image_compress.dart';
-import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:flutter_logs/flutter_logs.dart';
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:media_scanner/media_scanner.dart';
 
 import '../utils/gemini_service.dart';
-import '../utils/product_matcher.dart';
-import '../utils/excel_export.dart';
 import '../utils/ocr_masker.dart';
-import '../utils/keyword_detector.dart'; 
 import 'camera_capture_page.dart';
 import 'nifuda_ocr_confirm_page.dart';
 import 'product_list_ocr_confirm_page.dart';
 import 'product_list_mask_preview_page.dart';
-import '../widgets/excel_preview_dialog.dart';
-import 'matching_result_page.dart';
 import '../widgets/custom_snackbar.dart';
-import 'directory_image_picker_page.dart';
-import 'project_load_dialog.dart';
 import 'streaming_progress_dialog.dart';
 
-// --- Utility Functions (home_actions.dartからのコピー) ---
+// --- Utility Functions (home_actions.dartと同様のプライベート関数) ---
 void _logError(String tag, String subTag, Object error, StackTrace? stack) {
   FlutterLogs.logThis(
     tag: tag,
@@ -160,7 +147,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
   }
 }
 
-// (captureProcessAndConfirmProductListActionGemini 等は変更なし)
+// ★★★ captureProcessAndConfirmProductListActionGemini (リサイズ撤廃修正済み) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   BuildContext context,
   String selectedCompany,
@@ -195,7 +182,9 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中... (1/${imageFilePaths.length})');
 
   Uint8List firstImageBytes;
-  const int PERSPECTIVE_WIDTH = 1920;
+  
+  // リサイズ処理を削除
+
   try {
     final path = imageFilePaths.first;
     final file = File(path);
@@ -208,14 +197,13 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       return null;
     }
     
-    img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
-    
-    firstImageBytes = Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100));
+    // 元画像をそのまま最高画質でエンコード
+    firstImageBytes = Uint8List.fromList(img.encodeJpg(originalImage, quality: 100));
 
   } catch (e, s) {
     _logError('IMAGE_PROC', 'Image read/resize error (Gemini First Image)', e, s);
     if (context.mounted) _hideLoadingDialog(context);
-    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはリサイズに失敗しました: $e');
+    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはエンコードに失敗しました: $e');
     return null;
   } finally {
      if (context.mounted) _hideLoadingDialog(context);
@@ -266,15 +254,13 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
         
         if (originalImage == null) continue;
 
-        img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
-        
         img.Image maskedImage;
         if (template == 't') {
-            maskedImage = applyMaskToImage(normalizedImage, template: 't');
+            maskedImage = applyMaskToImage(originalImage, template: 't'); 
         } else if (template == 'dynamic' && dynamicMasks.isNotEmpty) {
-            maskedImage = applyMaskToImage(normalizedImage, template: 'dynamic', dynamicMaskRects: dynamicMasks);
+            maskedImage = applyMaskToImage(originalImage, template: 'dynamic', dynamicMaskRects: dynamicMasks); 
         } else {
-            maskedImage = normalizedImage;
+            maskedImage = originalImage; 
         }
         finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
       }

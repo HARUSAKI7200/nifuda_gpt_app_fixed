@@ -136,7 +136,7 @@ class _CameraCapturePageState extends State<CameraCapturePage>
       );
       final controller = CameraController(
         camera,
-        ResolutionPreset.max,
+        ResolutionPreset.max, // ★ 既に最大解像度が設定されています
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
@@ -243,7 +243,8 @@ class _CameraCapturePageState extends State<CameraCapturePage>
           }
 
           // 3. エンコード
-          finalBytes = Uint8List.fromList(img.encodeJpg(processedImage, quality: 90));
+          // ★★★ 変更点: JPEG品質を 90 -> 100 (最高画質) に変更 ★★★
+          finalBytes = Uint8List.fromList(img.encodeJpg(processedImage, quality: 100));
         }
 
         // 一時ファイル削除
@@ -373,19 +374,22 @@ class _CameraCapturePageState extends State<CameraCapturePage>
               
               // ガイド表示
               IgnorePointer(
-                child: Container(
-                  margin: const EdgeInsets.all(20),
-                  child: const Align(
-                    alignment: Alignment.topCenter,
-                    child: Padding(
-                      padding: EdgeInsets.only(top: 20),
-                      child: Text(
-                        "文字が読めるように撮影してください\n自動でトリミングされます",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white, 
-                          fontSize: 16, 
-                          shadows: [Shadow(blurRadius: 4, color: Colors.black)],
+                // ★★★ 変更点: SafeAreaを追加し、OSのUIと重ならないようにする ★★★
+                child: SafeArea(
+                  child: Container(
+                    margin: const EdgeInsets.all(20),
+                    child: const Align(
+                      alignment: Alignment.topCenter,
+                      child: Padding(
+                        padding: EdgeInsets.only(top: 20),
+                        child: Text(
+                          "文字が読めるように撮影してください\n自動でトリミングされます",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white, 
+                            fontSize: 16, 
+                            shadows: [Shadow(blurRadius: 4, color: Colors.black)],
+                          ),
                         ),
                       ),
                     ),
@@ -398,29 +402,35 @@ class _CameraCapturePageState extends State<CameraCapturePage>
                 alignment: Alignment.bottomCenter,
                 child: Container(
                   color: Colors.black54,
-                  padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 30),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      // 撮影ボタン
-                      FloatingActionButton.large(
-                        heroTag: 'shutter',
-                        backgroundColor: _isFinishing ? Colors.grey : Colors.white,
-                        onPressed: _takePicture,
-                        child: const Icon(Icons.camera, size: 50, color: Colors.black),
+                  // ★★★ 変更点: SafeAreaを下部バー内に配置し、ボタン類が隠れないようにする ★★★
+                  child: SafeArea(
+                    top: false, // 上部は関係ないので無効化
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 30),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          // 撮影ボタン
+                          FloatingActionButton.large(
+                            heroTag: 'shutter',
+                            backgroundColor: _isFinishing ? Colors.grey : Colors.white,
+                            onPressed: _takePicture,
+                            child: const Icon(Icons.camera, size: 50, color: Colors.black),
+                          ),
+                          // 完了ボタン
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.check),
+                            label: Text('完了 (${_okResults.length}件)'),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: _onFinish,
+                          )
+                        ],
                       ),
-                      // 完了ボタン
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.check),
-                        label: Text('完了 (${_okResults.length}件)'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: _onFinish,
-                      )
-                    ],
+                    ),
                   ),
                 ),
               ),
