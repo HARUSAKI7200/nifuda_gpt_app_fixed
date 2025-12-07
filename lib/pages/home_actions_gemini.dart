@@ -8,7 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter_logs/flutter_logs.dart';
-import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
+import 'package:cunning_document_scanner/cunning_document_scanner.dart';
+import 'package:http/http.dart' as http; // Dummy AI Serviceの型定義用
 
 import '../utils/gemini_service.dart';
 import '../utils/ocr_masker.dart';
@@ -74,7 +75,7 @@ void _hideLoadingDialog(BuildContext context) {
   }
 }
 
-// ★★★ captureProcessAndConfirmNifudaActionGemini (自作カメラ+バックグラウンド処理版) ★★★
+// ... (captureProcessAndConfirmNifudaActionGemini は変更なし)
 Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
     BuildContext context,
     String projectFolderPath,
@@ -147,28 +148,23 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
   }
 }
 
-// ★★★ captureProcessAndConfirmProductListActionGemini (リサイズ撤廃修正済み) ★★★
+// ★★★ 修正: captureProcessAndConfirmProductListActionGemini (CunningDocumentScanner 使用) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
   String projectFolderPath,
 ) async {
+  
   List<String>? imageFilePaths;
   try {
-    final options = DocumentScannerOptions(
-      pageLimit: 100,
-      isGalleryImport: false,
-      documentFormat: DocumentFormat.jpeg,
-      mode: ScannerMode.full
+    // ★ 修正: isGalleryImportを削除し、noOfPagesのみ指定
+    imageFilePaths = await CunningDocumentScanner.getPictures(
+        noOfPages: 100
     );
-    final docScanner = DocumentScanner(options: options);
-    final result = await docScanner.scanDocument();
-    imageFilePaths = result?.images;
-
   } catch (e, s) {
-    _logError('DOC_SCANNER', 'Scanner launch error (Gemini)', e, s);
-    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Google ML Kit Document Scannerの起動に失敗しました: $e');
+    _logError('DOC_SCANNER', 'Scanner launch error (Cunning/Gemini)', e, s);
+    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Cunning Document Scannerの起動に失敗しました: $e');
     return null;
   }
 
@@ -183,12 +179,13 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
 
   Uint8List firstImageBytes;
   
-  // リサイズ処理を削除
-
+  // 1枚目を読み込み
   try {
     final path = imageFilePaths.first;
     final file = File(path);
     final rawBytes = await file.readAsBytes();
+    
+    // 画質確認のため、最高画質でエンコード
     final originalImage = img.decodeImage(rawBytes);
     
     if (originalImage == null) {
@@ -197,19 +194,18 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       return null;
     }
     
-    // 元画像をそのまま最高画質でエンコード
     firstImageBytes = Uint8List.fromList(img.encodeJpg(originalImage, quality: 100));
 
   } catch (e, s) {
-    _logError('IMAGE_PROC', 'Image read/resize error (Gemini First Image)', e, s);
+    _logError('IMAGE_PROC', 'Image read/encode error (Gemini First Image)', e, s);
     if (context.mounted) _hideLoadingDialog(context);
-    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはエンコードに失敗しました: $e');
+    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みに失敗しました: $e');
     return null;
   } finally {
      if (context.mounted) _hideLoadingDialog(context);
   }
 
-
+  // テンプレート判定
   String template;
   switch (selectedCompany) {
     case 'T社': template = 't'; break;
@@ -225,6 +221,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       previewImageBytes: firstImageBytes,
       maskTemplate: template,
       imageIndex: 1,
+      // ★ 修正: ! を追加してNull安全に対応
       totalImages: imageFilePaths!.length, 
     )),
   );
@@ -235,9 +232,12 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   }
 
   final List<Rect> dynamicMasks = previewResult.dynamicMasks;
-
+  
   List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
-  if (imageFilePaths.length > 1) {
+
+  // 2枚目以降の処理
+  // ★ 修正: ! を追加してNull安全に対応
+  if (imageFilePaths!.length > 1) {
     if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths.length})');
     try {
       for (int i = 1; i < imageFilePaths.length; i++) {
@@ -250,8 +250,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
         final path = imageFilePaths[i];
         final file = File(path);
         final rawBytes = await file.readAsBytes();
-        final originalImage = img.decodeImage(rawBytes);
         
+        final originalImage = img.decodeImage(rawBytes);
         if (originalImage == null) continue;
 
         img.Image maskedImage;
@@ -322,7 +322,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
 }
 
 
-// ★★★ _processRawProductResultsGemini (変更なし) ★★★
+// ... (_processRawProductResultsGemini は変更なし)
 Future<List<List<String>>?> _processRawProductResultsGemini(
   BuildContext context,
   List<Map<String, dynamic>?> allAiRawResults,

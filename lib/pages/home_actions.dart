@@ -13,7 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:flutter_logs/flutter_logs.dart';
-import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
+import 'package:cunning_document_scanner/cunning_document_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:media_scanner/media_scanner.dart';
 import 'package:share_plus/share_plus.dart'; 
@@ -117,17 +117,6 @@ String _formatTimestampForFilename(DateTime dateTime) {
       '${dateTime.minute.toString().padLeft(2, '0')}'
       '${dateTime.second.toString().padLeft(2, '0')}';
 }
-img.Image _applySharpeningFilter(img.Image image) {
-  final Float32List kernel = Float32List.fromList([
-    0, -1, 0,
-    -1, 5, -1,
-    0, -1, 0,
-  ]);
-  return img.convolution(
-    image,
-    filter: kernel,
-  );
-}
 // --- End of Utility Functions ---
 
 
@@ -183,7 +172,6 @@ Future<void> _saveScannedProductImages(
   }
 }
 
-// ★★★ 修正: JSON保存ロジック (ケースごとにグループ化して保存) ★★★
 Future<String?> saveProjectAction(
   BuildContext context,
   String currentProjectFolderPath,
@@ -235,13 +223,8 @@ Future<String?> saveProjectAction(
 
     final file = File(saveFilePath);
 
-    // --- データをケースごとに整理 ---
-    // Nifuda Header: 0:製番, 1:項目番号, ... 8:Case No.
-    // Product Header: 0:ORDER No., ..., 8:照合済Case
-
     Map<String, dynamic> casesMap = {};
 
-    // 1. 荷札データをグループ化 (ヘッダー[0]はスキップ)
     if (nifudaData.length > 1) {
       for (int i = 1; i < nifudaData.length; i++) {
         final row = nifudaData[i];
@@ -255,7 +238,6 @@ Future<String?> saveProjectAction(
       }
     }
 
-    // 2. 製品リストデータをグループ化 (ヘッダー[0]はスキップ)
     if (productListKariData.length > 1) {
       for (int i = 1; i < productListKariData.length; i++) {
         final row = productListKariData[i];
@@ -272,10 +254,8 @@ Future<String?> saveProjectAction(
     final projectData = {
       'projectTitle': projectTitle,
       'projectFolderPath': currentProjectFolderPath,
-      // ヘッダー情報を保存
       'nifudaHeader': nifudaData.isNotEmpty ? nifudaData[0] : [],
       'productListHeader': productListKariData.isNotEmpty ? productListKariData[0] : [],
-      // グループ化したデータ
       'cases': casesMap, 
       'currentCaseNumber': currentCaseNumber,
     };
@@ -308,7 +288,6 @@ Future<String?> saveProjectAction(
   }
 }
 
-// ★★★ 修正: JSON読み込みロジック (新旧フォーマット対応) ★★★
 Future<Map<String, dynamic>?> loadProjectAction(
   BuildContext context,
   void Function(String?) updateJsonSavePath,
@@ -354,14 +333,10 @@ Future<Map<String, dynamic>?> loadProjectAction(
       throw Exception('ファイルの構造が不正です(projectTitle欠落)。');
     }
 
-    // データを復元 (フラットなリストに戻す)
     List<List<String>> nifudaData = [];
     List<List<String>> productListKariData = [];
 
     if (loadedData.containsKey('cases')) {
-      // ★ 新フォーマット (ケースごとにグループ化されている場合)
-      
-      // ヘッダー復元
       if (loadedData['nifudaHeader'] != null) {
         nifudaData.add(List<String>.from(loadedData['nifudaHeader']));
       }
@@ -369,9 +344,7 @@ Future<Map<String, dynamic>?> loadProjectAction(
         productListKariData.add(List<String>.from(loadedData['productListHeader']));
       }
 
-      // ケースデータを展開してリストに追加
       final Map<String, dynamic> cases = loadedData['cases'];
-      // Case No.順にソートして読み込む (オプション)
       final sortedKeys = cases.keys.toList()..sort(); 
 
       for (var key in sortedKeys) {
@@ -390,7 +363,6 @@ Future<Map<String, dynamic>?> loadProjectAction(
         }
       }
     } else {
-      // ★ 旧フォーマット (フラットなリスト)
       if (loadedData['nifudaData'] is List) {
         nifudaData = (loadedData['nifudaData'] as List).map((e) => List<String>.from(e)).toList();
       }
@@ -422,15 +394,11 @@ Future<Map<String, dynamic>?> loadProjectAction(
   }
 }
 
-
-// ★★★ captureProcessAndConfirmNifudaAction (自作カメラ+バックグラウンド処理版) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
     BuildContext context,
     String projectFolderPath,
     String currentCaseNumber,
 ) async {
-  // 1. 自作カメラ(CameraCapturePage)で撮影＆裏処理
-  //    戻り値は既に処理済みのAI結果リスト
   final List<Map<String, dynamic>>? processedResults = await Navigator.push(
     context,
     MaterialPageRoute(builder: (_) => CameraCapturePage(
@@ -447,7 +415,6 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
     return null;
   }
 
-  // 2. 結果を順次確認
   List<List<String>> allConfirmedNifudaRows = [];
   int imageIndex = 0;
 
@@ -455,7 +422,6 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
     imageIndex++;
     if (!context.mounted) break;
 
-    // 確認画面へ遷移
     final Map<String, dynamic>? confirmedResultMap = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -473,7 +439,6 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
           .toList();
       allConfirmedNifudaRows.add(confirmedRowAsList);
     } else {
-      // 破棄された場合、中断するか確認
       if (context.mounted && imageIndex < processedResults.length) {
          final proceed = await showDialog<bool>(
             context: context,
@@ -499,7 +464,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
   }
 }
 
-// ★★★ showAndExportNifudaListAction (Case No.フィルタリング修正済み) ★★★
+// ★★★ 修正: 欠落していた showAndExportNifudaListAction を追加 ★★★
 void showAndExportNifudaListAction(
   BuildContext context,
   List<List<String>> nifudaData,
@@ -539,7 +504,7 @@ void showAndExportNifudaListAction(
   );
 }
 
-// ★★★ captureProcessAndConfirmProductListAction (リサイズ撤廃修正済み) ★★★
+// ★★★ captureProcessAndConfirmProductListAction (CunningDocumentScanner 使用) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
@@ -548,19 +513,12 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 ) async {
   List<String>? imageFilePaths;
   try {
-    final options = DocumentScannerOptions(
-      pageLimit: 100,
-      isGalleryImport: false,
-      documentFormat: DocumentFormat.jpeg,
-      mode: ScannerMode.full
+    imageFilePaths = await CunningDocumentScanner.getPictures(
+        noOfPages: 100
     );
-    final docScanner = DocumentScanner(options: options);
-    final result = await docScanner.scanDocument();
-    imageFilePaths = result?.images;
-
   } catch (e, s) {
-    _logError('DOC_SCANNER', 'Scanner launch error (GPT)', e, s);
-    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Google ML Kit Document Scannerの起動に失敗しました: $e');
+    _logError('DOC_SCANNER', 'Scanner launch error (Cunning/GPT)', e, s);
+    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Cunning Document Scannerの起動に失敗しました: $e');
     return null;
   }
 
@@ -575,13 +533,12 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   Uint8List firstImageBytes;
   
-  // ★★★ 修正: リサイズ定数を削除 ★★★
-  // const int PERSPECTIVE_WIDTH = 1920; 
-
   try {
     final path = imageFilePaths.first;
     final file = File(path);
     final rawBytes = await file.readAsBytes();
+    
+    // 一旦デコードして、画質100でエンコード
     final originalImage = img.decodeImage(rawBytes);
     
     if (originalImage == null) {
@@ -590,24 +547,16 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       return null;
     }
     
-    // ★★★ 修正: リサイズ・シャープニングを廃止し、オリジナル画像をそのまま使用 ★★★
-    // img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
-    // normalizedImage = _applySharpeningFilter(normalizedImage);
-    
-    // firstImageBytes = Uint8List.fromList(img.encodeJpg(normalizedImage, quality: 100));
-    
-    // 元画像をそのまま最高画質でエンコード
     firstImageBytes = Uint8List.fromList(img.encodeJpg(originalImage, quality: 100));
 
   } catch (e, s) {
-    _logError('IMAGE_PROC', 'Image read/resize error (First Image)', e, s);
+    _logError('IMAGE_PROC', 'Image read/encode error (First Image)', e, s);
     if (context.mounted) _hideLoadingDialog(context);
-    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みまたはエンコードに失敗しました: $e');
+    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みに失敗しました: $e');
     return null;
   } finally {
      if (context.mounted) _hideLoadingDialog(context);
   }
-
 
   String template;
   switch (selectedCompany) {
@@ -623,7 +572,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       previewImageBytes: firstImageBytes,
       maskTemplate: template,
       imageIndex: 1,
-      // ★ 修正: imageFilePaths! で強制アンラップ
+      // ★ 修正: ! を追加してNull安全に対応
       totalImages: imageFilePaths!.length, 
     )),
   );
@@ -637,8 +586,10 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
   
-  if (imageFilePaths.length > 1) {
-    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths.length})');
+  // 2枚目以降
+  // ★ 修正: ! を追加してNull安全に対応
+  if (imageFilePaths!.length > 1) {
+    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths!.length})');
     try {
       for (int i = 1; i < imageFilePaths.length; i++) {
         if (!context.mounted) break;
@@ -654,17 +605,13 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
         if (originalImage == null) continue;
 
-        // ★★★ 修正: 2枚目以降もリサイズ・シャープニングを廃止 ★★★
-        // img.Image normalizedImage = img.copyResize(originalImage, width: PERSPECTIVE_WIDTH, height: (originalImage.height * (PERSPECTIVE_WIDTH / originalImage.width)).round());
-        // normalizedImage = _applySharpeningFilter(normalizedImage);
-        
         img.Image maskedImage;
         if (template == 't') {
-            maskedImage = applyMaskToImage(originalImage, template: 't'); // normalizedImage -> originalImage
+            maskedImage = applyMaskToImage(originalImage, template: 't'); 
         } else if (template == 'dynamic' && dynamicMasks.isNotEmpty) {
-            maskedImage = applyMaskToImage(originalImage, template: 'dynamic', dynamicMaskRects: dynamicMasks); // normalizedImage -> originalImage
+            maskedImage = applyMaskToImage(originalImage, template: 'dynamic', dynamicMaskRects: dynamicMasks); 
         } else {
-            maskedImage = originalImage; // normalizedImage -> originalImage
+            maskedImage = originalImage; 
         }
         finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
       }
@@ -725,7 +672,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   return _processRawProductResults(context, allAiRawResults, selectedCompany);
 }
 
-// ★★★ _processRawProductResults (製品リスト結果の整形) ★★★
+// ★★★ 追加: 欠落していた _processRawProductResults を定義 ★★★
 Future<List<List<String>>?> _processRawProductResults(
   BuildContext context,
   List<Map<String, dynamic>?> allAiRawResults,
@@ -785,7 +732,7 @@ Future<List<List<String>>?> _processRawProductResults(
   }
 }
 
-// ★★★ startMatchingAndShowResultsAction (変更なし) ★★★
+// ... (startMatchingAndShowResultsAction, exportDataToStorageAction, shareDataViaAppsAction, showAndExportProductListAction は変更なし)
 Future<String?> startMatchingAndShowResultsAction(
   BuildContext context,
   List<List<String>> nifudaData,
@@ -873,8 +820,6 @@ Future<String?> startMatchingAndShowResultsAction(
   return null;
 }
 
-
-// ★★★ 1. 共有フォルダ(SMB)への保存専用のアクション ★★★
 Future<String?> exportDataToStorageAction({
   required BuildContext context,
   required String projectTitle,
@@ -1004,7 +949,6 @@ Future<String?> exportDataToStorageAction({
   }
 }
 
-// ★★★ 2. アプリ(LINE/Gmail)での共有専用のアクション ★★★
 Future<String?> shareDataViaAppsAction({
   required BuildContext context,
   required String projectTitle,
