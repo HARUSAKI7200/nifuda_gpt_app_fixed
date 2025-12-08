@@ -16,7 +16,8 @@ import 'package:flutter_logs/flutter_logs.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:media_scanner/media_scanner.dart';
 import 'package:share_plus/share_plus.dart'; 
-import 'package:drift/drift.dart' show Value; 
+import 'package:drift/drift.dart' show Value;
+import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart'; // 追加
 
 import '../utils/gpt_service.dart';
 import '../utils/product_matcher.dart';
@@ -35,7 +36,7 @@ import 'project_load_dialog.dart';
 import 'streaming_progress_dialog.dart';
 import '../utils/gemini_service.dart';
 import '../state/project_state.dart';
-import 'document_scanner_page.dart'; // ★ 追加: 自作スキャナーページ
+// import 'document_scanner_page.dart'; // 削除: 不要になったため
 
 // --- Constants ---
 const String BASE_PROJECT_DIR = "/storage/emulated/0/DCIM/検品関係";
@@ -503,108 +504,168 @@ void showAndExportNifudaListAction(
   );
 }
 
-// ★★★ captureProcessAndConfirmProductListAction (修正: マスクテンプレート渡し対応) ★★★
+// ★★★ captureProcessAndConfirmProductListAction (ML Kit Document Scanner版) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
   String projectFolderPath,
 ) async {
-  List<String>? imageFilePaths;
-  try {
-    // ★ 修正: カスタムスキャナーページへ遷移し、maskTemplateを渡す
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => DocumentScannerPage(
-        maxPages: 100,
-        maskTemplate: selectedCompany, 
-      )),
-    );
-    if (result is List<String>) {
-      imageFilePaths = result;
-    }
-  } catch (e, s) {
-    _logError('DOC_SCANNER', 'Scanner launch error (OpenCV/GPT)', e, s);
-    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Document Scannerの起動に失敗しました: $e');
-    return null;
-  }
-
-  if (imageFilePaths == null || imageFilePaths.isEmpty) {
-    if (context.mounted) showCustomSnackBar(context, '製品リストのスキャンがキャンセルされました。');
-    return null;
-  }
-
-  // 画像はすでにScannerPage内でバックグラウンド処理（切り抜き＆マスク）されて保存されている
-  // なのでそのままプロジェクトフォルダへ保存
-  unawaited(_saveScannedProductImages(context, projectFolderPath, imageFilePaths));
-
-  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中... (1/${imageFilePaths!.length})'); // ★ 修正: !を追加
-
-  Uint8List firstImageBytes;
+  List<String> imageFilePaths = [];
   
+  // 1. Google ML Kit Document Scanner を起動
   try {
-    final path = imageFilePaths!.first; // ★ 修正: !を追加
-    final file = File(path);
-    final rawBytes = await file.readAsBytes();
-    
-    // 一旦デコードして、画質100でエンコード (確認用)
-    final originalImage = img.decodeImage(rawBytes);
-    
-    if (originalImage == null) {
-      if (context.mounted) _hideLoadingDialog(context);
-      _showErrorDialog(context, '画像処理エラー', '1枚目の画像をデコードできませんでした。');
+    final options = DocumentScannerOptions(
+      documentFormat: DocumentFormat.jpeg,
+      mode: ScannerMode.full, // 撮影・クロップ・フィルタなどの完全なUI
+      pageLimit: 100, // 複数ページ対応
+      isGalleryImport: true, // ギャラリーからのインポート許可
+    );
+
+    final documentScanner = DocumentScanner(options: options);
+    final result = await documentScanner.scanDocument();
+
+    if (result.images.isEmpty) {
+      if (context.mounted) showCustomSnackBar(context, '製品リストのスキャンがキャンセルされました。');
       return null;
     }
-    
-    firstImageBytes = Uint8List.fromList(img.encodeJpg(originalImage, quality: 100));
+    imageFilePaths = result.images;
 
   } catch (e, s) {
-    _logError('IMAGE_PROC', 'Image read/encode error (First Image)', e, s);
-    if (context.mounted) _hideLoadingDialog(context);
-    if (context.mounted) _showErrorDialog(context, '画像処理エラー', 'スキャン済みファイルの読み込みに失敗しました: $e');
+    _logError('DOC_SCANNER', 'ML Kit Scanner launch error', e, s);
+    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'ML Kit Document Scannerの起動に失敗しました: $e');
     return null;
-  } finally {
-     if (context.mounted) _hideLoadingDialog(context);
   }
 
-  // ★ 修正: PreviewPageでは「マスクなし(none)」として渡す
-  // (既にScannerPageでバックグラウンド処理済みのため二重処理しない)
+  // 2. マスク処理 (バックグラウンドで実行)
+  // ML Kit Scannerで得られた画像は既に歪み補正・トリミング済み。
+  // ここではさらに「社名などの黒塗り」を行う。
+  
+  if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
+
+  List<String> processedImagePaths = [];
+  
+  try {
+    // 一時ディレクトリ
+    final tempDir = await getTemporaryDirectory();
+    final redactionKeywords = [
+      '東芝', '東芝エネルギーシステムズ', '東芝インフラシステムズ', '東芝エレベータ',
+      '東芝プラントシステム', '東芝インフラテクノサービス', '東芝システムテクノロジー',
+      '東芝ITコントロールシステム', '東芝EIコントロールシステム', '東芝ディーエムエス',
+      'TMEIC', '東芝三菱電機産業システム',
+    ];
+
+    for (int i = 0; i < imageFilePaths.length; i++) {
+      final originalPath = imageFilePaths[i];
+      final originalFile = File(originalPath);
+      final rawBytes = await originalFile.readAsBytes();
+      
+      img.Image? imageObj = img.decodeImage(rawBytes);
+      if (imageObj == null) continue; // スキップ
+
+      // テンプレート判定
+      String internalTemplateName = 'none';
+      if (selectedCompany == 'T社') internalTemplateName = 't';
+      else if (selectedCompany == '動的マスク処理') internalTemplateName = 'dynamic';
+
+      // マスク適用
+      if (internalTemplateName == 't') {
+        // T社定型マスク
+        imageObj = applyMaskToImage(imageObj, template: 't');
+      } else if (internalTemplateName == 'dynamic') {
+        // 動的マスク (ML Kitでキーワード検出 -> マスク)
+        final rects = await KeywordDetector.detectKeywords(originalPath, redactionKeywords);
+        if (rects.isNotEmpty) {
+           imageObj = applyMaskToImage(imageObj, template: 'dynamic', dynamicMaskRects: rects);
+        }
+      }
+
+      // 保存 (上書きせず別名保存)
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final savedPath = '${tempDir.path}/processed_scan_$i\_$timestamp.jpg';
+      await File(savedPath).writeAsBytes(img.encodeJpg(imageObj, quality: 100));
+      processedImagePaths.add(savedPath);
+    }
+  } catch (e, s) {
+    _logError('IMAGE_PROC', 'Background Masking Error', e, s);
+    if (context.mounted) {
+      _hideLoadingDialog(context);
+      _showErrorDialog(context, '画像処理エラー', '画像のマスク処理中にエラーが発生しました: $e');
+    }
+    return null;
+  } finally {
+    if (context.mounted) _hideLoadingDialog(context);
+  }
+
+  if (processedImagePaths.isEmpty) {
+    if(context.mounted) showCustomSnackBar(context, '有効な画像がありませんでした。');
+    return null;
+  }
+
+  // 3. プロジェクトフォルダへの保存 (オリジナルではなく処理済み画像を保存)
+  unawaited(_saveScannedProductImages(context, projectFolderPath, processedImagePaths));
+
+  // 4. プレビュー (1枚目のみ確認・手動修正用)
+  // 既に自動マスク済みなので、プレビュー画面には 'none' を渡して「適用済み画像」として表示させる
+  // ただし、ユーザーがさらに追加でマスクしたい場合もあるため、PreviewPageの機能は維持する
+  
+  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
+
+  Uint8List firstImageBytes;
+  try {
+    final path = processedImagePaths.first;
+    final file = File(path);
+    final rawBytes = await file.readAsBytes();
+    // プレビュー用にデコード確認
+    final originalImage = img.decodeImage(rawBytes);
+    if (originalImage == null) throw Exception('画像のデコードに失敗');
+    firstImageBytes = Uint8List.fromList(img.encodeJpg(originalImage, quality: 100));
+  } catch(e, s) {
+    _logError('IMAGE_PROC', 'Preview Load Error', e, s);
+    if (context.mounted) {
+      _hideLoadingDialog(context);
+      _showErrorDialog(context, 'エラー', 'プレビュー画像の読み込みに失敗しました。');
+    }
+    return null;
+  } finally {
+    if (context.mounted) _hideLoadingDialog(context);
+  }
+
   if (!context.mounted) return null;
+
+  // プレビュー画面へ遷移
   final MaskPreviewResult? previewResult = await Navigator.push<MaskPreviewResult>(
     context, MaterialPageRoute(builder: (_) => ProductListMaskPreviewPage(
       previewImageBytes: firstImageBytes,
-      maskTemplate: 'none', // 修正: none
+      maskTemplate: 'none', // 既に処理済みなのでnone
       imageIndex: 1,
-      // ★ 修正: ! を追加してNull安全に対応
-      totalImages: imageFilePaths!.length, // ★ 修正: !を追加
+      totalImages: processedImagePaths.length,
     )),
   );
 
   if (previewResult == null) {
-      if(context.mounted) showCustomSnackBar(context, 'マスク確認が破棄されたため、OCR処理を中断しました。');
+      if(context.mounted) showCustomSnackBar(context, 'OCR処理を中断しました。');
       return null;
   }
 
-  final List<Rect> dynamicMasks = previewResult.dynamicMasks; // ここでは空のはず(noneなので)
-
+  // プレビューで編集された1枚目の画像 + 残りの画像
   List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
   
-  // 2枚目以降
-  if (imageFilePaths!.length > 1) { // ★ 修正: !を追加
-    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths!.length})'); // ★ 修正: !を追加
+  // 2枚目以降の読み込み
+  if (processedImagePaths.length > 1) {
+    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${processedImagePaths.length})');
     try {
-      for (int i = 1; i < imageFilePaths!.length; i++) { // ★ 修正: !を追加
+      for (int i = 1; i < processedImagePaths.length; i++) {
         if (!context.mounted) break;
         if(i > 1 && context.mounted) {
             Navigator.pop(context);
-           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${imageFilePaths!.length})'); // ★ 修正: !を追加
+           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${processedImagePaths.length})');
         }
 
-        final path = imageFilePaths![i]; // ★ 修正: !を追加
+        final path = processedImagePaths[i];
         final file = File(path);
         final rawBytes = await file.readAsBytes();
         
-        // 処理済み画像をそのままロード
         final originalImage = img.decodeImage(rawBytes);
         if (originalImage != null) {
            finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(originalImage, quality: 100)));
@@ -620,6 +681,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     return null;
   }
 
+  // 5. GPT送信 & OCR解析
   List<Map<String, dynamic>?> allAiRawResults = [];
   final String companyForGpt = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany;
 

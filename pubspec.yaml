@@ -25,8 +25,8 @@ dependencies:
   file_picker: ^10.3.2
   share_plus: ^7.0.2
 
-  # --- OpenCV ---
-  opencv_dart: ^1.4.5
+  # --- ML Kit Document Scanner ---
+  google_mlkit_document_scanner: ^0.4.0
 
   # --- State Management & DB ---
   flutter_riverpod: ^2.5.1
@@ -43,7 +43,6 @@ dependencies:
   # --- UI & User Input ---
   camera: ^0.11.0+1
   image_picker: ^1.1.2
-  # cunning_document_scanner: ^1.4.0  <-- 使わなくなりますが、念のため残すか削除してください
 
   # --- OCR Keyword Detection ---
   google_mlkit_text_recognition: ^0.15.0
