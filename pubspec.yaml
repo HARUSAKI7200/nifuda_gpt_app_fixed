@@ -13,7 +13,6 @@ dependencies:
 
   # --- Core & Utilities ---
   http: ^1.2.1
-  # ★ excelパッケージを追加
   excel: ^4.0.6 
   image: ^4.1.7
   flutter_image_compress: ^2.4.0
@@ -26,39 +25,37 @@ dependencies:
   file_picker: ^10.3.2
   share_plus: ^7.0.2
 
-  # ★★★ 状態管理・DB (IsarからDriftへ変更) ★★★
-  flutter_riverpod: ^2.5.1       # 状態管理
-  drift: ^2.29.0                 # ★ 変更: Drift (DB)
-  sqlite3_flutter_libs: ^0.5.40   # ★ 追加: Drift (Android/iOS用)
-  smb_connect: ^0.0.9 # (執筆時点での最新版。pub.devで確認してください)
+  # --- OpenCV ---
+  opencv_dart: ^1.4.5
+
+  # --- State Management & DB ---
+  flutter_riverpod: ^2.5.1
+  drift: ^2.29.0
+  sqlite3_flutter_libs: ^0.5.40
+  smb_connect: ^0.0.9
   shared_preferences: ^2.5.3
   
-  shimmer: ^3.0.0                # ローディング時のUX向上
-  flutter_logs: ^2.2.1            # ローカルファイルベースのロギング
+  shimmer: ^3.0.0
+  flutter_logs: ^2.2.1
   google_generative_ai: ^0.4.7
   openai_dart: ^0.6.0+1
   
   # --- UI & User Input ---
   camera: ^0.11.0+1
   image_picker: ^1.1.2
-  cunning_document_scanner: ^1.4.0
+  # cunning_document_scanner: ^1.4.0  <-- 使わなくなりますが、念のため残すか削除してください
 
-  # ★★★ 追加: キーワード検出用 ★★★
+  # --- OCR Keyword Detection ---
   google_mlkit_text_recognition: ^0.15.0
   
-  # --- App Icon Generation ---
   flutter_launcher_icons: ^0.13.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
-  
-  # ★★★ DB (IsarからDriftへ変更) ★★★
-  drift_dev: ^2.29.0            # ★ 追加: Drift ビルドランナー
-  # isar_generator: ^3.1.0+1     # 削除
-  
-  build_runner: ^2.4.13          # ビルドランナー 
+  drift_dev: ^2.29.0
+  build_runner: ^2.4.13
 
 flutter:
   uses-material-design: true
@@ -68,10 +65,10 @@ flutter:
     - assets/icon/
 
   fonts:
-   - family: NotoSerifJP # 👈 フォントファミリー名をNotoSerifJPに変更
+   - family: NotoSerifJP
      fonts:
-       - asset: fonts/NotoSerifJP-Regular.ttf # 👈 フォントファイル名を変更
-       - asset: fonts/NotoSerifJP-Bold.ttf    # 👈 フォントファイル名を変更
+       - asset: fonts/NotoSerifJP-Regular.ttf
+       - asset: fonts/NotoSerifJP-Bold.ttf
          weight: 700
 
 flutter_launcher_icons:

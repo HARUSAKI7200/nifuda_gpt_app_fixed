@@ -13,7 +13,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:flutter_logs/flutter_logs.dart';
-import 'package:cunning_document_scanner/cunning_document_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:media_scanner/media_scanner.dart';
 import 'package:share_plus/share_plus.dart'; 
@@ -36,6 +35,7 @@ import 'project_load_dialog.dart';
 import 'streaming_progress_dialog.dart';
 import '../utils/gemini_service.dart';
 import '../state/project_state.dart';
+import 'document_scanner_page.dart'; // ★ 追加: 自作スキャナーページ
 
 // --- Constants ---
 const String BASE_PROJECT_DIR = "/storage/emulated/0/DCIM/検品関係";
@@ -464,7 +464,6 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
   }
 }
 
-// ★★★ 修正: 欠落していた showAndExportNifudaListAction を追加 ★★★
 void showAndExportNifudaListAction(
   BuildContext context,
   List<List<String>> nifudaData,
@@ -504,7 +503,7 @@ void showAndExportNifudaListAction(
   );
 }
 
-// ★★★ captureProcessAndConfirmProductListAction (CunningDocumentScanner 使用) ★★★
+// ★★★ captureProcessAndConfirmProductListAction (修正: マスクテンプレート渡し対応) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
@@ -513,12 +512,20 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 ) async {
   List<String>? imageFilePaths;
   try {
-    imageFilePaths = await CunningDocumentScanner.getPictures(
-        noOfPages: 100
+    // ★ 修正: カスタムスキャナーページへ遷移し、maskTemplateを渡す
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => DocumentScannerPage(
+        maxPages: 100,
+        maskTemplate: selectedCompany, 
+      )),
     );
+    if (result is List<String>) {
+      imageFilePaths = result;
+    }
   } catch (e, s) {
-    _logError('DOC_SCANNER', 'Scanner launch error (Cunning/GPT)', e, s);
-    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Cunning Document Scannerの起動に失敗しました: $e');
+    _logError('DOC_SCANNER', 'Scanner launch error (OpenCV/GPT)', e, s);
+    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Document Scannerの起動に失敗しました: $e');
     return null;
   }
 
@@ -527,18 +534,20 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     return null;
   }
 
+  // 画像はすでにScannerPage内でバックグラウンド処理（切り抜き＆マスク）されて保存されている
+  // なのでそのままプロジェクトフォルダへ保存
   unawaited(_saveScannedProductImages(context, projectFolderPath, imageFilePaths));
 
-  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中... (1/${imageFilePaths.length})');
+  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中... (1/${imageFilePaths!.length})'); // ★ 修正: !を追加
 
   Uint8List firstImageBytes;
   
   try {
-    final path = imageFilePaths.first;
+    final path = imageFilePaths!.first; // ★ 修正: !を追加
     final file = File(path);
     final rawBytes = await file.readAsBytes();
     
-    // 一旦デコードして、画質100でエンコード
+    // 一旦デコードして、画質100でエンコード (確認用)
     final originalImage = img.decodeImage(rawBytes);
     
     if (originalImage == null) {
@@ -558,22 +567,16 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
      if (context.mounted) _hideLoadingDialog(context);
   }
 
-  String template;
-  switch (selectedCompany) {
-    case 'T社': template = 't'; break;
-    case 'マスク処理なし': template = 'none'; break;
-    case '動的マスク処理': template = 'dynamic'; break;
-    default: if(context.mounted) _showErrorDialog(context, 'テンプレートエラー', '無効な会社名が選択されました。'); return null;
-  }
-
+  // ★ 修正: PreviewPageでは「マスクなし(none)」として渡す
+  // (既にScannerPageでバックグラウンド処理済みのため二重処理しない)
   if (!context.mounted) return null;
   final MaskPreviewResult? previewResult = await Navigator.push<MaskPreviewResult>(
     context, MaterialPageRoute(builder: (_) => ProductListMaskPreviewPage(
       previewImageBytes: firstImageBytes,
-      maskTemplate: template,
+      maskTemplate: 'none', // 修正: none
       imageIndex: 1,
       // ★ 修正: ! を追加してNull安全に対応
-      totalImages: imageFilePaths!.length, 
+      totalImages: imageFilePaths!.length, // ★ 修正: !を追加
     )),
   );
 
@@ -582,38 +585,30 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       return null;
   }
 
-  final List<Rect> dynamicMasks = previewResult.dynamicMasks;
+  final List<Rect> dynamicMasks = previewResult.dynamicMasks; // ここでは空のはず(noneなので)
 
   List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
   
   // 2枚目以降
-  // ★ 修正: ! を追加してNull安全に対応
-  if (imageFilePaths!.length > 1) {
-    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths!.length})');
+  if (imageFilePaths!.length > 1) { // ★ 修正: !を追加
+    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths!.length})'); // ★ 修正: !を追加
     try {
-      for (int i = 1; i < imageFilePaths.length; i++) {
+      for (int i = 1; i < imageFilePaths!.length; i++) { // ★ 修正: !を追加
         if (!context.mounted) break;
         if(i > 1 && context.mounted) {
             Navigator.pop(context);
-           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${imageFilePaths.length})');
+           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${imageFilePaths!.length})'); // ★ 修正: !を追加
         }
 
-        final path = imageFilePaths[i];
+        final path = imageFilePaths![i]; // ★ 修正: !を追加
         final file = File(path);
         final rawBytes = await file.readAsBytes();
+        
+        // 処理済み画像をそのままロード
         final originalImage = img.decodeImage(rawBytes);
-
-        if (originalImage == null) continue;
-
-        img.Image maskedImage;
-        if (template == 't') {
-            maskedImage = applyMaskToImage(originalImage, template: 't'); 
-        } else if (template == 'dynamic' && dynamicMasks.isNotEmpty) {
-            maskedImage = applyMaskToImage(originalImage, template: 'dynamic', dynamicMaskRects: dynamicMasks); 
-        } else {
-            maskedImage = originalImage; 
+        if (originalImage != null) {
+           finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(originalImage, quality: 100)));
         }
-        finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
       }
     } finally {
        if (context.mounted) _hideLoadingDialog(context);
@@ -672,7 +667,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   return _processRawProductResults(context, allAiRawResults, selectedCompany);
 }
 
-// ★★★ 追加: 欠落していた _processRawProductResults を定義 ★★★
 Future<List<List<String>>?> _processRawProductResults(
   BuildContext context,
   List<Map<String, dynamic>?> allAiRawResults,
@@ -732,7 +726,6 @@ Future<List<List<String>>?> _processRawProductResults(
   }
 }
 
-// ... (startMatchingAndShowResultsAction, exportDataToStorageAction, shareDataViaAppsAction, showAndExportProductListAction は変更なし)
 Future<String?> startMatchingAndShowResultsAction(
   BuildContext context,
   List<List<String>> nifudaData,
@@ -1084,7 +1077,6 @@ Future<String?> shareDataViaAppsAction({
 }
 
 
-// ★★★ showAndExportProductListAction ★★★
 void showAndExportProductListAction(
   BuildContext context,
   List<List<String>> productListData,

@@ -8,8 +8,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter_logs/flutter_logs.dart';
-import 'package:cunning_document_scanner/cunning_document_scanner.dart';
-import 'package:http/http.dart' as http; // Dummy AI Serviceの型定義用
+import 'package:http/http.dart' as http;
+// ★ 追加: 不足していたインポート
+import 'package:path/path.dart' as p;
+import 'package:permission_handler/permission_handler.dart';
+import 'package:media_scanner/media_scanner.dart';
 
 import '../utils/gemini_service.dart';
 import '../utils/ocr_masker.dart';
@@ -19,8 +22,10 @@ import 'product_list_ocr_confirm_page.dart';
 import 'product_list_mask_preview_page.dart';
 import '../widgets/custom_snackbar.dart';
 import 'streaming_progress_dialog.dart';
+import 'document_scanner_page.dart';
 
-// --- Utility Functions (home_actions.dartと同様のプライベート関数) ---
+// --- Utility Functions ---
+
 void _logError(String tag, String subTag, Object error, StackTrace? stack) {
   FlutterLogs.logThis(
     tag: tag,
@@ -30,6 +35,7 @@ void _logError(String tag, String subTag, Object error, StackTrace? stack) {
     level: LogLevel.ERROR,
   );
 }
+
 void _showErrorDialog(BuildContext context, String title, String message) {
   if (!context.mounted) return;
   showDialog(
@@ -50,6 +56,7 @@ void _showErrorDialog(BuildContext context, String title, String message) {
     },
   );
 }
+
 void _showLoadingDialog(BuildContext context, String message) {
   if (!context.mounted) return;
   showDialog(
@@ -68,6 +75,7 @@ void _showLoadingDialog(BuildContext context, String message) {
     },
   );
 }
+
 void _hideLoadingDialog(BuildContext context) {
   final navigator = Navigator.of(context, rootNavigator: true);
   if (navigator.canPop()) {
@@ -75,7 +83,70 @@ void _hideLoadingDialog(BuildContext context) {
   }
 }
 
-// ... (captureProcessAndConfirmNifudaActionGemini は変更なし)
+String _formatTimestampForFilename(DateTime dateTime) {
+  return '${dateTime.year.toString().padLeft(4, '0')}'
+      '${dateTime.month.toString().padLeft(2, '0')}'
+      '${dateTime.day.toString().padLeft(2, '0')}_'
+      '${dateTime.hour.toString().padLeft(2, '0')}'
+      '${dateTime.minute.toString().padLeft(2, '0')}'
+      '${dateTime.second.toString().padLeft(2, '0')}';
+}
+
+// ★ 追加: 不足していた画像保存関数
+Future<void> _saveScannedProductImages(
+    BuildContext context,
+    String projectFolderPath,
+    List<String> sourceImagePaths, {
+    bool isNifuda = false, 
+    String? caseNumber,    
+}) async {
+  if (!Platform.isAndroid) return;
+  try {
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.storage,
+      Permission.manageExternalStorage,
+    ].request();
+
+    if (!statuses[Permission.storage]!.isGranted && !statuses[Permission.manageExternalStorage]!.isGranted) {
+      throw Exception('ストレージへのアクセス権限がありません。');
+    }
+
+    String targetDirPath;
+    String fileNamePrefix;
+    if (isNifuda && caseNumber != null) {
+      targetDirPath = p.join(projectFolderPath, "荷札画像/$caseNumber");
+      fileNamePrefix = "nifuda_${caseNumber.replaceAll('#', 'Case_')}";
+    } else {
+      targetDirPath = p.join(projectFolderPath, "製品リスト画像");
+      fileNamePrefix = "product_list";
+    }
+
+    final Directory targetDir = Directory(targetDirPath);
+    if (!await targetDir.exists()) await targetDir.create(recursive: true);
+
+    for (final sourcePath in sourceImagePaths) {
+      final sourceFile = File(sourcePath);
+      if (!await sourceFile.exists()) continue;
+      
+      final timestamp = _formatTimestampForFilename(DateTime.now());
+      final originalExtension = p.extension(sourcePath);
+      final fileName = '${fileNamePrefix}_$timestamp$originalExtension';
+      final targetFilePath = p.join(targetDir.path, fileName);
+
+      try {
+        await sourceFile.copy(targetFilePath);
+        await MediaScanner.loadMedia(path: targetFilePath);
+      } catch (e, s) {
+        _logError('IMAGE_SAVE', 'COPY_ERROR', e, s);
+      }
+    }
+  } catch (e, s) {
+    _logError('IMAGE_SAVE', 'SAVE_PROCESS_ERROR', e, s);
+  }
+}
+
+// --- Main Actions ---
+
 Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
     BuildContext context,
     String projectFolderPath,
@@ -148,7 +219,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
   }
 }
 
-// ★★★ 修正: captureProcessAndConfirmProductListActionGemini (CunningDocumentScanner 使用) ★★★
+// ★★★ captureProcessAndConfirmProductListActionGemini (OpenCV使用版) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   BuildContext context,
   String selectedCompany,
@@ -158,13 +229,20 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   
   List<String>? imageFilePaths;
   try {
-    // ★ 修正: isGalleryImportを削除し、noOfPagesのみ指定
-    imageFilePaths = await CunningDocumentScanner.getPictures(
-        noOfPages: 100
+    // カスタムスキャナーページへ遷移 (マスクテンプレートを渡す)
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => DocumentScannerPage(
+        maxPages: 100,
+        maskTemplate: selectedCompany, 
+      )),
     );
+    if (result is List<String>) {
+      imageFilePaths = result;
+    }
   } catch (e, s) {
-    _logError('DOC_SCANNER', 'Scanner launch error (Cunning/Gemini)', e, s);
-    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Cunning Document Scannerの起動に失敗しました: $e');
+    _logError('DOC_SCANNER', 'Scanner launch error (OpenCV/Gemini)', e, s);
+    if (context.mounted) _showErrorDialog(context, 'スキャナ起動エラー', 'Document Scannerの起動に失敗しました: $e');
     return null;
   }
 
@@ -173,15 +251,16 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     return null;
   }
 
-  // unawaited(_saveScannedProductImages(context, projectFolderPath, imageFilePaths));
+  // 画像はすでにScannerPage内でマスク処理・保存されている
+  unawaited(_saveScannedProductImages(context, projectFolderPath, imageFilePaths));
 
-  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中... (1/${imageFilePaths.length})');
+  if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中... (1/${imageFilePaths!.length})'); // Null安全対応済み
 
   Uint8List firstImageBytes;
   
   // 1枚目を読み込み
   try {
-    final path = imageFilePaths.first;
+    final path = imageFilePaths!.first; // Null安全対応済み
     final file = File(path);
     final rawBytes = await file.readAsBytes();
     
@@ -205,24 +284,15 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
      if (context.mounted) _hideLoadingDialog(context);
   }
 
-  // テンプレート判定
-  String template;
-  switch (selectedCompany) {
-    case 'T社': template = 't'; break;
-    case 'マスク処理なし': template = 'none'; break;
-    case '動的マスク処理': template = 'dynamic'; break;
-    default: if(context.mounted) _showErrorDialog(context, 'テンプレートエラー', '無効な会社名が選択されました。'); return null;
-  }
-
   if (!context.mounted) return null;
 
+  // Preview (確認) - 既にマスク済みのため 'none' を指定
   final MaskPreviewResult? previewResult = await Navigator.push<MaskPreviewResult>(
     context, MaterialPageRoute(builder: (_) => ProductListMaskPreviewPage(
       previewImageBytes: firstImageBytes,
-      maskTemplate: template,
+      maskTemplate: 'none', 
       imageIndex: 1,
-      // ★ 修正: ! を追加してNull安全に対応
-      totalImages: imageFilePaths!.length, 
+      totalImages: imageFilePaths!.length, // Null安全対応済み
     )),
   );
 
@@ -236,33 +306,25 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
 
   // 2枚目以降の処理
-  // ★ 修正: ! を追加してNull安全に対応
-  if (imageFilePaths!.length > 1) {
-    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths.length})');
+  if (imageFilePaths!.length > 1) { // Null安全対応済み
+    if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${imageFilePaths!.length})'); // Null安全対応済み
     try {
-      for (int i = 1; i < imageFilePaths.length; i++) {
+      for (int i = 1; i < imageFilePaths!.length; i++) { // Null安全対応済み
         if (!context.mounted) break;
         if(i > 1 && context.mounted) {
             Navigator.pop(context);
-           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${imageFilePaths.length})');
+           _showLoadingDialog(context, '画像を準備中... (${i + 1}/${imageFilePaths!.length})'); // Null安全対応済み
         }
 
-        final path = imageFilePaths[i];
+        final path = imageFilePaths![i]; // Null安全対応済み
         final file = File(path);
         final rawBytes = await file.readAsBytes();
         
+        // 処理済み画像をそのままロード
         final originalImage = img.decodeImage(rawBytes);
-        if (originalImage == null) continue;
-
-        img.Image maskedImage;
-        if (template == 't') {
-            maskedImage = applyMaskToImage(originalImage, template: 't'); 
-        } else if (template == 'dynamic' && dynamicMasks.isNotEmpty) {
-            maskedImage = applyMaskToImage(originalImage, template: 'dynamic', dynamicMaskRects: dynamicMasks); 
-        } else {
-            maskedImage = originalImage; 
+        if (originalImage != null) {
+           finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(originalImage, quality: 100)));
         }
-        finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(maskedImage, quality: 100)));
       }
     } finally {
        if (context.mounted) _hideLoadingDialog(context);
@@ -274,6 +336,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     return null;
   }
 
+  // --- Gemini送信 ---
   List<Map<String, dynamic>?> allAiRawResults = [];
   final String companyForGemini = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany;
 
@@ -322,7 +385,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
 }
 
 
-// ... (_processRawProductResultsGemini は変更なし)
 Future<List<List<String>>?> _processRawProductResultsGemini(
   BuildContext context,
   List<Map<String, dynamic>?> allAiRawResults,
