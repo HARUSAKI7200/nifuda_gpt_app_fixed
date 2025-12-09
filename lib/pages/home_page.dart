@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_logs/flutter_logs.dart';
+import 'package:simple_barcode_scanner/simple_barcode_scanner.dart'; // 追加
 import '../state/project_state.dart';
 import 'home_actions.dart';
 import '../widgets/custom_snackbar.dart';
@@ -12,7 +13,7 @@ import 'home_actions_gemini.dart';
 import 'project_load_dialog.dart';
 import '../database/app_database.dart';
 import 'smb_settings_page.dart';
-import 'directory_image_picker_page.dart'; // JSON読み込みに必要
+import 'directory_image_picker_page.dart';
 import 'package:drift/drift.dart' show Value;
 
 class HomePage extends ConsumerWidget {
@@ -54,9 +55,7 @@ class HomePage extends ConsumerWidget {
                 ),
             ],
           ),
-          // ★★★ 修正: SafeAreaでOSのUI（ノッチやホームバー）との重なりを回避 ★★★
           body: SafeArea(
-            // ★★★ 修正: LayoutBuilderで画面幅に応じたレイアウトを構築 ★★★
             child: LayoutBuilder(
               builder: (context, constraints) {
                 // 横幅が 600px 未満ならスマホレイアウト（縦並び）
@@ -77,7 +76,7 @@ class HomePage extends ConsumerWidget {
                     ),
                   );
                 } else {
-                  // タブレット以上: 左右2カラムレイアウト（既存のロジック）
+                  // タブレット以上: 左右2カラムレイアウト
                   return Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Row(
@@ -85,7 +84,7 @@ class HomePage extends ConsumerWidget {
                       children: [
                         // 左カラム (操作ボタン)
                         Expanded(
-                          flex: 4, // ボタンエリアの比率を調整
+                          flex: 4, 
                           child: SingleChildScrollView(
                             child: _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns),
                           ),
@@ -93,7 +92,7 @@ class HomePage extends ConsumerWidget {
                         const SizedBox(width: 24),
                         // 右カラム (プロジェクト情報)
                         Expanded(
-                          flex: 5, // 情報エリアの比率を調整
+                          flex: 5, 
                           child: Column(
                             children: [
                               _buildProjectInfoSection(projectState, notifier, isProjectActive, isLoading),
@@ -112,7 +111,6 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  // ★ 追加: プロジェクト情報部分を共通ウィジェットとして切り出し
   Widget _buildProjectInfoSection(
     ProjectState projectState,
     ProjectNotifier notifier,
@@ -129,7 +127,6 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  // 左カラムのUIを構築するメソッド
   Widget _buildLeftColumn(
     BuildContext context, 
     WidgetRef ref, 
@@ -374,7 +371,6 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  // 汎用的なアクションボタン
   Widget _buildActionButton({
     required String text,
     required IconData icon,
@@ -404,7 +400,6 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  // 汎用的なドロップダウン
   Widget _buildDropdownSelector({
     required String value,
     required List<String> items,
@@ -526,7 +521,6 @@ class HomePage extends ConsumerWidget {
                   ),
                   const SizedBox(height: 8),
                   Text('保存先パス: ${state.projectFolderPath ?? '---'}', style: const TextStyle(fontSize: 13, color: Colors.grey)),
-                  // JSON保存パスの表示を追加
                   if (state.jsonSavePath != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 4.0),
@@ -559,9 +553,39 @@ class HomePage extends ConsumerWidget {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // ★ 変更点: テキストフィールドにスキャンボタンを追加
               TextField(
                 controller: projectCodeController,
-                decoration: const InputDecoration(labelText: '依頼No (プロジェクトコード)'),
+                decoration: InputDecoration(
+                  labelText: '依頼No (プロジェクトコード)',
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.qr_code_scanner),
+                    onPressed: () async {
+                      // バーコードスキャン実行
+                      try {
+                        String? res = await SimpleBarcodeScanner.scanBarcode(
+                          context,
+                          barcodeAppBar: const BarcodeAppBar(
+                            appBarTitle: 'バーコードスキャン',
+                            centerTitle: false,
+                            enableBackButton: true,
+                            backButtonIcon: Icon(Icons.arrow_back_ios),
+                          ),
+                          isShowFlashIcon: true,
+                          delayMillis: 1000, 
+                          cameraFace: CameraFace.back,
+                        );
+                        
+                        if (res != null && res != '-1') {
+                          projectCodeController.text = res;
+                        }
+                      } catch (e) {
+                        debugPrint('Scan error: $e');
+                        // 必要ならエラー表示
+                      }
+                    },
+                  ),
+                ),
               ),
               const SizedBox(height: 16), 
               TextField(

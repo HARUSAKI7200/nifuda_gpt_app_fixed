@@ -17,7 +17,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:media_scanner/media_scanner.dart';
 import 'package:share_plus/share_plus.dart'; 
 import 'package:drift/drift.dart' show Value;
-import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart'; // 追加
+import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart'; 
 
 import '../utils/gpt_service.dart';
 import '../utils/product_matcher.dart';
@@ -36,7 +36,6 @@ import 'project_load_dialog.dart';
 import 'streaming_progress_dialog.dart';
 import '../utils/gemini_service.dart';
 import '../state/project_state.dart';
-// import 'document_scanner_page.dart'; // 削除: 不要になったため
 
 // --- Constants ---
 const String BASE_PROJECT_DIR = "/storage/emulated/0/DCIM/検品関係";
@@ -538,9 +537,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   }
 
   // 2. マスク処理 (バックグラウンドで実行)
-  // ML Kit Scannerで得られた画像は既に歪み補正・トリミング済み。
-  // ここではさらに「社名などの黒塗り」を行う。
-  
   if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
 
   List<String> processedImagePaths = [];
@@ -582,8 +578,9 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
       // 保存 (上書きせず別名保存)
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final savedPath = '${tempDir.path}/processed_scan_$i\_$timestamp.jpg';
-      await File(savedPath).writeAsBytes(img.encodeJpg(imageObj, quality: 100));
+      // ★ 修正: 保存形式をPNGに変更 (可逆圧縮で画質劣化を防ぐ)
+      final savedPath = '${tempDir.path}/processed_scan_$i\_$timestamp.png';
+      await File(savedPath).writeAsBytes(img.encodePng(imageObj));
       processedImagePaths.add(savedPath);
     }
   } catch (e, s) {
@@ -606,8 +603,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   unawaited(_saveScannedProductImages(context, projectFolderPath, processedImagePaths));
 
   // 4. プレビュー (1枚目のみ確認・手動修正用)
-  // 既に自動マスク済みなので、プレビュー画面には 'none' を渡して「適用済み画像」として表示させる
-  // ただし、ユーザーがさらに追加でマスクしたい場合もあるため、PreviewPageの機能は維持する
   
   if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
 
@@ -619,7 +614,10 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     // プレビュー用にデコード確認
     final originalImage = img.decodeImage(rawBytes);
     if (originalImage == null) throw Exception('画像のデコードに失敗');
-    firstImageBytes = Uint8List.fromList(img.encodeJpg(originalImage, quality: 100));
+    
+    // PNGならそのまま使用
+    firstImageBytes = rawBytes;
+
   } catch(e, s) {
     _logError('IMAGE_PROC', 'Preview Load Error', e, s);
     if (context.mounted) {
@@ -666,10 +664,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
         final file = File(path);
         final rawBytes = await file.readAsBytes();
         
-        final originalImage = img.decodeImage(rawBytes);
-        if (originalImage != null) {
-           finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(originalImage, quality: 100)));
-        }
+        // PNGバイトデータをそのままリストに追加 (再エンコードなし)
+        finalImagesToSend.add(rawBytes);
       }
     } finally {
        if (context.mounted) _hideLoadingDialog(context);

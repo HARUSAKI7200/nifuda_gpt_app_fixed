@@ -39,8 +39,11 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
   final List<img.Image> _undoStack = [];
   img.Image? _initialImageState;
   
-  // ★ 修正点: 動的マスクのRect情報を保持するリスト
+  // 動的マスクのRect情報を保持するリスト
   final List<Rect> _dynamicMaskRects = [];
+
+  // ★ 追加: 画像が変更されたかどうかのフラグ
+  bool _hasModified = false;
 
   @override
   void initState() {
@@ -56,6 +59,8 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       _initialImageState = img.Image.from(decodedImage); 
       _editableImage = decodedImage;
 
+      // テンプレート指定があれば初期状態で適用（これは自動変更なので_hasModifiedはfalseのままでよい、またはtrueにするか仕様次第）
+      // 今回は「ユーザーの手動変更」のみを検知して最適化するため、テンプレート適用は「初期状態」とみなす
       if (widget.maskTemplate == 't') {
         _editableImage = applyMaskToImage(_editableImage, template: 't');
       }
@@ -69,8 +74,8 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
 
   void _updateDisplayImage() {
     setState(() {
-      _displayImageBytes =
-          Uint8List.fromList(img.encodeJpg(_editableImage, quality: 80));
+      // ★ 修正: PNGエンコードに変更 (画質劣化なし)
+      _displayImageBytes = Uint8List.fromList(img.encodePng(_editableImage));
     });
   }
 
@@ -149,8 +154,11 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
       color: img.ColorRgb8(0, 0, 0),
     );
     
-    // ★ 修正点: 適用したRectをリストに追加 (後の画像にも適用するため)
+    // 適用したRectをリストに追加 (後の画像にも適用するため)
     _dynamicMaskRects.add(rectOnImage);
+
+    // ★ 修正: 変更フラグを立てる
+    _hasModified = true;
 
     setState(() {
       _currentDrawingRect = null;
@@ -162,18 +170,18 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
     if (_undoStack.isEmpty) return;
     setState(() {
       _editableImage = _undoStack.removeLast();
-      // ★ 修正点: Rectリストからも末尾を削除
       if(_dynamicMaskRects.isNotEmpty) {
         _dynamicMaskRects.removeLast();
       }
       _updateDisplayImage();
+      // Undoスタックが空になったら変更なし状態に戻す（簡易判定）
+      if (_undoStack.isEmpty) _hasModified = false;
     });
   }
 
   void _reset() {
     setState(() {
       _undoStack.clear();
-      // ★ 修正点: Rectリストをクリア
       _dynamicMaskRects.clear(); 
       if (_initialImageState != null) {
          _editableImage = img.Image.from(_initialImageState!);
@@ -182,12 +190,17 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
          }
       }
       _updateDisplayImage();
+      _hasModified = false;
     });
   }
 
   void _confirmAndPop() {
-    // ★ 修正点: 戻り値の型を変更
-    Navigator.pop(context, (imageBytes: _displayImageBytes, dynamicMasks: _dynamicMaskRects));
+    // ★ 修正: 変更がなければ、再エンコードせず元のバイトデータをそのまま返す（劣化ゼロ & 高速）
+    if (!_hasModified) {
+      Navigator.pop(context, (imageBytes: widget.previewImageBytes, dynamicMasks: _dynamicMaskRects));
+    } else {
+      Navigator.pop(context, (imageBytes: _displayImageBytes, dynamicMasks: _dynamicMaskRects));
+    }
   }
 
   Widget _buildEditor() {
@@ -260,7 +273,6 @@ class _ProductListMaskPreviewPageState extends State<ProductListMaskPreviewPage>
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.cancel_outlined),
                       label: const Text('この画像を破棄'),
-                      // ★ 修正点: 戻り値の型を変更 (nullを返す)
                       onPressed: () => Navigator.pop(context, null),
                       style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red[600],

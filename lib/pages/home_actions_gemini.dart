@@ -13,7 +13,7 @@ import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:media_scanner/media_scanner.dart';
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
-import 'package:path_provider/path_provider.dart'; // ★ 追加: これが抜けていました
+import 'package:path_provider/path_provider.dart';
 
 import '../utils/gemini_service.dart';
 import '../utils/ocr_masker.dart';
@@ -289,8 +289,9 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       }
 
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final savedPath = '${tempDir.path}/processed_scan_gemini_$i\_$timestamp.jpg';
-      await File(savedPath).writeAsBytes(img.encodeJpg(imageObj, quality: 100));
+      // ★ 修正: 保存形式をPNGに変更 (可逆圧縮で画質劣化を防ぐ)
+      final savedPath = '${tempDir.path}/processed_scan_gemini_$i\_$timestamp.png';
+      await File(savedPath).writeAsBytes(img.encodePng(imageObj));
       processedImagePaths.add(savedPath);
     }
   } catch (e, s) {
@@ -309,7 +310,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     return null;
   }
 
-  // 3. プロジェクトフォルダへ保存
+  // 3. プロジェクトフォルダへ保存 (PNGを保存)
   unawaited(_saveScannedProductImages(context, projectFolderPath, processedImagePaths));
 
   if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
@@ -321,9 +322,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     final file = File(path);
     final rawBytes = await file.readAsBytes();
     
-    final originalImage = img.decodeImage(rawBytes);
-    if (originalImage == null) throw Exception('画像のデコードに失敗');
-    firstImageBytes = Uint8List.fromList(img.encodeJpg(originalImage, quality: 100));
+    // PNGはそのまま読み込める
+    firstImageBytes = rawBytes;
 
   } catch (e, s) {
     _logError('IMAGE_PROC', 'Preview Load Error (Gemini)', e, s);
@@ -369,11 +369,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
         final path = processedImagePaths[i];
         final file = File(path);
         final rawBytes = await file.readAsBytes();
-        
-        final originalImage = img.decodeImage(rawBytes);
-        if (originalImage != null) {
-           finalImagesToSend.add(Uint8List.fromList(img.encodeJpg(originalImage, quality: 100)));
-        }
+        // PNGバイトデータをそのままリストに追加 (再エンコードなし)
+        finalImagesToSend.add(rawBytes);
       }
     } finally {
        if (context.mounted) _hideLoadingDialog(context);

@@ -30,6 +30,9 @@ class KeywordDetector {
     final List<Rect> detectedRedactionRects = [];
     bool hasText = false;
 
+    // ★ 追加機能: 特定キーワードより「上」を全て塗りつぶすためのトリガーワード
+    const String topMaskTriggerKeyword = '注文主';
+
     try {
       final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
 
@@ -44,12 +47,26 @@ class KeywordDetector {
 
         for (TextLine line in block.lines) {
           final String lineText = line.text;
-          // 黒塗りキーワード判定
+          
+          // 1. 通常のキーワード判定
           for (String keyword in targetKeywords) {
             if (lineText.contains(keyword)) {
               detectedRedactionRects.add(line.boundingBox);
               break; 
             }
+          }
+
+          // 2. 「注文主」より上を塗りつぶす特別ルール
+          // 「注文主」が含まれていたら、その行の上端(top)より上の領域全体をマスクに追加
+          if (lineText.contains(topMaskTriggerKeyword)) {
+            // 幅は十分に大きな値(100000)を指定しておけば、ocr_masker側で画像幅に合わせてカット(clamp)される
+            final Rect topAreaRect = Rect.fromLTRB(
+              0, 
+              0, 
+              100000, 
+              line.boundingBox.top // この行の上端まで
+            );
+            detectedRedactionRects.add(topAreaRect);
           }
         }
       }
