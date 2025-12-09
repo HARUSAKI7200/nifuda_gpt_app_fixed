@@ -25,6 +25,9 @@ dependencies:
   file_picker: ^10.3.2
   share_plus: ^7.0.2
 
+  # --- Barcode Scanner ---
+  simple_barcode_scanner: ^0.4.0
+
   # --- ML Kit Document Scanner ---
   google_mlkit_document_scanner: ^0.4.0
 
