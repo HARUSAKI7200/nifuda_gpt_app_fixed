@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_logs/flutter_logs.dart';
-import 'package:simple_barcode_scanner/simple_barcode_scanner.dart'; // 追加
+import 'package:simple_barcode_scanner/simple_barcode_scanner.dart'; 
 import '../state/project_state.dart';
 import 'home_actions.dart';
 import '../widgets/custom_snackbar.dart';
@@ -14,12 +14,13 @@ import 'project_load_dialog.dart';
 import '../database/app_database.dart';
 import 'smb_settings_page.dart';
 import 'directory_image_picker_page.dart';
+import 'mask_profile_edit_page.dart';
+import 'mask_profile_list_page.dart'; // ★ 追加
 import 'package:drift/drift.dart' show Value;
 
 class HomePage extends ConsumerWidget {
   HomePage({super.key});
 
-  // Case No.のドロップダウンリストアイテム
   final List<String> _caseNumbers = List.generate(50, (index) => '#${index + 1}');
 
   @override
@@ -32,16 +33,24 @@ class HomePage extends ConsumerWidget {
         padding: const EdgeInsets.all(16.0),
         child: Text('データベースエラーが発生しました: $err', style: const TextStyle(color: Colors.red)),
       ))),
-      data: (_) {
+      data: (dbInstance) {
         final projectState = ref.watch(projectProvider);
         final notifier = ref.read(projectProvider.notifier);
         final isProjectActive = projectState.currentProjectId != null || projectState.projectTitle.isNotEmpty;
         final isLoading = projectState.isLoading;
         
-        // T社と汎用のパターン
         final List<String> matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）'];
-        // マスク処理の選択肢
-        final List<String> maskOptions = ['T社', 'マスク処理なし', '動的マスク処理'];
+        
+        // ★ 修正: T社を削除し、削除メニューを追加
+        final List<String> fixedMaskOptions = ['マスク処理なし', '動的マスク処理'];
+        final List<String> customMaskOptions = projectState.maskProfiles.map((p) => p.profileName).toList();
+        final List<String> maskOptions = [
+          ...fixedMaskOptions, 
+          ...customMaskOptions, 
+          '-----------------', 
+          '+ 新規追加...',
+          '- 設定の削除...'
+        ];
 
         return Scaffold(
           appBar: AppBar(
@@ -58,39 +67,33 @@ class HomePage extends ConsumerWidget {
           body: SafeArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                // 横幅が 600px 未満ならスマホレイアウト（縦並び）
                 if (constraints.maxWidth < 600) {
                   return SingleChildScrollView(
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // スマホ: 先にプロジェクト情報を表示
                         _buildProjectInfoSection(projectState, notifier, isProjectActive, isLoading),
                         const SizedBox(height: 24),
                         const Divider(thickness: 2),
                         const SizedBox(height: 16),
-                        // その下に操作ボタン
-                        _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns),
+                        _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns, dbInstance),
                       ],
                     ),
                   );
                 } else {
-                  // タブレット以上: 左右2カラムレイアウト
                   return Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // 左カラム (操作ボタン)
                         Expanded(
                           flex: 4, 
                           child: SingleChildScrollView(
-                            child: _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns),
+                            child: _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns, dbInstance),
                           ),
                         ),
                         const SizedBox(width: 24),
-                        // 右カラム (プロジェクト情報)
                         Expanded(
                           flex: 5, 
                           child: Column(
@@ -136,8 +139,8 @@ class HomePage extends ConsumerWidget {
     bool isLoading,
     List<String> maskOptions,
     List<String> matchingPatterns,
+    AppDatabase db,
   ) {
-    // データ件数
     final nifudaDataCount = state.nifudaData.length - (state.nifudaData.isNotEmpty ? 1 : 0);
     final productDataCount = state.productListKariData.length - (state.productListKariData.isNotEmpty ? 1 : 0);
     final hasNifudaData = nifudaDataCount > 0;
@@ -145,7 +148,6 @@ class HomePage extends ConsumerWidget {
 
     return Column(
       children: [
-        // 1. 新規作成
         _buildActionButton(
           text: '新規作成',
           icon: Icons.add,
@@ -153,7 +155,6 @@ class HomePage extends ConsumerWidget {
           onPressed: isLoading ? null : () => _showCreateProjectDialog(context, notifier),
         ),
         
-        // 2. 保存 / 読み込み
         Row(
           children: [
             Expanded(
@@ -201,7 +202,6 @@ class HomePage extends ConsumerWidget {
         
         const Divider(height: 24, thickness: 1),
 
-        // 3. 荷札 (GPT)
         _buildActionButton(
           text: '荷札を撮影して抽出 (GPT)',
           icon: Icons.camera_alt,
@@ -223,7 +223,6 @@ class HomePage extends ConsumerWidget {
           },
         ),
         
-        // 4. 荷札 (Gemini)
         _buildActionButton(
           text: '荷札を撮影して抽出 (Gemini)',
           icon: Icons.camera_alt_outlined,
@@ -245,7 +244,6 @@ class HomePage extends ConsumerWidget {
           },
         ),
         
-        // 5. 荷札リスト
         _buildActionButton(
           text: '荷札リスト (全体: $nifudaDataCount 件)',
           icon: Icons.list,
@@ -264,14 +262,35 @@ class HomePage extends ConsumerWidget {
 
         // 6. マスク処理 (ドロップダウン)
         _buildDropdownSelector(
-          value: state.selectedCompany,
+          // 選択値がリストにない場合(削除された等)はデフォルトへ
+          value: maskOptions.contains(state.selectedCompany) ? state.selectedCompany : 'マスク処理なし',
           items: maskOptions,
           prefix: 'マスク処理:',
-          onChanged: isLoading ? null : (String? newValue) => notifier.updateSelection(company: newValue),
+          onChanged: isLoading ? null : (String? newValue) async {
+            if (newValue == null || newValue == '-----------------') return;
+
+            if (newValue == '+ 新規追加...') {
+              final result = await Navigator.push(
+                context, 
+                MaterialPageRoute(builder: (_) => const MaskProfileEditPage())
+              );
+              if (result == true) {
+                await notifier.loadMaskProfiles();
+              }
+            } else if (newValue == '- 設定の削除...') {
+              // ★ 追加: 削除画面へ遷移
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MaskProfileListPage())
+              );
+              await notifier.loadMaskProfiles(); // 戻ってきたらリスト更新
+            } else {
+              notifier.updateSelection(company: newValue);
+            }
+          },
           color: Colors.indigo,
         ),
 
-        // 7. 製品リスト (GPT)
         _buildActionButton(
           text: '製品リストを撮影して抽出 (GPT)',
           icon: Icons.scanner,
@@ -287,6 +306,7 @@ class HomePage extends ConsumerWidget {
                 state.selectedCompany,
                 notifier.setLoading,
                 state.projectFolderPath!,
+                db,
              );
              if (newRows != null && newRows.isNotEmpty) {
                  await notifier.addProductListRows(newRows);
@@ -294,7 +314,6 @@ class HomePage extends ConsumerWidget {
           },
         ),
         
-        // 8. 製品リスト (Gemini)
         _buildActionButton(
           text: '製品リストを撮影して抽出 (Gemini)',
           icon: Icons.scanner_outlined,
@@ -310,6 +329,7 @@ class HomePage extends ConsumerWidget {
                 state.selectedCompany,
                 notifier.setLoading,
                 state.projectFolderPath!,
+                db,
              );
              if (newRows != null && newRows.isNotEmpty) {
                  await notifier.addProductListRows(newRows);
@@ -317,7 +337,6 @@ class HomePage extends ConsumerWidget {
           },
         ),
 
-        // 9. 製品リスト
         _buildActionButton(
           text: '製品リスト ($productDataCount 件)',
           icon: Icons.list_alt,
@@ -332,7 +351,7 @@ class HomePage extends ConsumerWidget {
         
         const Divider(height: 24, thickness: 1),
 
-        // 10. 照合パターン (ドロップダウン)
+        // 10. 照合パターン
         _buildDropdownSelector(
           value: state.selectedMatchingPattern,
           items: matchingPatterns,
@@ -341,7 +360,6 @@ class HomePage extends ConsumerWidget {
           color: Colors.green,
         ),
         
-        // 11. 照合を開始する
         _buildActionButton(
           text: '照合を開始する (${state.currentCaseNumber})',
           icon: Icons.rule,
@@ -420,11 +438,20 @@ class HomePage extends ConsumerWidget {
         child: DropdownButton<String>(
           value: value,
           items: items.map((String item) {
+            // 区切り線や特別メニューのスタイル調整
+            final isSpecial = item.startsWith('+') || item.startsWith('-');
+            final isDivider = item.startsWith('---');
+            
             return DropdownMenuItem<String>(
               value: item,
+              enabled: !isDivider,
               child: Text(
-                '$prefix $item',
-                style: TextStyle(color: color[800], fontWeight: FontWeight.w600, fontSize: 14.5),
+                isSpecial || isDivider ? item : '$prefix $item',
+                style: TextStyle(
+                  color: isSpecial ? Colors.blue[800] : (isDivider ? Colors.grey : color[800]), 
+                  fontWeight: isSpecial ? FontWeight.bold : FontWeight.w600, 
+                  fontSize: 14.5
+                ),
                 overflow: TextOverflow.ellipsis,
               )
             );
@@ -467,7 +494,6 @@ class HomePage extends ConsumerWidget {
       ),
     );
   }
-
 
   Widget _buildProjectInfoCard(ProjectState state, bool isLoading) {
     return Card(
@@ -553,7 +579,6 @@ class HomePage extends ConsumerWidget {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // ★ 変更点: テキストフィールドにスキャンボタンを追加
               TextField(
                 controller: projectCodeController,
                 decoration: InputDecoration(
@@ -561,7 +586,6 @@ class HomePage extends ConsumerWidget {
                   suffixIcon: IconButton(
                     icon: const Icon(Icons.qr_code_scanner),
                     onPressed: () async {
-                      // バーコードスキャン実行
                       try {
                         String? res = await SimpleBarcodeScanner.scanBarcode(
                           context,
@@ -581,7 +605,6 @@ class HomePage extends ConsumerWidget {
                         }
                       } catch (e) {
                         debugPrint('Scan error: $e');
-                        // 必要ならエラー表示
                       }
                     },
                   ),

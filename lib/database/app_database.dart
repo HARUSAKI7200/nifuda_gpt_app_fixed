@@ -1,63 +1,27 @@
 // lib/database/app_database.dart
 import 'dart:io';
+import 'dart:convert'; // JSON変換用
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+// ★ 修正: FlutterのRectを使うため dart:ui が必要だが、Driftファイル内では通常使わない。
+// JSON変換はStringとして扱うのでここではインポート不要。
 
+part '../models/app_collections.dart'; // ★ここを修正
 part 'app_database.g.dart';
-
-// --- テーブル定義 ---
-
-@DataClassName('Project')
-class Projects extends Table {
-  IntColumn get id => integer().autoIncrement()();
-  TextColumn get projectCode => text().unique()();
-  TextColumn get projectTitle => text()();
-  TextColumn get inspectionStatus => text()();
-  TextColumn get projectFolderPath => text()();
-}
-
-@DataClassName('NifudaRow')
-class NifudaRows extends Table {
-  IntColumn get id => integer().autoIncrement()();
-  IntColumn get projectId => integer().references(Projects, #id)();
-  TextColumn get seiban => text()();
-  TextColumn get itemNumber => text()();
-  TextColumn get productName => text()();
-  TextColumn get form => text()();
-  TextColumn get quantity => text()();
-  TextColumn get documentNumber => text()();
-  TextColumn get remarks => text()();
-  TextColumn get arrangementCode => text()();
-  // ★ 追加: Case No.
-  TextColumn get caseNumber => text()();
-}
-
-@DataClassName('ProductListRow')
-class ProductListRows extends Table {
-  IntColumn get id => integer().autoIncrement()();
-  IntColumn get projectId => integer().references(Projects, #id)();
-  TextColumn get orderNo => text()();
-  TextColumn get itemOfSpare => text()();
-  TextColumn get productSymbol => text()();
-  TextColumn get formSpec => text()();
-  TextColumn get productCode => text()();
-  TextColumn get orderQuantity => text()();
-  TextColumn get article => text()();
-  TextColumn get note => text()();
-  // ★ 追加: 照合済Case (Null許容)
-  TextColumn get matchedCase => text().nullable()();
-}
 
 // --- データベースクラス ---
 
-@DriftDatabase(tables: [Projects, NifudaRows, ProductListRows], daos: [ProjectsDao, NifudaRowsDao, ProductListRowsDao])
+@DriftDatabase(
+  tables: [Projects, NifudaRows, ProductListRows, MaskProfiles], // ★ MaskProfilesを追加
+  daos: [ProjectsDao, NifudaRowsDao, ProductListRowsDao, MaskProfilesDao], // ★ MaskProfilesDaoを追加
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 2; // ★ スキーマバージョンを 2 に変更
+  int get schemaVersion => 3; // ★ スキーマバージョンを 3 に変更
 
   @override
   MigrationStrategy get migration {
@@ -67,11 +31,13 @@ class AppDatabase extends _$AppDatabase {
       },
       onUpgrade: (Migrator m, int from, int to) async {
         if (from < 2) {
-          // ★ 修正: addColumnの引数を修正 (テーブルインスタンスとカラム定義)
           await m.addColumn(nifudaRows, nifudaRows.caseNumber);
           await m.addColumn(productListRows, productListRows.matchedCase);
         }
-        // 今後のバージョンのマイグレーションはここに追加
+        if (from < 3) {
+          // ★ バージョン3への更新: MaskProfilesテーブル作成
+          await m.createTable(maskProfiles);
+        }
       },
     );
   }
@@ -85,17 +51,14 @@ LazyDatabase _openConnection() {
   });
 }
 
-
-// --- DAO (Data Access Object) ---
+// --- DAO ---
 
 @DriftAccessor(tables: [Projects])
 class ProjectsDao extends DatabaseAccessor<AppDatabase> with _$ProjectsDaoMixin {
   ProjectsDao(AppDatabase db) : super(db);
 
-  // ★ 修正: 戻り値を Future<Project> に変更し、挿入/更新後に取得
   Future<Project> upsertProject(ProjectsCompanion entry) async {
     final id = await into(projects).insertOnConflictUpdate(entry);
-    // 挿入/更新された行を取得して返す
     return await (select(projects)..where((p) => p.id.equals(id))).getSingle();
   }
 
@@ -110,7 +73,6 @@ class NifudaRowsDao extends DatabaseAccessor<AppDatabase> with _$NifudaRowsDaoMi
 
   Future<void> batchInsertNifudaRows(List<NifudaRowsCompanion> entries) {
     return batch((b) {
-      // ★ 修正: Replaced -> InsertMode
       b.insertAll(nifudaRows, entries, mode: InsertMode.insertOrReplace);
     });
   }
@@ -119,14 +81,12 @@ class NifudaRowsDao extends DatabaseAccessor<AppDatabase> with _$NifudaRowsDaoMi
     return (select(nifudaRows)..where((t) => t.projectId.equals(projectId))).get();
   }
 
-  // 特定のCase No.の荷札データを取得
   Future<List<NifudaRow>> getNifudaRowsByCase(int projectId, String caseNumber) {
     return (select(nifudaRows)
            ..where((t) => t.projectId.equals(projectId))
            ..where((t) => t.caseNumber.equals(caseNumber))).get();
   }
 
-  // 特定のCase No.の荷札データを削除
   Future<int> deleteNifudaRowsByCase(int projectId, String caseNumber) {
     return (delete(nifudaRows)
            ..where((t) => t.projectId.equals(projectId))
@@ -140,7 +100,6 @@ class ProductListRowsDao extends DatabaseAccessor<AppDatabase> with _$ProductLis
 
   Future<void> batchInsertProductListRows(List<ProductListRowsCompanion> entries) {
     return batch((b) {
-      // ★ 修正: Replaced -> InsertMode
       b.insertAll(productListRows, entries, mode: InsertMode.insertOrReplace);
     });
   }
@@ -149,15 +108,35 @@ class ProductListRowsDao extends DatabaseAccessor<AppDatabase> with _$ProductLis
     return (select(productListRows)..where((t) => t.projectId.equals(projectId))).get();
   }
 
-  // 製品リストの照合済みCase No.を更新
   Future<int> updateMatchedCase(int rowId, String caseNumber) {
     return (update(productListRows)..where((t) => t.id.equals(rowId)))
            .write(ProductListRowsCompanion(matchedCase: Value(caseNumber)));
   }
 
-  // 製品リストの照合済みCase No.をクリア
   Future<int> clearMatchedCase(int rowId) {
     return (update(productListRows)..where((t) => t.id.equals(rowId)))
            .write(const ProductListRowsCompanion(matchedCase: Value(null)));
   }
+}
+
+// ★ 追加: MaskProfilesDao
+@DriftAccessor(tables: [MaskProfiles])
+class MaskProfilesDao extends DatabaseAccessor<AppDatabase> with _$MaskProfilesDaoMixin {
+  MaskProfilesDao(AppDatabase db) : super(db);
+
+  Future<List<MaskProfile>> getAllProfiles() => select(maskProfiles).get();
+  
+  Future<MaskProfile?> getProfileByName(String name) {
+    return (select(maskProfiles)..where((t) => t.profileName.equals(name))).getSingleOrNull();
+  }
+
+  // RectのリストをJSON文字列として保存 ("left,top,width,height" のリスト)
+  Future<int> insertProfile(String name, List<String> rectsData) {
+    return into(maskProfiles).insert(MaskProfilesCompanion.insert(
+      profileName: name,
+      rectsJson: jsonEncode(rectsData),
+    ));
+  }
+  
+  Future<int> deleteProfile(int id) => (delete(maskProfiles)..where((t) => t.id.equals(id))).go();
 }

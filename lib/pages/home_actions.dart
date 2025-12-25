@@ -36,6 +36,7 @@ import 'project_load_dialog.dart';
 import 'streaming_progress_dialog.dart';
 import '../utils/gemini_service.dart';
 import '../state/project_state.dart';
+import '../database/app_database.dart'; 
 
 // --- Constants ---
 const String BASE_PROJECT_DIR = "/storage/emulated/0/DCIM/検品関係";
@@ -503,12 +504,13 @@ void showAndExportNifudaListAction(
   );
 }
 
-// ★★★ captureProcessAndConfirmProductListAction (ML Kit Document Scanner版) ★★★
+// ★★★ captureProcessAndConfirmProductListAction (修正: AppDatabaseを受け取る) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
   String projectFolderPath,
+  AppDatabase db, // ★ DBインスタンス
 ) async {
   List<String> imageFilePaths = [];
   
@@ -551,6 +553,26 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       'TMEIC', '東芝三菱電機産業システム',
     ];
 
+    // ★ 追加: DBからカスタムマスク設定を読み込む
+    List<Rect> customRelativeRects = [];
+    if (selectedCompany != 'マスク処理なし' && selectedCompany != '動的マスク処理') {
+      try {
+        final profile = await db.maskProfilesDao.getProfileByName(selectedCompany);
+        if (profile != null) {
+          final List<dynamic> list = jsonDecode(profile.rectsJson);
+          customRelativeRects = list.map((s) {
+            final parts = s.toString().split(',');
+            return Rect.fromLTWH(
+              double.parse(parts[0]), double.parse(parts[1]), 
+              double.parse(parts[2]), double.parse(parts[3])
+            );
+          }).toList();
+        }
+      } catch (e) {
+        if (kDebugMode) print('Mask profile load error: $e');
+      }
+    }
+
     for (int i = 0; i < imageFilePaths.length; i++) {
       final originalPath = imageFilePaths[i];
       final originalFile = File(originalPath);
@@ -559,21 +581,18 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       img.Image? imageObj = img.decodeImage(rawBytes);
       if (imageObj == null) continue; // スキップ
 
-      // テンプレート判定
       String internalTemplateName = 'none';
-      if (selectedCompany == 'T社') internalTemplateName = 't';
-      else if (selectedCompany == '動的マスク処理') internalTemplateName = 'dynamic';
+      if (selectedCompany == '動的マスク処理') internalTemplateName = 'dynamic';
 
-      // マスク適用
-      if (internalTemplateName == 't') {
-        // T社定型マスク
-        imageObj = applyMaskToImage(imageObj, template: 't');
-      } else if (internalTemplateName == 'dynamic') {
+      if (internalTemplateName == 'dynamic') {
         // 動的マスク (ML Kitでキーワード検出 -> マスク)
         final rects = await KeywordDetector.detectKeywords(originalPath, redactionKeywords);
         if (rects.isNotEmpty) {
            imageObj = applyMaskToImage(imageObj, template: 'dynamic', dynamicMaskRects: rects);
         }
+      } else if (customRelativeRects.isNotEmpty) {
+        // ★ 追加: カスタムマスク適用
+        imageObj = applyMaskToImage(imageObj, relativeMaskRects: customRelativeRects);
       }
 
       // 保存 (上書きせず別名保存)
@@ -679,7 +698,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   // 5. GPT送信 & OCR解析
   List<Map<String, dynamic>?> allAiRawResults = [];
-  final String companyForGpt = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany;
+  final String companyForGpt = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany; // T社が削除されても、もしカスタム名がT社ならこれで動く
 
   for (int i = 0; i < finalImagesToSend.length; i++) {
       if (!context.mounted) break;
@@ -733,7 +752,8 @@ Future<List<List<String>>?> _processRawProductResults(
   List<Map<String, String>> allExtractedProductRows = [];
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
 
-  final bool isTCompany = (selectedCompany == 'T社');
+  // selectedCompanyが'T社'（今は削除済みだがカスタムで登録される可能性あり）または'TMEIC'を含むか
+  final bool isTCompany = selectedCompany.contains('T社') || selectedCompany.contains('TMEIC');
 
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {

@@ -1,21 +1,22 @@
 // lib/utils/gpt_service.dart
 //
 // 修正方針：
-// - ★★★ 修正: GPTモデルを「gpt-5-mini」に戻す ★★★
+// - ★★★ 修正: GPTモデルを「gpt-5.2」に変更 ★★★
 // - 荷札抽出時のフォールバックロジックを削除。
-// - gpt-5(-mini) が "temperature: 0.0" に非対応なため、temperatureの指定自体を削除 (維持)
+// - gpt-5.2 が "temperature: 0.0" に非対応なため、temperatureの指定自体を削除 (維持)
 // - SDKのChatCompletionResponseFormatエラーをResponseFormat(type: ResponseFormatType.jsonObject)に修正。
 // - ストリーミング応答のNull安全性を強化。
 // - 欠落していた `package:flutter/foundation.dart` のインポートを追加。
-// ★ TMEIC社のプロンプトを「commonOrderNoは左側のみ」「productsは備考(NOTE)」に修正。
-// ★ T社以外のプロンプトを「備考(REMARKS)」を使用するよう修正。
+// - ★ プロンプトレジストリを使用し、引数を company から promptId に変更。
 
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart'; // ★ 修正: インポートを追加
+import 'package:flutter/foundation.dart';
 import 'package:flutter_logs/flutter_logs.dart';
 import 'package:http/http.dart' as http;
 import 'package:openai_dart/openai_dart.dart';
+
+import 'prompt_definitions.dart'; // ★追加: プロンプト定義をインポート
 
 // --- Local Helper Functions (Duplicated for consistency) ---
 
@@ -95,93 +96,6 @@ String _buildNifudaPrompt() {
 ''';
 }
 
-// 製品リスト（Product List）抽出プロンプト (重複)
-// ★★★ 修正: ユーザー指示に基づきプロンプトを修正 ★★★
-String _buildProductListPrompt(String company) {
-  // ★ TMEIC (T社) の場合: 「備考(NOTE)」を要求
-  final fieldsForPrompt = (company == 'TMEIC')
-      ? '["ITEM OF SPARE", "品名記号", "形格", "製品コード番号", "注文数", "記事", "備考(NOTE)"]'
-  // ★ T社以外の場合: 「備考(REMARKS)」を要求 (枝番のため)
-      : '["品名記号", "形格", "製品コード番号", "数量", "備考(REMARKS)"]';
-
-  // ★ TMEIC (T社) のプロンプト
-  if (company == 'TMEIC') {
-    return '''
-あなたは「TMEIC」の製品リスト（T社帳票）を完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
-
-### 思考プロセス
-1.  **役割認識:** あなたは単なるOCRエンジンではありません。細部まで見逃さない、熟練のデジタルアーキビストです。
-2.  **一文字ずつの検証:** 「製品コード番号」などの文字列を読み取る際は、決して単語や文脈で推測せず、一文字ずつ丁寧になぞり、形状を特定します。
-3.  **類似文字の徹底的な判別:** (O/0, Q/0, 1/l, S/5, B/8, かっこ類...)
-    - `Q` と `0`: 最重要項目です。`Q`には必ず右下に短い棒（セリフやテール）があります。この棒が少しでも視認できる場合は、絶対に`Q`と判断してください。
-
-### 抽出項目
-1.  **commonOrderNo**: 画像の**左上、テーブルの外**にある共通の番号（例: `QZ83941 FEV2385` や `7LJ5321 5605566`）のうち、**スペースの左側だけ**（例: `QZ83941` や `7LJ5321`）を一つだけ抽出します。
-2.  **products**: 製品リストの各行から以下の項目を抽出します。
-    - 項目が存在しない、または物理的に完全に読み取れない場合のみ、値を空文字列 `""` としてください。
-    - **「備考(NOTE)」** 列（例: `FEV2385` や `5605566`）の値を正確に抽出してください。
-    - 対象項目リスト（各行ごと）：
-      $fieldsForPrompt
-
-### 出力形式 (JSON)
-出力は必ずJSON形式に従ってください。
-"commonOrderNo"には抽出した **左上の共通番号（スペースの左側のみ）** を、"products"には各行の情報を配列として格納してください。
-
-例:
-{
-  "commonOrderNo": "QZ83941",
-  "products": [
-    {
-      "ITEM OF SPARE": "021",
-      "品名記号": "PWB-PL",
-      "形格": "ARND-4334A (X10)",
-      "製品コード番号": "4KAF4334G001",
-      "注文数": "2",
-      "記事": "PRINTED WIRING BOARD (Soft No. PSS)",
-      "備考(NOTE)": "FEV2385" 
-    }
-  ]
-}
-''';
-  }
-
-  // ★ TMEIC社以外のプロンプト
-  return '''
-あなたは「$company」の製品リストを完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
-
-### 思考プロセス
-1.  **役割認識:** あなたは単なるOCRエンジンではありません。細部まで見逃さない、熟練のデジタルアーキビストです。
-2.  **一文字ずつの検証:** 「製品コード番号」などの文字列を読み取る際は、決して単語や文脈で推測せず、一文字ずつ丁寧になぞり、形状を特定します。
-3.  **類似文字の徹底的な判別:** (O/0, Q/0, 1/l, S/5, B/8, かっこ類...)
-    - `Q` と `0`: 最重要項目です。`Q`には必ず右下に短い棒（セリフやテール）があります。この棒が少しでも視認できる場合は、絶対に`Q`と判断してください。
-
-### 抽出項目
-1.  **commonOrderNo**: 画像の**右上、テーブルの外**にある共通の注文番号プレフィックス（例: `T-12345-` や `S-98765-`）を一つだけ抽出します。枝番（例: -01）の**直前のハイフンまで**を含めてください。
-2.  **products**: 製品リストの各行から以下の項目を抽出します。
-    - 項目が存在しない、または物理的に完全に読み取れない場合のみ、値を空文字列 `""` としてください。
-    - **「備考(REMARKS)」** 列は、枝番（例: `01`）が記載されている場合、その枝番の数字を抽出してください。
-    - 対象項目リスト（各行ごと）：
-      $fieldsForPrompt
-
-### 出力形式 (JSON)
-出力は必ずJSON形式に従ってください。
-"commonOrderNo"には抽出した **右上の共通プレフィックスのみ** を、"products"には各行の情報を配列として格納してください。
-例:
-{
-  "commonOrderNo": "T-12345-",
-  "products": [
-    {
-      "品名記号": "...",
-      "形格": "...",
-      "製品コード番号": "...",
-      "数量": "1",
-      "備考(REMARKS)": "01"
-    }
-  ]
-}
-''';
-}
-
 
 /// OpenAI APIキーを --dart-define から取得
 const openAIApiKey = String.fromEnvironment('OPENAI_API_KEY');
@@ -199,28 +113,23 @@ Future<CreateChatCompletionResponse> _openAICreateVisionChat({
     request: CreateChatCompletionRequest(
       model: model,
       messages: [
-        // system ロール：ここは String を直接渡せる
         ChatCompletionMessage.system(
           content:
               'あなたはデータ入力の超専門家です。応答は必ず純粋なJSON（プレーンテキストのJSONオブジェクトのみ、前後の説明文やコードフェンス禁止）で出力してください。',
         ),
-        // user: テキスト + 画像（data URL）を parts で送信
         ChatCompletionMessage.user(
           content: ChatCompletionUserMessageContent.parts([
             ChatCompletionMessageContentPart.text(text: prompt),
             ChatCompletionMessageContentPart.image(
               imageUrl: ChatCompletionMessageImageUrl(
-                url: dataUrl, // ← data: スキームを渡す
+                url: dataUrl,
                 detail: ChatCompletionMessageImageDetail.high,
               ),
             ),
           ]),
         ),
       ],
-      // ★ 修正: temperature: 0.0 を削除
-      // ★ ログに基づき、gpt-5(-mini) は temperature: 1 (デフォルト) のみをサポート
-      // temperature: 0.0,
-      // ★ 正式：JSONモードを指定（factory）
+      // ★ 修正: temperature: 0.0 を削除 (gpt-5.2 対応)
       responseFormat: ResponseFormat.jsonObject(),
     ),
   );
@@ -252,10 +161,7 @@ Stream<CreateChatCompletionStreamResponse> _openAICreateVisionChatStream({
           ]),
         ),
       ],
-      // ★ 修正: temperature: 0.0 を削除
-      // ★ ログに基づき、gpt-5(-mini) は temperature: 1 (デフォルト) のみをサポート
-      // temperature: 0.0,
-      // ★ 正式：JSONモードを指定（factory）
+      // ★ 修正: temperature: 0.0 を削除 (gpt-5.2 対応)
       responseFormat: ResponseFormat.jsonObject(),
     ),
   );
@@ -266,21 +172,22 @@ Stream<CreateChatCompletionStreamResponse> _openAICreateVisionChatStream({
 Future<Map<String, dynamic>?> sendImageToGPT(
   Uint8List imageBytes, {
   required bool isProductList,
-  required String company,
-  http.Client? client, // 未使用だが削除禁止（互換性維持）
+  // ★ company 引数を削除し、後方互換のために残す場合は無視するか、promptId を使用するように呼び出し元を変更
+  // ここでは呼び出し元の修正を前提に promptId を受け取るように変更したいが、
+  // 既存インターフェースを維持しつつ promptId オプションを追加する
+  String? promptId, 
+  String company = '', // Deprecated: use promptId instead
+  http.Client? client, 
 }) async {
   // APIキーの検証
   if (openAIApiKey.isEmpty) {
     FlutterLogs.logThis(
       tag: 'GPT_SERVICE',
       subTag: 'API_KEY_MISSING',
-      logMessage:
-          'OpenAI APIキーが設定されていません。',
+      logMessage: 'OpenAI APIキーが設定されていません。',
       level: LogLevel.SEVERE,
     );
-    throw Exception(
-      'OpenAI APIキーが設定されていません。',
-    );
+    throw Exception('OpenAI APIキーが設定されていません。');
   }
 
   // 製品リストの場合はストリーミング専用関数へ委譲 (ここでは非ストリーミング関数として実装を維持)
@@ -288,27 +195,27 @@ Future<Map<String, dynamic>?> sendImageToGPT(
     if (kDebugMode) print('Warning: Product List extraction should use sendImageToGPTStream.');
   }
 
-
   final mime = _guessMimeType(imageBytes);
   final String base64Image = base64Encode(imageBytes);
   final String dataUrl = 'data:$mime;base64,$base64Image';
 
-  // ★★★ 修正: モデルを gpt-5-mini に変更 ★★★
-  ChatCompletionModel primaryModel = ChatCompletionModel.modelId('gpt-5-mini');
+  // ★★★ 修正: モデルを gpt-5.2 に変更 ★★★
+  ChatCompletionModel primaryModel = ChatCompletionModel.modelId('gpt-5.2');
   
-  // プロンプト（既存内容は変更しない）
+  // プロンプト
+  // 荷札の場合は固定、製品リストの場合は isProductList フラグで判断（この関数は主に荷札用）
   final String prompt = _buildNifudaPrompt();
 
   FlutterLogs.logInfo(
     'GPT_SERVICE',
     'REQUEST_SENT',
-    'Sending image to GPT (gpt-5-mini) for Nifuda', // ★ 修正
+    'Sending image to GPT (gpt-5.2) for Nifuda',
   );
 
   try {
     CreateChatCompletionResponse response;
 
-    // -------- gpt-5-mini で送信 (★ 修正: フォールバックなし) --------
+    // -------- gpt-5.2 で送信 --------
     try {
       response = await _openAICreateVisionChat(
         model: primaryModel,
@@ -316,26 +223,23 @@ Future<Map<String, dynamic>?> sendImageToGPT(
         dataUrl: dataUrl,
       );
     } on OpenAIClientException catch (e, s) {
-      // ★ 修正: フォールバックロジックを削除し、エラーログと再スローに変更
       final String msg = e.message ?? e.toString();
       FlutterLogs.logThis(
         tag: 'GPT_SERVICE',
         subTag: 'PRIMARY_REQUEST_FAILED',
-        logMessage: 'gpt-5-mini failed: $msg\n$s', // ★ 修正
+        logMessage: 'gpt-5.2 failed: $msg\n$s',
         exception: Exception(msg),
         level: LogLevel.WARNING,
       );
-      rethrow; // ★ 修正: 失敗したらそのままエラーを投げる
+      rethrow;
     }
 
-    // 応答本文の抽出（通常は String）
     final dynamic rawContent = response.choices.first.message.content;
 
     String? contentString;
     if (rawContent is String) {
       contentString = rawContent;
     } else {
-      // 型付きの場合のフォールバック（基本はString想定）
       contentString = rawContent?.toString();
     }
 
@@ -349,10 +253,8 @@ Future<Map<String, dynamic>?> sendImageToGPT(
       return null;
     }
 
-    // 念のためコードフェンス除去（```json ... ``` → 素のJSON）
     contentString = _stripCodeFences(contentString).trim();
 
-    // JSONにパース
     try {
       if (kDebugMode) {
         // ignore: avoid_print
@@ -387,7 +289,6 @@ Future<Map<String, dynamic>?> sendImageToGPT(
       return null;
     }
   } on OpenAIClientException catch (e, s) {
-    // HTTP例外
     FlutterLogs.logThis(
       tag: 'GPT_SERVICE',
       subTag: 'API_REQUEST_FAILED',
@@ -413,7 +314,8 @@ Future<Map<String, dynamic>?> sendImageToGPT(
 /// 製品リスト抽出用のストリーミング関数
 Stream<String> sendImageToGPTStream(
   Uint8List imageBytes, {
-  required String company,
+  // ★ 引数変更: company を promptId に置き換え
+  required String promptId,
 }) async* {
   if (openAIApiKey.isEmpty) {
     FlutterLogs.logThis(tag: 'GPT_SERVICE', subTag: 'API_KEY_MISSING', logMessage: 'OpenAI APIキーが設定されていません。', level: LogLevel.SEVERE);
@@ -424,15 +326,17 @@ Stream<String> sendImageToGPTStream(
   final String base64Image = base64Encode(imageBytes);
   final String dataUrl = 'data:$mime;base64,$base64Image';
   
-  // ★★★ 修正: モデルを gpt-5-mini に変更 ★★★
-  final ChatCompletionModel visionModel = ChatCompletionModel.modelId('gpt-5-mini');
-  // ★ 修正されたプロンプトを使用
-  final String prompt = _buildProductListPrompt(company);
+  // ★★★ 修正: モデルを gpt-5.2 に変更 ★★★
+  final ChatCompletionModel visionModel = ChatCompletionModel.modelId('gpt-5.2');
+  
+  // ★ 修正: PromptRegistry からプロンプトを取得
+  final definition = PromptRegistry.getById(promptId);
+  final String prompt = definition.systemPrompt;
 
   FlutterLogs.logInfo(
     'GPT_SERVICE',
     'STREAM_REQUEST_SENT',
-    'Sending image to GPT Stream (gpt-5-mini) for Product List', // ★ 修正
+    'Sending image to GPT Stream (gpt-5.2) for Product List using prompt: ${definition.label}',
   );
 
   try {
@@ -443,10 +347,9 @@ Stream<String> sendImageToGPTStream(
     );
 
     await for (final chunk in responseStream) {
-      // ★ 修正: choicesとdeltaのNull安全チェックを追加
       final content = chunk.choices?.first.delta?.content;
       if (content != null) {
-        yield content; // テキストチャンクをそのまま流す
+        yield content; 
       }
     }
   } on OpenAIClientException catch (e, s) {

@@ -339,10 +339,7 @@ class $NifudaRowsTable extends NifudaRows
   @override
   late final GeneratedColumn<int> projectId = GeneratedColumn<int>(
       'project_id', aliasedName, false,
-      type: DriftSqlType.int,
-      requiredDuringInsert: true,
-      defaultConstraints:
-          GeneratedColumn.constraintIsAlways('REFERENCES projects (id)'));
+      type: DriftSqlType.int, requiredDuringInsert: true);
   static const VerificationMeta _seibanMeta = const VerificationMeta('seiban');
   @override
   late final GeneratedColumn<String> seiban = GeneratedColumn<String>(
@@ -900,10 +897,7 @@ class $ProductListRowsTable extends ProductListRows
   @override
   late final GeneratedColumn<int> projectId = GeneratedColumn<int>(
       'project_id', aliasedName, false,
-      type: DriftSqlType.int,
-      requiredDuringInsert: true,
-      defaultConstraints:
-          GeneratedColumn.constraintIsAlways('REFERENCES projects (id)'));
+      type: DriftSqlType.int, requiredDuringInsert: true);
   static const VerificationMeta _orderNoMeta =
       const VerificationMeta('orderNo');
   @override
@@ -1443,6 +1437,228 @@ class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
   }
 }
 
+class $MaskProfilesTable extends MaskProfiles
+    with TableInfo<$MaskProfilesTable, MaskProfile> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MaskProfilesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+      'id', aliasedName, false,
+      hasAutoIncrement: true,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
+  static const VerificationMeta _profileNameMeta =
+      const VerificationMeta('profileName');
+  @override
+  late final GeneratedColumn<String> profileName = GeneratedColumn<String>(
+      'profile_name', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: true,
+      defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'));
+  static const VerificationMeta _rectsJsonMeta =
+      const VerificationMeta('rectsJson');
+  @override
+  late final GeneratedColumn<String> rectsJson = GeneratedColumn<String>(
+      'rects_json', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns => [id, profileName, rectsJson];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'mask_profiles';
+  @override
+  VerificationContext validateIntegrity(Insertable<MaskProfile> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('profile_name')) {
+      context.handle(
+          _profileNameMeta,
+          profileName.isAcceptableOrUnknown(
+              data['profile_name']!, _profileNameMeta));
+    } else if (isInserting) {
+      context.missing(_profileNameMeta);
+    }
+    if (data.containsKey('rects_json')) {
+      context.handle(_rectsJsonMeta,
+          rectsJson.isAcceptableOrUnknown(data['rects_json']!, _rectsJsonMeta));
+    } else if (isInserting) {
+      context.missing(_rectsJsonMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  MaskProfile map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return MaskProfile(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+      profileName: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}profile_name'])!,
+      rectsJson: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}rects_json'])!,
+    );
+  }
+
+  @override
+  $MaskProfilesTable createAlias(String alias) {
+    return $MaskProfilesTable(attachedDatabase, alias);
+  }
+}
+
+class MaskProfile extends DataClass implements Insertable<MaskProfile> {
+  final int id;
+  final String profileName;
+  final String rectsJson;
+  const MaskProfile(
+      {required this.id, required this.profileName, required this.rectsJson});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['profile_name'] = Variable<String>(profileName);
+    map['rects_json'] = Variable<String>(rectsJson);
+    return map;
+  }
+
+  MaskProfilesCompanion toCompanion(bool nullToAbsent) {
+    return MaskProfilesCompanion(
+      id: Value(id),
+      profileName: Value(profileName),
+      rectsJson: Value(rectsJson),
+    );
+  }
+
+  factory MaskProfile.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MaskProfile(
+      id: serializer.fromJson<int>(json['id']),
+      profileName: serializer.fromJson<String>(json['profileName']),
+      rectsJson: serializer.fromJson<String>(json['rectsJson']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'profileName': serializer.toJson<String>(profileName),
+      'rectsJson': serializer.toJson<String>(rectsJson),
+    };
+  }
+
+  MaskProfile copyWith({int? id, String? profileName, String? rectsJson}) =>
+      MaskProfile(
+        id: id ?? this.id,
+        profileName: profileName ?? this.profileName,
+        rectsJson: rectsJson ?? this.rectsJson,
+      );
+  MaskProfile copyWithCompanion(MaskProfilesCompanion data) {
+    return MaskProfile(
+      id: data.id.present ? data.id.value : this.id,
+      profileName:
+          data.profileName.present ? data.profileName.value : this.profileName,
+      rectsJson: data.rectsJson.present ? data.rectsJson.value : this.rectsJson,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MaskProfile(')
+          ..write('id: $id, ')
+          ..write('profileName: $profileName, ')
+          ..write('rectsJson: $rectsJson')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, profileName, rectsJson);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MaskProfile &&
+          other.id == this.id &&
+          other.profileName == this.profileName &&
+          other.rectsJson == this.rectsJson);
+}
+
+class MaskProfilesCompanion extends UpdateCompanion<MaskProfile> {
+  final Value<int> id;
+  final Value<String> profileName;
+  final Value<String> rectsJson;
+  const MaskProfilesCompanion({
+    this.id = const Value.absent(),
+    this.profileName = const Value.absent(),
+    this.rectsJson = const Value.absent(),
+  });
+  MaskProfilesCompanion.insert({
+    this.id = const Value.absent(),
+    required String profileName,
+    required String rectsJson,
+  })  : profileName = Value(profileName),
+        rectsJson = Value(rectsJson);
+  static Insertable<MaskProfile> custom({
+    Expression<int>? id,
+    Expression<String>? profileName,
+    Expression<String>? rectsJson,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (profileName != null) 'profile_name': profileName,
+      if (rectsJson != null) 'rects_json': rectsJson,
+    });
+  }
+
+  MaskProfilesCompanion copyWith(
+      {Value<int>? id, Value<String>? profileName, Value<String>? rectsJson}) {
+    return MaskProfilesCompanion(
+      id: id ?? this.id,
+      profileName: profileName ?? this.profileName,
+      rectsJson: rectsJson ?? this.rectsJson,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (profileName.present) {
+      map['profile_name'] = Variable<String>(profileName.value);
+    }
+    if (rectsJson.present) {
+      map['rects_json'] = Variable<String>(rectsJson.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MaskProfilesCompanion(')
+          ..write('id: $id, ')
+          ..write('profileName: $profileName, ')
+          ..write('rectsJson: $rectsJson')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1450,16 +1666,30 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $NifudaRowsTable nifudaRows = $NifudaRowsTable(this);
   late final $ProductListRowsTable productListRows =
       $ProductListRowsTable(this);
+  late final $MaskProfilesTable maskProfiles = $MaskProfilesTable(this);
+  late final Index nifudaProjectIdIdx = Index('nifuda_project_id_idx',
+      'CREATE INDEX nifuda_project_id_idx ON nifuda_rows (project_id)');
+  late final Index productListProjectIdIdx = Index(
+      'product_list_project_id_idx',
+      'CREATE INDEX product_list_project_id_idx ON product_list_rows (project_id)');
   late final ProjectsDao projectsDao = ProjectsDao(this as AppDatabase);
   late final NifudaRowsDao nifudaRowsDao = NifudaRowsDao(this as AppDatabase);
   late final ProductListRowsDao productListRowsDao =
       ProductListRowsDao(this as AppDatabase);
+  late final MaskProfilesDao maskProfilesDao =
+      MaskProfilesDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [projects, nifudaRows, productListRows];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+        projects,
+        nifudaRows,
+        productListRows,
+        maskProfiles,
+        nifudaProjectIdIdx,
+        productListProjectIdIdx
+      ];
 }
 
 typedef $$ProjectsTableCreateCompanionBuilder = ProjectsCompanion Function({
@@ -1476,43 +1706,6 @@ typedef $$ProjectsTableUpdateCompanionBuilder = ProjectsCompanion Function({
   Value<String> inspectionStatus,
   Value<String> projectFolderPath,
 });
-
-final class $$ProjectsTableReferences
-    extends BaseReferences<_$AppDatabase, $ProjectsTable, Project> {
-  $$ProjectsTableReferences(super.$_db, super.$_table, super.$_typedResult);
-
-  static MultiTypedResultKey<$NifudaRowsTable, List<NifudaRow>>
-      _nifudaRowsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
-          db.nifudaRows,
-          aliasName:
-              $_aliasNameGenerator(db.projects.id, db.nifudaRows.projectId));
-
-  $$NifudaRowsTableProcessedTableManager get nifudaRowsRefs {
-    final manager = $$NifudaRowsTableTableManager($_db, $_db.nifudaRows)
-        .filter((f) => f.projectId.id.sqlEquals($_itemColumn<int>('id')!));
-
-    final cache = $_typedResult.readTableOrNull(_nifudaRowsRefsTable($_db));
-    return ProcessedTableManager(
-        manager.$state.copyWith(prefetchedData: cache));
-  }
-
-  static MultiTypedResultKey<$ProductListRowsTable, List<ProductListRow>>
-      _productListRowsRefsTable(_$AppDatabase db) =>
-          MultiTypedResultKey.fromTable(db.productListRows,
-              aliasName: $_aliasNameGenerator(
-                  db.projects.id, db.productListRows.projectId));
-
-  $$ProductListRowsTableProcessedTableManager get productListRowsRefs {
-    final manager =
-        $$ProductListRowsTableTableManager($_db, $_db.productListRows)
-            .filter((f) => f.projectId.id.sqlEquals($_itemColumn<int>('id')!));
-
-    final cache =
-        $_typedResult.readTableOrNull(_productListRowsRefsTable($_db));
-    return ProcessedTableManager(
-        manager.$state.copyWith(prefetchedData: cache));
-  }
-}
 
 class $$ProjectsTableFilterComposer
     extends Composer<_$AppDatabase, $ProjectsTable> {
@@ -1539,48 +1732,6 @@ class $$ProjectsTableFilterComposer
   ColumnFilters<String> get projectFolderPath => $composableBuilder(
       column: $table.projectFolderPath,
       builder: (column) => ColumnFilters(column));
-
-  Expression<bool> nifudaRowsRefs(
-      Expression<bool> Function($$NifudaRowsTableFilterComposer f) f) {
-    final $$NifudaRowsTableFilterComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.id,
-        referencedTable: $db.nifudaRows,
-        getReferencedColumn: (t) => t.projectId,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$NifudaRowsTableFilterComposer(
-              $db: $db,
-              $table: $db.nifudaRows,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return f(composer);
-  }
-
-  Expression<bool> productListRowsRefs(
-      Expression<bool> Function($$ProductListRowsTableFilterComposer f) f) {
-    final $$ProductListRowsTableFilterComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.id,
-        referencedTable: $db.productListRows,
-        getReferencedColumn: (t) => t.projectId,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$ProductListRowsTableFilterComposer(
-              $db: $db,
-              $table: $db.productListRows,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return f(composer);
-  }
 }
 
 class $$ProjectsTableOrderingComposer
@@ -1634,48 +1785,6 @@ class $$ProjectsTableAnnotationComposer
 
   GeneratedColumn<String> get projectFolderPath => $composableBuilder(
       column: $table.projectFolderPath, builder: (column) => column);
-
-  Expression<T> nifudaRowsRefs<T extends Object>(
-      Expression<T> Function($$NifudaRowsTableAnnotationComposer a) f) {
-    final $$NifudaRowsTableAnnotationComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.id,
-        referencedTable: $db.nifudaRows,
-        getReferencedColumn: (t) => t.projectId,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$NifudaRowsTableAnnotationComposer(
-              $db: $db,
-              $table: $db.nifudaRows,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return f(composer);
-  }
-
-  Expression<T> productListRowsRefs<T extends Object>(
-      Expression<T> Function($$ProductListRowsTableAnnotationComposer a) f) {
-    final $$ProductListRowsTableAnnotationComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.id,
-        referencedTable: $db.productListRows,
-        getReferencedColumn: (t) => t.projectId,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$ProductListRowsTableAnnotationComposer(
-              $db: $db,
-              $table: $db.productListRows,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return f(composer);
-  }
 }
 
 class $$ProjectsTableTableManager extends RootTableManager<
@@ -1687,9 +1796,9 @@ class $$ProjectsTableTableManager extends RootTableManager<
     $$ProjectsTableAnnotationComposer,
     $$ProjectsTableCreateCompanionBuilder,
     $$ProjectsTableUpdateCompanionBuilder,
-    (Project, $$ProjectsTableReferences),
+    (Project, BaseReferences<_$AppDatabase, $ProjectsTable, Project>),
     Project,
-    PrefetchHooks Function({bool nifudaRowsRefs, bool productListRowsRefs})> {
+    PrefetchHooks Function()> {
   $$ProjectsTableTableManager(_$AppDatabase db, $ProjectsTable table)
       : super(TableManagerState(
           db: db,
@@ -1729,50 +1838,9 @@ class $$ProjectsTableTableManager extends RootTableManager<
             projectFolderPath: projectFolderPath,
           ),
           withReferenceMapper: (p0) => p0
-              .map((e) =>
-                  (e.readTable(table), $$ProjectsTableReferences(db, table, e)))
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
               .toList(),
-          prefetchHooksCallback: (
-              {nifudaRowsRefs = false, productListRowsRefs = false}) {
-            return PrefetchHooks(
-              db: db,
-              explicitlyWatchedTables: [
-                if (nifudaRowsRefs) db.nifudaRows,
-                if (productListRowsRefs) db.productListRows
-              ],
-              addJoins: null,
-              getPrefetchedDataCallback: (items) async {
-                return [
-                  if (nifudaRowsRefs)
-                    await $_getPrefetchedData<Project, $ProjectsTable,
-                            NifudaRow>(
-                        currentTable: table,
-                        referencedTable:
-                            $$ProjectsTableReferences._nifudaRowsRefsTable(db),
-                        managerFromTypedResult: (p0) =>
-                            $$ProjectsTableReferences(db, table, p0)
-                                .nifudaRowsRefs,
-                        referencedItemsForCurrentItem:
-                            (item, referencedItems) => referencedItems
-                                .where((e) => e.projectId == item.id),
-                        typedResults: items),
-                  if (productListRowsRefs)
-                    await $_getPrefetchedData<Project, $ProjectsTable,
-                            ProductListRow>(
-                        currentTable: table,
-                        referencedTable: $$ProjectsTableReferences
-                            ._productListRowsRefsTable(db),
-                        managerFromTypedResult: (p0) =>
-                            $$ProjectsTableReferences(db, table, p0)
-                                .productListRowsRefs,
-                        referencedItemsForCurrentItem:
-                            (item, referencedItems) => referencedItems
-                                .where((e) => e.projectId == item.id),
-                        typedResults: items)
-                ];
-              },
-            );
-          },
+          prefetchHooksCallback: null,
         ));
 }
 
@@ -1785,9 +1853,9 @@ typedef $$ProjectsTableProcessedTableManager = ProcessedTableManager<
     $$ProjectsTableAnnotationComposer,
     $$ProjectsTableCreateCompanionBuilder,
     $$ProjectsTableUpdateCompanionBuilder,
-    (Project, $$ProjectsTableReferences),
+    (Project, BaseReferences<_$AppDatabase, $ProjectsTable, Project>),
     Project,
-    PrefetchHooks Function({bool nifudaRowsRefs, bool productListRowsRefs})>;
+    PrefetchHooks Function()>;
 typedef $$NifudaRowsTableCreateCompanionBuilder = NifudaRowsCompanion Function({
   Value<int> id,
   required int projectId,
@@ -1815,26 +1883,6 @@ typedef $$NifudaRowsTableUpdateCompanionBuilder = NifudaRowsCompanion Function({
   Value<String> caseNumber,
 });
 
-final class $$NifudaRowsTableReferences
-    extends BaseReferences<_$AppDatabase, $NifudaRowsTable, NifudaRow> {
-  $$NifudaRowsTableReferences(super.$_db, super.$_table, super.$_typedResult);
-
-  static $ProjectsTable _projectIdTable(_$AppDatabase db) =>
-      db.projects.createAlias(
-          $_aliasNameGenerator(db.nifudaRows.projectId, db.projects.id));
-
-  $$ProjectsTableProcessedTableManager get projectId {
-    final $_column = $_itemColumn<int>('project_id')!;
-
-    final manager = $$ProjectsTableTableManager($_db, $_db.projects)
-        .filter((f) => f.id.sqlEquals($_column));
-    final item = $_typedResult.readTableOrNull(_projectIdTable($_db));
-    if (item == null) return manager;
-    return ProcessedTableManager(
-        manager.$state.copyWith(prefetchedData: [item]));
-  }
-}
-
 class $$NifudaRowsTableFilterComposer
     extends Composer<_$AppDatabase, $NifudaRowsTable> {
   $$NifudaRowsTableFilterComposer({
@@ -1846,6 +1894,9 @@ class $$NifudaRowsTableFilterComposer
   });
   ColumnFilters<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get projectId => $composableBuilder(
+      column: $table.projectId, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get seiban => $composableBuilder(
       column: $table.seiban, builder: (column) => ColumnFilters(column));
@@ -1875,26 +1926,6 @@ class $$NifudaRowsTableFilterComposer
 
   ColumnFilters<String> get caseNumber => $composableBuilder(
       column: $table.caseNumber, builder: (column) => ColumnFilters(column));
-
-  $$ProjectsTableFilterComposer get projectId {
-    final $$ProjectsTableFilterComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.projectId,
-        referencedTable: $db.projects,
-        getReferencedColumn: (t) => t.id,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$ProjectsTableFilterComposer(
-              $db: $db,
-              $table: $db.projects,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return composer;
-  }
 }
 
 class $$NifudaRowsTableOrderingComposer
@@ -1908,6 +1939,9 @@ class $$NifudaRowsTableOrderingComposer
   });
   ColumnOrderings<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get projectId => $composableBuilder(
+      column: $table.projectId, builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<String> get seiban => $composableBuilder(
       column: $table.seiban, builder: (column) => ColumnOrderings(column));
@@ -1937,26 +1971,6 @@ class $$NifudaRowsTableOrderingComposer
 
   ColumnOrderings<String> get caseNumber => $composableBuilder(
       column: $table.caseNumber, builder: (column) => ColumnOrderings(column));
-
-  $$ProjectsTableOrderingComposer get projectId {
-    final $$ProjectsTableOrderingComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.projectId,
-        referencedTable: $db.projects,
-        getReferencedColumn: (t) => t.id,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$ProjectsTableOrderingComposer(
-              $db: $db,
-              $table: $db.projects,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return composer;
-  }
 }
 
 class $$NifudaRowsTableAnnotationComposer
@@ -1970,6 +1984,9 @@ class $$NifudaRowsTableAnnotationComposer
   });
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get projectId =>
+      $composableBuilder(column: $table.projectId, builder: (column) => column);
 
   GeneratedColumn<String> get seiban =>
       $composableBuilder(column: $table.seiban, builder: (column) => column);
@@ -1997,26 +2014,6 @@ class $$NifudaRowsTableAnnotationComposer
 
   GeneratedColumn<String> get caseNumber => $composableBuilder(
       column: $table.caseNumber, builder: (column) => column);
-
-  $$ProjectsTableAnnotationComposer get projectId {
-    final $$ProjectsTableAnnotationComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.projectId,
-        referencedTable: $db.projects,
-        getReferencedColumn: (t) => t.id,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$ProjectsTableAnnotationComposer(
-              $db: $db,
-              $table: $db.projects,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return composer;
-  }
 }
 
 class $$NifudaRowsTableTableManager extends RootTableManager<
@@ -2028,9 +2025,9 @@ class $$NifudaRowsTableTableManager extends RootTableManager<
     $$NifudaRowsTableAnnotationComposer,
     $$NifudaRowsTableCreateCompanionBuilder,
     $$NifudaRowsTableUpdateCompanionBuilder,
-    (NifudaRow, $$NifudaRowsTableReferences),
+    (NifudaRow, BaseReferences<_$AppDatabase, $NifudaRowsTable, NifudaRow>),
     NifudaRow,
-    PrefetchHooks Function({bool projectId})> {
+    PrefetchHooks Function()> {
   $$NifudaRowsTableTableManager(_$AppDatabase db, $NifudaRowsTable table)
       : super(TableManagerState(
           db: db,
@@ -2094,46 +2091,9 @@ class $$NifudaRowsTableTableManager extends RootTableManager<
             caseNumber: caseNumber,
           ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (
-                    e.readTable(table),
-                    $$NifudaRowsTableReferences(db, table, e)
-                  ))
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
               .toList(),
-          prefetchHooksCallback: ({projectId = false}) {
-            return PrefetchHooks(
-              db: db,
-              explicitlyWatchedTables: [],
-              addJoins: <
-                  T extends TableManagerState<
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic>>(state) {
-                if (projectId) {
-                  state = state.withJoin(
-                    currentTable: table,
-                    currentColumn: table.projectId,
-                    referencedTable:
-                        $$NifudaRowsTableReferences._projectIdTable(db),
-                    referencedColumn:
-                        $$NifudaRowsTableReferences._projectIdTable(db).id,
-                  ) as T;
-                }
-
-                return state;
-              },
-              getPrefetchedDataCallback: (items) async {
-                return [];
-              },
-            );
-          },
+          prefetchHooksCallback: null,
         ));
 }
 
@@ -2146,9 +2106,9 @@ typedef $$NifudaRowsTableProcessedTableManager = ProcessedTableManager<
     $$NifudaRowsTableAnnotationComposer,
     $$NifudaRowsTableCreateCompanionBuilder,
     $$NifudaRowsTableUpdateCompanionBuilder,
-    (NifudaRow, $$NifudaRowsTableReferences),
+    (NifudaRow, BaseReferences<_$AppDatabase, $NifudaRowsTable, NifudaRow>),
     NifudaRow,
-    PrefetchHooks Function({bool projectId})>;
+    PrefetchHooks Function()>;
 typedef $$ProductListRowsTableCreateCompanionBuilder = ProductListRowsCompanion
     Function({
   Value<int> id,
@@ -2178,27 +2138,6 @@ typedef $$ProductListRowsTableUpdateCompanionBuilder = ProductListRowsCompanion
   Value<String?> matchedCase,
 });
 
-final class $$ProductListRowsTableReferences extends BaseReferences<
-    _$AppDatabase, $ProductListRowsTable, ProductListRow> {
-  $$ProductListRowsTableReferences(
-      super.$_db, super.$_table, super.$_typedResult);
-
-  static $ProjectsTable _projectIdTable(_$AppDatabase db) =>
-      db.projects.createAlias(
-          $_aliasNameGenerator(db.productListRows.projectId, db.projects.id));
-
-  $$ProjectsTableProcessedTableManager get projectId {
-    final $_column = $_itemColumn<int>('project_id')!;
-
-    final manager = $$ProjectsTableTableManager($_db, $_db.projects)
-        .filter((f) => f.id.sqlEquals($_column));
-    final item = $_typedResult.readTableOrNull(_projectIdTable($_db));
-    if (item == null) return manager;
-    return ProcessedTableManager(
-        manager.$state.copyWith(prefetchedData: [item]));
-  }
-}
-
 class $$ProductListRowsTableFilterComposer
     extends Composer<_$AppDatabase, $ProductListRowsTable> {
   $$ProductListRowsTableFilterComposer({
@@ -2210,6 +2149,9 @@ class $$ProductListRowsTableFilterComposer
   });
   ColumnFilters<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get projectId => $composableBuilder(
+      column: $table.projectId, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get orderNo => $composableBuilder(
       column: $table.orderNo, builder: (column) => ColumnFilters(column));
@@ -2237,26 +2179,6 @@ class $$ProductListRowsTableFilterComposer
 
   ColumnFilters<String> get matchedCase => $composableBuilder(
       column: $table.matchedCase, builder: (column) => ColumnFilters(column));
-
-  $$ProjectsTableFilterComposer get projectId {
-    final $$ProjectsTableFilterComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.projectId,
-        referencedTable: $db.projects,
-        getReferencedColumn: (t) => t.id,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$ProjectsTableFilterComposer(
-              $db: $db,
-              $table: $db.projects,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return composer;
-  }
 }
 
 class $$ProductListRowsTableOrderingComposer
@@ -2270,6 +2192,9 @@ class $$ProductListRowsTableOrderingComposer
   });
   ColumnOrderings<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get projectId => $composableBuilder(
+      column: $table.projectId, builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<String> get orderNo => $composableBuilder(
       column: $table.orderNo, builder: (column) => ColumnOrderings(column));
@@ -2299,26 +2224,6 @@ class $$ProductListRowsTableOrderingComposer
 
   ColumnOrderings<String> get matchedCase => $composableBuilder(
       column: $table.matchedCase, builder: (column) => ColumnOrderings(column));
-
-  $$ProjectsTableOrderingComposer get projectId {
-    final $$ProjectsTableOrderingComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.projectId,
-        referencedTable: $db.projects,
-        getReferencedColumn: (t) => t.id,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$ProjectsTableOrderingComposer(
-              $db: $db,
-              $table: $db.projects,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return composer;
-  }
 }
 
 class $$ProductListRowsTableAnnotationComposer
@@ -2332,6 +2237,9 @@ class $$ProductListRowsTableAnnotationComposer
   });
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get projectId =>
+      $composableBuilder(column: $table.projectId, builder: (column) => column);
 
   GeneratedColumn<String> get orderNo =>
       $composableBuilder(column: $table.orderNo, builder: (column) => column);
@@ -2359,26 +2267,6 @@ class $$ProductListRowsTableAnnotationComposer
 
   GeneratedColumn<String> get matchedCase => $composableBuilder(
       column: $table.matchedCase, builder: (column) => column);
-
-  $$ProjectsTableAnnotationComposer get projectId {
-    final $$ProjectsTableAnnotationComposer composer = $composerBuilder(
-        composer: this,
-        getCurrentColumn: (t) => t.projectId,
-        referencedTable: $db.projects,
-        getReferencedColumn: (t) => t.id,
-        builder: (joinBuilder,
-                {$addJoinBuilderToRootComposer,
-                $removeJoinBuilderFromRootComposer}) =>
-            $$ProjectsTableAnnotationComposer(
-              $db: $db,
-              $table: $db.projects,
-              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-              joinBuilder: joinBuilder,
-              $removeJoinBuilderFromRootComposer:
-                  $removeJoinBuilderFromRootComposer,
-            ));
-    return composer;
-  }
 }
 
 class $$ProductListRowsTableTableManager extends RootTableManager<
@@ -2390,9 +2278,12 @@ class $$ProductListRowsTableTableManager extends RootTableManager<
     $$ProductListRowsTableAnnotationComposer,
     $$ProductListRowsTableCreateCompanionBuilder,
     $$ProductListRowsTableUpdateCompanionBuilder,
-    (ProductListRow, $$ProductListRowsTableReferences),
+    (
+      ProductListRow,
+      BaseReferences<_$AppDatabase, $ProductListRowsTable, ProductListRow>
+    ),
     ProductListRow,
-    PrefetchHooks Function({bool projectId})> {
+    PrefetchHooks Function()> {
   $$ProductListRowsTableTableManager(
       _$AppDatabase db, $ProductListRowsTable table)
       : super(TableManagerState(
@@ -2457,46 +2348,9 @@ class $$ProductListRowsTableTableManager extends RootTableManager<
             matchedCase: matchedCase,
           ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (
-                    e.readTable(table),
-                    $$ProductListRowsTableReferences(db, table, e)
-                  ))
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
               .toList(),
-          prefetchHooksCallback: ({projectId = false}) {
-            return PrefetchHooks(
-              db: db,
-              explicitlyWatchedTables: [],
-              addJoins: <
-                  T extends TableManagerState<
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic>>(state) {
-                if (projectId) {
-                  state = state.withJoin(
-                    currentTable: table,
-                    currentColumn: table.projectId,
-                    referencedTable:
-                        $$ProductListRowsTableReferences._projectIdTable(db),
-                    referencedColumn:
-                        $$ProductListRowsTableReferences._projectIdTable(db).id,
-                  ) as T;
-                }
-
-                return state;
-              },
-              getPrefetchedDataCallback: (items) async {
-                return [];
-              },
-            );
-          },
+          prefetchHooksCallback: null,
         ));
 }
 
@@ -2509,9 +2363,149 @@ typedef $$ProductListRowsTableProcessedTableManager = ProcessedTableManager<
     $$ProductListRowsTableAnnotationComposer,
     $$ProductListRowsTableCreateCompanionBuilder,
     $$ProductListRowsTableUpdateCompanionBuilder,
-    (ProductListRow, $$ProductListRowsTableReferences),
+    (
+      ProductListRow,
+      BaseReferences<_$AppDatabase, $ProductListRowsTable, ProductListRow>
+    ),
     ProductListRow,
-    PrefetchHooks Function({bool projectId})>;
+    PrefetchHooks Function()>;
+typedef $$MaskProfilesTableCreateCompanionBuilder = MaskProfilesCompanion
+    Function({
+  Value<int> id,
+  required String profileName,
+  required String rectsJson,
+});
+typedef $$MaskProfilesTableUpdateCompanionBuilder = MaskProfilesCompanion
+    Function({
+  Value<int> id,
+  Value<String> profileName,
+  Value<String> rectsJson,
+});
+
+class $$MaskProfilesTableFilterComposer
+    extends Composer<_$AppDatabase, $MaskProfilesTable> {
+  $$MaskProfilesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get profileName => $composableBuilder(
+      column: $table.profileName, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get rectsJson => $composableBuilder(
+      column: $table.rectsJson, builder: (column) => ColumnFilters(column));
+}
+
+class $$MaskProfilesTableOrderingComposer
+    extends Composer<_$AppDatabase, $MaskProfilesTable> {
+  $$MaskProfilesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get profileName => $composableBuilder(
+      column: $table.profileName, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get rectsJson => $composableBuilder(
+      column: $table.rectsJson, builder: (column) => ColumnOrderings(column));
+}
+
+class $$MaskProfilesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MaskProfilesTable> {
+  $$MaskProfilesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get profileName => $composableBuilder(
+      column: $table.profileName, builder: (column) => column);
+
+  GeneratedColumn<String> get rectsJson =>
+      $composableBuilder(column: $table.rectsJson, builder: (column) => column);
+}
+
+class $$MaskProfilesTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $MaskProfilesTable,
+    MaskProfile,
+    $$MaskProfilesTableFilterComposer,
+    $$MaskProfilesTableOrderingComposer,
+    $$MaskProfilesTableAnnotationComposer,
+    $$MaskProfilesTableCreateCompanionBuilder,
+    $$MaskProfilesTableUpdateCompanionBuilder,
+    (
+      MaskProfile,
+      BaseReferences<_$AppDatabase, $MaskProfilesTable, MaskProfile>
+    ),
+    MaskProfile,
+    PrefetchHooks Function()> {
+  $$MaskProfilesTableTableManager(_$AppDatabase db, $MaskProfilesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MaskProfilesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MaskProfilesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MaskProfilesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            Value<String> profileName = const Value.absent(),
+            Value<String> rectsJson = const Value.absent(),
+          }) =>
+              MaskProfilesCompanion(
+            id: id,
+            profileName: profileName,
+            rectsJson: rectsJson,
+          ),
+          createCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            required String profileName,
+            required String rectsJson,
+          }) =>
+              MaskProfilesCompanion.insert(
+            id: id,
+            profileName: profileName,
+            rectsJson: rectsJson,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$MaskProfilesTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $MaskProfilesTable,
+    MaskProfile,
+    $$MaskProfilesTableFilterComposer,
+    $$MaskProfilesTableOrderingComposer,
+    $$MaskProfilesTableAnnotationComposer,
+    $$MaskProfilesTableCreateCompanionBuilder,
+    $$MaskProfilesTableUpdateCompanionBuilder,
+    (
+      MaskProfile,
+      BaseReferences<_$AppDatabase, $MaskProfilesTable, MaskProfile>
+    ),
+    MaskProfile,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2522,16 +2516,19 @@ class $AppDatabaseManager {
       $$NifudaRowsTableTableManager(_db, _db.nifudaRows);
   $$ProductListRowsTableTableManager get productListRows =>
       $$ProductListRowsTableTableManager(_db, _db.productListRows);
+  $$MaskProfilesTableTableManager get maskProfiles =>
+      $$MaskProfilesTableTableManager(_db, _db.maskProfiles);
 }
 
 mixin _$ProjectsDaoMixin on DatabaseAccessor<AppDatabase> {
   $ProjectsTable get projects => attachedDatabase.projects;
 }
 mixin _$NifudaRowsDaoMixin on DatabaseAccessor<AppDatabase> {
-  $ProjectsTable get projects => attachedDatabase.projects;
   $NifudaRowsTable get nifudaRows => attachedDatabase.nifudaRows;
 }
 mixin _$ProductListRowsDaoMixin on DatabaseAccessor<AppDatabase> {
-  $ProjectsTable get projects => attachedDatabase.projects;
   $ProductListRowsTable get productListRows => attachedDatabase.productListRows;
+}
+mixin _$MaskProfilesDaoMixin on DatabaseAccessor<AppDatabase> {
+  $MaskProfilesTable get maskProfiles => attachedDatabase.maskProfiles;
 }

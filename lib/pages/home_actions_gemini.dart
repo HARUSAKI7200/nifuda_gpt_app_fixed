@@ -24,6 +24,7 @@ import 'product_list_mask_preview_page.dart';
 import '../widgets/custom_snackbar.dart';
 import 'streaming_progress_dialog.dart';
 import '../utils/keyword_detector.dart';
+import '../database/app_database.dart'; // ★ 追加: DBアクセス用
 
 // --- Utility Functions ---
 
@@ -220,12 +221,13 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
   }
 }
 
-// ★★★ captureProcessAndConfirmProductListActionGemini (ML Kit Document Scanner版) ★★★
+// ★★★ captureProcessAndConfirmProductListActionGemini (修正: AppDatabaseを受け取る) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
   String projectFolderPath,
+  AppDatabase db, // ★ DBインスタンス
 ) async {
   
   List<String> imageFilePaths = [];
@@ -267,6 +269,26 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       'TMEIC', '東芝三菱電機産業システム',
     ];
 
+    // ★ 追加: DBからカスタムマスク設定を読み込む
+    List<Rect> customRelativeRects = [];
+    if (selectedCompany != 'マスク処理なし' && selectedCompany != '動的マスク処理') {
+      try {
+        final profile = await db.maskProfilesDao.getProfileByName(selectedCompany);
+        if (profile != null) {
+          final List<dynamic> list = jsonDecode(profile.rectsJson);
+          customRelativeRects = list.map((s) {
+            final parts = s.toString().split(',');
+            return Rect.fromLTWH(
+              double.parse(parts[0]), double.parse(parts[1]), 
+              double.parse(parts[2]), double.parse(parts[3])
+            );
+          }).toList();
+        }
+      } catch (e) {
+        if (kDebugMode) print('Mask profile load error: $e');
+      }
+    }
+
     for (int i = 0; i < imageFilePaths.length; i++) {
       final originalPath = imageFilePaths[i];
       final originalFile = File(originalPath);
@@ -276,16 +298,16 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       if (imageObj == null) continue;
 
       String internalTemplateName = 'none';
-      if (selectedCompany == 'T社') internalTemplateName = 't';
-      else if (selectedCompany == '動的マスク処理') internalTemplateName = 'dynamic';
+      if (selectedCompany == '動的マスク処理') internalTemplateName = 'dynamic';
 
-      if (internalTemplateName == 't') {
-        imageObj = applyMaskToImage(imageObj, template: 't');
-      } else if (internalTemplateName == 'dynamic') {
+      if (internalTemplateName == 'dynamic') {
         final rects = await KeywordDetector.detectKeywords(originalPath, redactionKeywords);
         if (rects.isNotEmpty) {
            imageObj = applyMaskToImage(imageObj, template: 'dynamic', dynamicMaskRects: rects);
         }
+      } else if (customRelativeRects.isNotEmpty) {
+        // ★ 追加: カスタムマスク適用
+        imageObj = applyMaskToImage(imageObj, relativeMaskRects: customRelativeRects);
       }
 
       final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -439,7 +461,7 @@ Future<List<List<String>>?> _processRawProductResultsGemini(
   List<Map<String, String>> allExtractedProductRows = [];
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
 
-  final bool isTCompany = (selectedCompany == 'T社');
+  final bool isTCompany = selectedCompany.contains('T社') || selectedCompany.contains('TMEIC');
 
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {

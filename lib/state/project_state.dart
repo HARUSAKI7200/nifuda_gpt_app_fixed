@@ -25,6 +25,8 @@ class ProjectState {
   final bool isLoading;
   final String selectedCompany;
   final String selectedMatchingPattern;
+  
+  final List<MaskProfile> maskProfiles;
 
   const ProjectState({
     this.currentProjectId,
@@ -38,6 +40,7 @@ class ProjectState {
     required this.isLoading,
     required this.selectedCompany,
     required this.selectedMatchingPattern,
+    required this.maskProfiles,
   });
 
   ProjectState copyWith({
@@ -52,6 +55,7 @@ class ProjectState {
     bool? isLoading,
     String? selectedCompany,
     String? selectedMatchingPattern,
+    List<MaskProfile>? maskProfiles,
   }) {
     return ProjectState(
       currentProjectId: currentProjectId == null ? this.currentProjectId : currentProjectId.value,
@@ -65,6 +69,7 @@ class ProjectState {
       isLoading: isLoading ?? this.isLoading,
       selectedCompany: selectedCompany ?? this.selectedCompany,
       selectedMatchingPattern: selectedMatchingPattern ?? this.selectedMatchingPattern,
+      maskProfiles: maskProfiles ?? this.maskProfiles,
     );
   }
 }
@@ -80,12 +85,15 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
           projectFolderPath: null,
           currentCaseNumber: '#1',
           jsonSavePath: null,
-          nifudaData: const [], // 初期状態ではヘッダーを含めない
-          productListKariData: const [], // 初期状態ではヘッダーを含めない
+          nifudaData: [], 
+          productListKariData: [], 
           isLoading: false,
-          selectedCompany: 'T社',
+          selectedCompany: 'マスク処理なし', // ★ 変更: 初期値を変更
           selectedMatchingPattern: 'T社（製番・項目番号）',
-        ));
+          maskProfiles: [],
+        )) {
+    loadMaskProfiles();
+  }
 
   // ====== 状態操作 ======
   void setLoading(bool loading) {
@@ -114,10 +122,18 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
   void updateJsonSavePath(String? path) {
       state = state.copyWith(jsonSavePath: Value(path));
   }
+  
+  Future<void> loadMaskProfiles() async {
+    try {
+      final profiles = await _db.maskProfilesDao.getAllProfiles();
+      state = state.copyWith(maskProfiles: profiles);
+    } catch (e) {
+      FlutterLogs.logError('STATE_ACTION', 'LOAD_PROFILES_FAIL', 'Failed to load mask profiles: $e');
+    }
+  }
 
   // ====== DB連携ロジック ======
 
-  // ★ 修正: プライベート -> パブリック に変更 (getter)
   List<String> get nifudaHeader => const ['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード', 'Case No.'];
   List<String> get productListHeader => const ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考', '照合済Case'];
 
@@ -142,7 +158,6 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         projectFolderPath: newProject.projectFolderPath,
         currentCaseNumber: '#1',
         jsonSavePath: Value(null),
-        // ★ 修正: 新規作成時はヘッダーのみ設定
         nifudaData: [nifudaHeader],
         productListKariData: [productListHeader],
       );
@@ -202,15 +217,12 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     }
   }
 
-  // ★ 追加: JSONデータからStateを更新するメソッド
   Future<void> loadProjectFromJsonData(Map<String, dynamic> jsonData) async {
       setLoading(true);
       try {
-          // ヘッダーがJSONデータに含まれているか確認し、なければ追加
           List<List<String>> nifudaData = List<List<String>>.from((jsonData['nifudaData'] as List).map((e) => List<String>.from(e)));
           List<List<String>> productListData = List<List<String>>.from((jsonData['productListKariData'] as List).map((e) => List<String>.from(e)));
 
-          // ヘッダーがない、または形式が違う場合はデフォルトヘッダーを追加
           if (nifudaData.isEmpty || (nifudaData.first.isNotEmpty && nifudaData.first[0] != nifudaHeader[0])) {
               nifudaData.insert(0, nifudaHeader);
           }
@@ -223,10 +235,9 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
               projectFolderPath: jsonData['currentProjectFolderPath'],
               nifudaData: nifudaData,
               productListKariData: productListData,
-              inspectionStatus: STATUS_IN_PROGRESS, // JSONロード時は '検品中' に
-              currentProjectId: Value(null), // DBとは切り離す
-              currentCaseNumber: jsonData['currentCaseNumber'] ?? '#1', // Case No.も復元
-              // jsonSavePath は loadProjectAction 側で更新済み
+              inspectionStatus: STATUS_IN_PROGRESS,
+              currentProjectId: Value(null),
+              currentCaseNumber: jsonData['currentCaseNumber'] ?? '#1',
           );
           FlutterLogs.logInfo('STATE_ACTION', 'LOAD_JSON', 'Project state loaded from JSON.');
       } catch (e, s) {
@@ -245,7 +256,6 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     final currentCaseNumber = state.currentCaseNumber;
 
     final List<NifudaRowsCompanion> entries = newRows.map((row) {
-      // rowの要素数がヘッダーより少ない場合も考慮
       String safeGet(int index) => (index < row.length) ? row[index] : '';
       return NifudaRowsCompanion.insert(
         projectId: projectId,
@@ -291,7 +301,7 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         orderQuantity: safeGet(5),
         article: safeGet(6),
         note: safeGet(7),
-        matchedCase: Value(null), // 初期値は null
+        matchedCase: Value(null),
       );
     }).toList();
 
@@ -308,19 +318,16 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
   }
 
   Future<void> updateProjectStatus(String status) async {
-    // DB ID がなくても State のステータスは更新
     state = state.copyWith(inspectionStatus: status);
 
     if (state.currentProjectId == null) {
-      return; // DB 操作はスキップ
+      return;
     }
 
-    // DB ID があれば DB も更新
     await _db.projectsDao.upsertProject(
       ProjectsCompanion(
         id: Value(state.currentProjectId!),
         inspectionStatus: Value(status),
-        // 他のカラムは更新しない場合は Value.absent() を指定
         projectCode: Value.absent(),
         projectTitle: Value.absent(),
         projectFolderPath: Value.absent(),
@@ -333,7 +340,6 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
 // Riverpod Provider
 final projectProvider = StateNotifierProvider<ProjectNotifier, ProjectState>((ref) {
   final dbAsyncValue = ref.watch(databaseProvider);
-  // requireValue は DB 初期化完了まで待機する
   return ProjectNotifier(dbAsyncValue.requireValue);
 });
 
@@ -343,12 +349,9 @@ final databaseProvider = FutureProvider<AppDatabase>((ref) async {
 });
 
 final appDatabaseInstanceProvider = Provider<AppDatabase>((ref) {
-  // アプリ起動時に一度だけインスタンス化される
   return AppDatabase();
 });
 
-
-// プロジェクト一覧をストリーミング
 final projectListStreamProvider = StreamProvider<List<Project>>((ref) {
   final dbAsync = ref.watch(databaseProvider);
 
@@ -357,7 +360,6 @@ final projectListStreamProvider = StreamProvider<List<Project>>((ref) {
   }
 
   final db = dbAsync.requireValue;
-  // orderBy で降順にソート
   return (db.projectsDao.select(db.projects)
          ..orderBy([(t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc)]))
          .watch();
