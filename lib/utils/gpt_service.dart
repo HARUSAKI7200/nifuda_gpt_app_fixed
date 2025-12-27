@@ -16,7 +16,7 @@ import 'package:flutter_logs/flutter_logs.dart';
 import 'package:http/http.dart' as http;
 import 'package:openai_dart/openai_dart.dart';
 
-import 'prompt_definitions.dart'; // ★追加: プロンプト定義をインポート
+import 'prompt_definitions.dart'; // ★追加
 
 // --- Local Helper Functions (Duplicated for consistency) ---
 
@@ -173,8 +173,6 @@ Future<Map<String, dynamic>?> sendImageToGPT(
   Uint8List imageBytes, {
   required bool isProductList,
   // ★ company 引数を削除し、後方互換のために残す場合は無視するか、promptId を使用するように呼び出し元を変更
-  // ここでは呼び出し元の修正を前提に promptId を受け取るように変更したいが、
-  // 既存インターフェースを維持しつつ promptId オプションを追加する
   String? promptId, 
   String company = '', // Deprecated: use promptId instead
   http.Client? client, 
@@ -314,8 +312,10 @@ Future<Map<String, dynamic>?> sendImageToGPT(
 /// 製品リスト抽出用のストリーミング関数
 Stream<String> sendImageToGPTStream(
   Uint8List imageBytes, {
-  // ★ 引数変更: company を promptId に置き換え
-  required String promptId,
+  // ★ 引数変更: company を promptId に置き換え (デフォルトはstandard)
+  String promptId = 'standard',
+  // companyは廃止だがシグネチャ互換のため残し、無視する
+  String company = '', 
 }) async* {
   if (openAIApiKey.isEmpty) {
     FlutterLogs.logThis(tag: 'GPT_SERVICE', subTag: 'API_KEY_MISSING', logMessage: 'OpenAI APIキーが設定されていません。', level: LogLevel.SEVERE);

@@ -207,7 +207,8 @@ Future<Map<String, dynamic>?> sendImageToGemini(
 Stream<String> sendImageToGeminiStream(
   Uint8List imageBytes, {
   // ★ 引数変更
-  required String promptId,
+  String promptId = 'standard',
+  String company = '', // 廃止予定
 }) async* {
   final model = _getGeminiClient();
   

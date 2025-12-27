@@ -5,23 +5,22 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
-// ★ 修正: FlutterのRectを使うため dart:ui が必要だが、Driftファイル内では通常使わない。
-// JSON変換はStringとして扱うのでここではインポート不要。
 
-part '../models/app_collections.dart'; // ★ここを修正
+part '../models/app_collections.dart';
 part 'app_database.g.dart';
 
 // --- データベースクラス ---
 
 @DriftDatabase(
-  tables: [Projects, NifudaRows, ProductListRows, MaskProfiles], // ★ MaskProfilesを追加
-  daos: [ProjectsDao, NifudaRowsDao, ProductListRowsDao, MaskProfilesDao], // ★ MaskProfilesDaoを追加
+  tables: [Projects, NifudaRows, ProductListRows, MaskProfiles],
+  daos: [ProjectsDao, NifudaRowsDao, ProductListRowsDao, MaskProfilesDao],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
+  // ★ 修正: バージョンを4に更新
   @override
-  int get schemaVersion => 3; // ★ スキーマバージョンを 3 に変更
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -35,8 +34,11 @@ class AppDatabase extends _$AppDatabase {
           await m.addColumn(productListRows, productListRows.matchedCase);
         }
         if (from < 3) {
-          // ★ バージョン3への更新: MaskProfilesテーブル作成
           await m.createTable(maskProfiles);
+        }
+        // ★ 修正: バージョン4への更新 (promptId追加)
+        if (from < 4) {
+          await m.addColumn(maskProfiles, maskProfiles.promptId);
         }
       },
     );
@@ -119,7 +121,6 @@ class ProductListRowsDao extends DatabaseAccessor<AppDatabase> with _$ProductLis
   }
 }
 
-// ★ 追加: MaskProfilesDao
 @DriftAccessor(tables: [MaskProfiles])
 class MaskProfilesDao extends DatabaseAccessor<AppDatabase> with _$MaskProfilesDaoMixin {
   MaskProfilesDao(AppDatabase db) : super(db);
@@ -130,11 +131,12 @@ class MaskProfilesDao extends DatabaseAccessor<AppDatabase> with _$MaskProfilesD
     return (select(maskProfiles)..where((t) => t.profileName.equals(name))).getSingleOrNull();
   }
 
-  // RectのリストをJSON文字列として保存 ("left,top,width,height" のリスト)
-  Future<int> insertProfile(String name, List<String> rectsData) {
+  // ★ 修正: promptId を引数に追加
+  Future<int> insertProfile(String name, List<String> rectsData, {String? promptId}) {
     return into(maskProfiles).insert(MaskProfilesCompanion.insert(
       profileName: name,
       rectsJson: jsonEncode(rectsData),
+      promptId: Value(promptId), // NULL可
     ));
   }
   

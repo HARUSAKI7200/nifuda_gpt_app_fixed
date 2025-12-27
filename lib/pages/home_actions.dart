@@ -36,7 +36,9 @@ import 'project_load_dialog.dart';
 import 'streaming_progress_dialog.dart';
 import '../utils/gemini_service.dart';
 import '../state/project_state.dart';
-import '../database/app_database.dart'; 
+import '../database/app_database.dart';
+// ★ 追加: プロンプト定義
+import '../utils/prompt_definitions.dart';
 
 // --- Constants ---
 const String BASE_PROJECT_DIR = "/storage/emulated/0/DCIM/検品関係";
@@ -513,14 +515,15 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   AppDatabase db, // ★ DBインスタンス
 ) async {
   List<String> imageFilePaths = [];
-  
+  String? promptIdToUse; // ★ 追加
+
   // 1. Google ML Kit Document Scanner を起動
   try {
     final options = DocumentScannerOptions(
       documentFormat: DocumentFormat.jpeg,
-      mode: ScannerMode.full, // 撮影・クロップ・フィルタなどの完全なUI
-      pageLimit: 100, // 複数ページ対応
-      isGalleryImport: true, // ギャラリーからのインポート許可
+      mode: ScannerMode.full, 
+      pageLimit: 100, 
+      isGalleryImport: true, 
     );
 
     final documentScanner = DocumentScanner(options: options);
@@ -538,7 +541,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     return null;
   }
 
-  // 2. マスク処理 (バックグラウンドで実行)
+  // 2. マスク処理 & PromptID取得 (バックグラウンドで実行)
   if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
 
   List<String> processedImagePaths = [];
@@ -553,12 +556,15 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       'TMEIC', '東芝三菱電機産業システム',
     ];
 
-    // ★ 追加: DBからカスタムマスク設定を読み込む
+    // ★ 修正: DBからカスタムマスク設定とプロンプトIDを読み込む
     List<Rect> customRelativeRects = [];
     if (selectedCompany != 'マスク処理なし' && selectedCompany != '動的マスク処理') {
       try {
         final profile = await db.maskProfilesDao.getProfileByName(selectedCompany);
         if (profile != null) {
+          // プロンプトIDを取得
+          promptIdToUse = profile.promptId;
+          
           final List<dynamic> list = jsonDecode(profile.rectsJson);
           customRelativeRects = list.map((s) {
             final parts = s.toString().split(',');
@@ -585,19 +591,18 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       if (selectedCompany == '動的マスク処理') internalTemplateName = 'dynamic';
 
       if (internalTemplateName == 'dynamic') {
-        // 動的マスク (ML Kitでキーワード検出 -> マスク)
+        // 動的マスク
         final rects = await KeywordDetector.detectKeywords(originalPath, redactionKeywords);
         if (rects.isNotEmpty) {
            imageObj = applyMaskToImage(imageObj, template: 'dynamic', dynamicMaskRects: rects);
         }
       } else if (customRelativeRects.isNotEmpty) {
-        // ★ 追加: カスタムマスク適用
+        // カスタムマスク適用
         imageObj = applyMaskToImage(imageObj, relativeMaskRects: customRelativeRects);
       }
 
-      // 保存 (上書きせず別名保存)
+      // 保存 (PNG)
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      // ★ 修正: 保存形式をPNGに変更 (可逆圧縮で画質劣化を防ぐ)
       final savedPath = '${tempDir.path}/processed_scan_$i\_$timestamp.png';
       await File(savedPath).writeAsBytes(img.encodePng(imageObj));
       processedImagePaths.add(savedPath);
@@ -618,10 +623,10 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     return null;
   }
 
-  // 3. プロジェクトフォルダへの保存 (オリジナルではなく処理済み画像を保存)
+  // 3. プロジェクトフォルダへの保存
   unawaited(_saveScannedProductImages(context, projectFolderPath, processedImagePaths));
 
-  // 4. プレビュー (1枚目のみ確認・手動修正用)
+  // 4. プレビュー
   
   if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
 
@@ -630,11 +635,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     final path = processedImagePaths.first;
     final file = File(path);
     final rawBytes = await file.readAsBytes();
-    // プレビュー用にデコード確認
-    final originalImage = img.decodeImage(rawBytes);
-    if (originalImage == null) throw Exception('画像のデコードに失敗');
-    
-    // PNGならそのまま使用
     firstImageBytes = rawBytes;
 
   } catch(e, s) {
@@ -650,11 +650,10 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   if (!context.mounted) return null;
 
-  // プレビュー画面へ遷移
   final MaskPreviewResult? previewResult = await Navigator.push<MaskPreviewResult>(
     context, MaterialPageRoute(builder: (_) => ProductListMaskPreviewPage(
       previewImageBytes: firstImageBytes,
-      maskTemplate: 'none', // 既に処理済みなのでnone
+      maskTemplate: 'none',
       imageIndex: 1,
       totalImages: processedImagePaths.length,
     )),
@@ -665,10 +664,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       return null;
   }
 
-  // プレビューで編集された1枚目の画像 + 残りの画像
   List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
   
-  // 2枚目以降の読み込み
   if (processedImagePaths.length > 1) {
     if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${processedImagePaths.length})');
     try {
@@ -682,8 +679,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
         final path = processedImagePaths[i];
         final file = File(path);
         final rawBytes = await file.readAsBytes();
-        
-        // PNGバイトデータをそのままリストに追加 (再エンコードなし)
         finalImagesToSend.add(rawBytes);
       }
     } finally {
@@ -698,15 +693,18 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
 
   // 5. GPT送信 & OCR解析
   List<Map<String, dynamic>?> allAiRawResults = [];
-  final String companyForGpt = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany; // T社が削除されても、もしカスタム名がT社ならこれで動く
+  
+  // ★ プロンプトIDを決定 (デフォルトは standard)
+  final String actualPromptId = promptIdToUse ?? 'standard';
 
   for (int i = 0; i < finalImagesToSend.length; i++) {
       if (!context.mounted) break;
       final imageBytes = finalImagesToSend[i];
 
+      // ★ 修正: promptId を渡す
       final Stream<String> stream = sendImageToGPTStream(
         imageBytes,
-        company: companyForGpt,
+        promptId: actualPromptId,
       );
 
       final String streamTitle = '製品リスト抽出中 (GPT) (${i + 1} / ${finalImagesToSend.length})';
@@ -720,7 +718,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       if (rawJsonResponse == null) {
           _logError('OCR_ACTION', 'PRODUCT_LIST_GPT_STREAM_FAIL', 'Stream failed or cancelled for image ${i + 1}', null);
           if (context.mounted) _showErrorDialog(context, '抽出エラー', '${i + 1}枚目の画像の抽出に失敗しました。処理を中断します。');
-          return allAiRawResults.isNotEmpty ? await _processRawProductResults(context, allAiRawResults, selectedCompany) : null;
+          return allAiRawResults.isNotEmpty ? await _processRawProductResults(context, allAiRawResults, actualPromptId) : null;
       }
 
       try {
@@ -741,23 +739,25 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   }
 
   if (!context.mounted) return null;
-  return _processRawProductResults(context, allAiRawResults, selectedCompany);
+  // ★ 修正: promptId を渡して後処理
+  return _processRawProductResults(context, allAiRawResults, actualPromptId);
 }
 
 Future<List<List<String>>?> _processRawProductResults(
   BuildContext context,
   List<Map<String, dynamic>?> allAiRawResults,
-  String selectedCompany,
+  String promptId, 
 ) async {
   List<Map<String, String>> allExtractedProductRows = [];
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
 
-  // selectedCompanyが'T社'（今は削除済みだがカスタムで登録される可能性あり）または'TMEIC'を含むか
-  final bool isTCompany = selectedCompany.contains('T社') || selectedCompany.contains('TMEIC');
+  // ★ PromptRegistryから定義を取得
+  final definition = PromptRegistry.getById(promptId);
 
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {
         final List<dynamic> productListRaw = result['products'];
+        // commonOrderNoは取得するが、fullRowタイプの場合は使わないこともある
         String commonOrderNo = result['commonOrderNo']?.toString() ?? '';
 
         for (final item in productListRaw) {
@@ -765,24 +765,44 @@ Future<List<List<String>>?> _processRawProductResults(
             Map<String, String> row = {};
             String finalOrderNo = '';
 
-            if (isTCompany) {
-              final String note = item['備考(NOTE)']?.toString() ?? '';
-              finalOrderNo = '$commonOrderNo $note'.trim();
-            } else {
-              final String remarks = item['備考(REMARKS)']?.toString() ?? '';
-              finalOrderNo = commonOrderNo;
+            // ★ タイプ別の処理分岐
+            switch (definition.type) {
+              case PromptType.tmeic:
+                // TMEIC: commonNo + Note
+                final String note = item['備考(NOTE)']?.toString() ?? '';
+                finalOrderNo = '$commonOrderNo $note'.trim();
+                break;
 
-              if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
-                 if (commonOrderNo.endsWith('-') || commonOrderNo.endsWith(' ')) {
-                     finalOrderNo = '$commonOrderNo$remarks';
-                 } else {
-                     finalOrderNo = '$commonOrderNo $remarks';
-                 }
-              }
+              case PromptType.fullRow:
+                // 行完結型: 行内のデータをそのまま使う
+                // プロンプト側で "ORDER No." に入れているはずだが、念のため揺らぎ対応
+                finalOrderNo = item['ORDER No.']?.toString() ?? item['製番']?.toString() ?? '';
+                break;
+
+              case PromptType.standard:
+              default:
+                // 標準: commonNo + Remarks
+                final String remarks = item['備考(REMARKS)']?.toString() ?? '';
+                finalOrderNo = commonOrderNo;
+                if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
+                   if (commonOrderNo.endsWith('-') || commonOrderNo.endsWith(' ')) {
+                       finalOrderNo = '$commonOrderNo$remarks';
+                   } else {
+                       finalOrderNo = '$commonOrderNo $remarks';
+                   }
+                }
+                break;
             }
 
+            // 各フィールドのマッピング
             for (String field in expectedProductFields) {
-              row[field] = (field == 'ORDER No.') ? finalOrderNo : item[field]?.toString() ?? '';
+              if (field == 'ORDER No.') {
+                row[field] = finalOrderNo;
+              } else {
+                // プロンプトが出力したJSONキーと、アプリのフィールド名のマッチング
+                // プロンプト側でアプリのフィールド名に合わせて出力するように指示しているため、基本はそのまま取得
+                row[field] = item[field]?.toString() ?? '';
+              }
             }
             allExtractedProductRows.add(row);
           }

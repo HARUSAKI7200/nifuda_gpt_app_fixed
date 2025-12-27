@@ -1466,8 +1466,14 @@ class $MaskProfilesTable extends MaskProfiles
   late final GeneratedColumn<String> rectsJson = GeneratedColumn<String>(
       'rects_json', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _promptIdMeta =
+      const VerificationMeta('promptId');
   @override
-  List<GeneratedColumn> get $columns => [id, profileName, rectsJson];
+  late final GeneratedColumn<String> promptId = GeneratedColumn<String>(
+      'prompt_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  @override
+  List<GeneratedColumn> get $columns => [id, profileName, rectsJson, promptId];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -1495,6 +1501,10 @@ class $MaskProfilesTable extends MaskProfiles
     } else if (isInserting) {
       context.missing(_rectsJsonMeta);
     }
+    if (data.containsKey('prompt_id')) {
+      context.handle(_promptIdMeta,
+          promptId.isAcceptableOrUnknown(data['prompt_id']!, _promptIdMeta));
+    }
     return context;
   }
 
@@ -1510,6 +1520,8 @@ class $MaskProfilesTable extends MaskProfiles
           .read(DriftSqlType.string, data['${effectivePrefix}profile_name'])!,
       rectsJson: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}rects_json'])!,
+      promptId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}prompt_id']),
     );
   }
 
@@ -1523,14 +1535,21 @@ class MaskProfile extends DataClass implements Insertable<MaskProfile> {
   final int id;
   final String profileName;
   final String rectsJson;
+  final String? promptId;
   const MaskProfile(
-      {required this.id, required this.profileName, required this.rectsJson});
+      {required this.id,
+      required this.profileName,
+      required this.rectsJson,
+      this.promptId});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
     map['profile_name'] = Variable<String>(profileName);
     map['rects_json'] = Variable<String>(rectsJson);
+    if (!nullToAbsent || promptId != null) {
+      map['prompt_id'] = Variable<String>(promptId);
+    }
     return map;
   }
 
@@ -1539,6 +1558,9 @@ class MaskProfile extends DataClass implements Insertable<MaskProfile> {
       id: Value(id),
       profileName: Value(profileName),
       rectsJson: Value(rectsJson),
+      promptId: promptId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(promptId),
     );
   }
 
@@ -1549,6 +1571,7 @@ class MaskProfile extends DataClass implements Insertable<MaskProfile> {
       id: serializer.fromJson<int>(json['id']),
       profileName: serializer.fromJson<String>(json['profileName']),
       rectsJson: serializer.fromJson<String>(json['rectsJson']),
+      promptId: serializer.fromJson<String?>(json['promptId']),
     );
   }
   @override
@@ -1558,14 +1581,20 @@ class MaskProfile extends DataClass implements Insertable<MaskProfile> {
       'id': serializer.toJson<int>(id),
       'profileName': serializer.toJson<String>(profileName),
       'rectsJson': serializer.toJson<String>(rectsJson),
+      'promptId': serializer.toJson<String?>(promptId),
     };
   }
 
-  MaskProfile copyWith({int? id, String? profileName, String? rectsJson}) =>
+  MaskProfile copyWith(
+          {int? id,
+          String? profileName,
+          String? rectsJson,
+          Value<String?> promptId = const Value.absent()}) =>
       MaskProfile(
         id: id ?? this.id,
         profileName: profileName ?? this.profileName,
         rectsJson: rectsJson ?? this.rectsJson,
+        promptId: promptId.present ? promptId.value : this.promptId,
       );
   MaskProfile copyWithCompanion(MaskProfilesCompanion data) {
     return MaskProfile(
@@ -1573,6 +1602,7 @@ class MaskProfile extends DataClass implements Insertable<MaskProfile> {
       profileName:
           data.profileName.present ? data.profileName.value : this.profileName,
       rectsJson: data.rectsJson.present ? data.rectsJson.value : this.rectsJson,
+      promptId: data.promptId.present ? data.promptId.value : this.promptId,
     );
   }
 
@@ -1581,55 +1611,66 @@ class MaskProfile extends DataClass implements Insertable<MaskProfile> {
     return (StringBuffer('MaskProfile(')
           ..write('id: $id, ')
           ..write('profileName: $profileName, ')
-          ..write('rectsJson: $rectsJson')
+          ..write('rectsJson: $rectsJson, ')
+          ..write('promptId: $promptId')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, profileName, rectsJson);
+  int get hashCode => Object.hash(id, profileName, rectsJson, promptId);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is MaskProfile &&
           other.id == this.id &&
           other.profileName == this.profileName &&
-          other.rectsJson == this.rectsJson);
+          other.rectsJson == this.rectsJson &&
+          other.promptId == this.promptId);
 }
 
 class MaskProfilesCompanion extends UpdateCompanion<MaskProfile> {
   final Value<int> id;
   final Value<String> profileName;
   final Value<String> rectsJson;
+  final Value<String?> promptId;
   const MaskProfilesCompanion({
     this.id = const Value.absent(),
     this.profileName = const Value.absent(),
     this.rectsJson = const Value.absent(),
+    this.promptId = const Value.absent(),
   });
   MaskProfilesCompanion.insert({
     this.id = const Value.absent(),
     required String profileName,
     required String rectsJson,
+    this.promptId = const Value.absent(),
   })  : profileName = Value(profileName),
         rectsJson = Value(rectsJson);
   static Insertable<MaskProfile> custom({
     Expression<int>? id,
     Expression<String>? profileName,
     Expression<String>? rectsJson,
+    Expression<String>? promptId,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (profileName != null) 'profile_name': profileName,
       if (rectsJson != null) 'rects_json': rectsJson,
+      if (promptId != null) 'prompt_id': promptId,
     });
   }
 
   MaskProfilesCompanion copyWith(
-      {Value<int>? id, Value<String>? profileName, Value<String>? rectsJson}) {
+      {Value<int>? id,
+      Value<String>? profileName,
+      Value<String>? rectsJson,
+      Value<String?>? promptId}) {
     return MaskProfilesCompanion(
       id: id ?? this.id,
       profileName: profileName ?? this.profileName,
       rectsJson: rectsJson ?? this.rectsJson,
+      promptId: promptId ?? this.promptId,
     );
   }
 
@@ -1645,6 +1686,9 @@ class MaskProfilesCompanion extends UpdateCompanion<MaskProfile> {
     if (rectsJson.present) {
       map['rects_json'] = Variable<String>(rectsJson.value);
     }
+    if (promptId.present) {
+      map['prompt_id'] = Variable<String>(promptId.value);
+    }
     return map;
   }
 
@@ -1653,7 +1697,8 @@ class MaskProfilesCompanion extends UpdateCompanion<MaskProfile> {
     return (StringBuffer('MaskProfilesCompanion(')
           ..write('id: $id, ')
           ..write('profileName: $profileName, ')
-          ..write('rectsJson: $rectsJson')
+          ..write('rectsJson: $rectsJson, ')
+          ..write('promptId: $promptId')
           ..write(')'))
         .toString();
   }
@@ -2374,12 +2419,14 @@ typedef $$MaskProfilesTableCreateCompanionBuilder = MaskProfilesCompanion
   Value<int> id,
   required String profileName,
   required String rectsJson,
+  Value<String?> promptId,
 });
 typedef $$MaskProfilesTableUpdateCompanionBuilder = MaskProfilesCompanion
     Function({
   Value<int> id,
   Value<String> profileName,
   Value<String> rectsJson,
+  Value<String?> promptId,
 });
 
 class $$MaskProfilesTableFilterComposer
@@ -2399,6 +2446,9 @@ class $$MaskProfilesTableFilterComposer
 
   ColumnFilters<String> get rectsJson => $composableBuilder(
       column: $table.rectsJson, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get promptId => $composableBuilder(
+      column: $table.promptId, builder: (column) => ColumnFilters(column));
 }
 
 class $$MaskProfilesTableOrderingComposer
@@ -2418,6 +2468,9 @@ class $$MaskProfilesTableOrderingComposer
 
   ColumnOrderings<String> get rectsJson => $composableBuilder(
       column: $table.rectsJson, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get promptId => $composableBuilder(
+      column: $table.promptId, builder: (column) => ColumnOrderings(column));
 }
 
 class $$MaskProfilesTableAnnotationComposer
@@ -2437,6 +2490,9 @@ class $$MaskProfilesTableAnnotationComposer
 
   GeneratedColumn<String> get rectsJson =>
       $composableBuilder(column: $table.rectsJson, builder: (column) => column);
+
+  GeneratedColumn<String> get promptId =>
+      $composableBuilder(column: $table.promptId, builder: (column) => column);
 }
 
 class $$MaskProfilesTableTableManager extends RootTableManager<
@@ -2468,21 +2524,25 @@ class $$MaskProfilesTableTableManager extends RootTableManager<
             Value<int> id = const Value.absent(),
             Value<String> profileName = const Value.absent(),
             Value<String> rectsJson = const Value.absent(),
+            Value<String?> promptId = const Value.absent(),
           }) =>
               MaskProfilesCompanion(
             id: id,
             profileName: profileName,
             rectsJson: rectsJson,
+            promptId: promptId,
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
             required String profileName,
             required String rectsJson,
+            Value<String?> promptId = const Value.absent(),
           }) =>
               MaskProfilesCompanion.insert(
             id: id,
             profileName: profileName,
             rectsJson: rectsJson,
+            promptId: promptId,
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))

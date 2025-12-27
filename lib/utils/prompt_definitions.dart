@@ -1,16 +1,28 @@
 // lib/utils/prompt_definitions.dart
 
+/// プロンプトの処理タイプ定義
+enum PromptType {
+  standard, // 標準 (共通No + 備考REMARKS)
+  tmeic,    // TMEIC (共通No + 備考NOTE)
+  fullRow,  // 行完結型 (行内に製番・項番が全て含まれる)
+}
+
 /// 抽出プロンプトの定義クラス
 class PromptDefinition {
   final String id;         // DB保存用ID
   final String label;      // 設定画面の表示名
   final String systemPrompt; // プロンプト本文
+  final PromptType type;   // 処理タイプ
 
   const PromptDefinition({
     required this.id,
     required this.label,
     required this.systemPrompt,
+    required this.type,
   });
+  
+  // 後方互換用ゲッター
+  bool get isTmeicStyle => type == PromptType.tmeic;
 }
 
 /// プロンプトのレジストリ（台帳）
@@ -21,6 +33,7 @@ class PromptRegistry {
     PromptDefinition(
       id: 'standard',
       label: '標準 (備考=REMARKS, 右上No)',
+      type: PromptType.standard,
       systemPrompt: '''
 あなたは製品リストを完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
 
@@ -57,10 +70,11 @@ class PromptRegistry {
 ''',
     ),
 
-    // 2. TMEIC社パターン
+    // 2. TMEIC社パターン (タイトル変更)
     PromptDefinition(
       id: 'tmeic',
-      label: 'TMEIC (備考=NOTE, 左側No)',
+      label: 'TMEIC DS産(中国)', // ★ 変更
+      type: PromptType.tmeic,
       systemPrompt: '''
 あなたは「TMEIC」の製品リスト（T社帳票）を完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
 
@@ -94,6 +108,42 @@ class PromptRegistry {
       "注文数": "2",
       "記事": "PRINTED WIRING BOARD (Soft No. PSS)",
       "備考(NOTE)": "FEV2385" 
+    }
+  ]
+}
+''',
+    ),
+
+    // 3. ★新規追加: 東芝 鉄シブ 鉄シ産
+    PromptDefinition(
+      id: 'toshiba_tessibu',
+      label: '東芝 鉄シブ 鉄シ産',
+      type: PromptType.fullRow, // 行の中に全ての情報があるタイプ
+      systemPrompt: '''
+あなたは製品リストを完璧に文字起こしする、データ入力の超専門家です。以下のルールに従い、画像内の表から情報を抽出してください。
+
+### 思考プロセス
+1.  **O/#列の分解:** 「O/#」列には「製番」と「項番」がスペースで区切られて記載されています（例: "5605578 DJ0001B"）。これを必ず「製番」と「項番」に分割して抽出してください。
+2.  **項目マッピング:**
+    - `O/#` の左側 -> `"ORDER No."`
+    - `O/#` の右側 -> `"ITEM OF SPARE"`
+    - `品名/型名` -> `"品名記号"`
+    - `数量` -> `"注文数"` (単位「台」などは除き、数値のみ)
+
+### 抽出ルール
+- 画像に写っている製品行をすべて抽出してください。
+- 項目が存在しない場合は空文字列 `""` としてください。
+- `commonOrderNo` は使用しませんが、JSON形式を保つために空文字列 `""` を出力してください。
+
+### 出力形式 (JSON)
+{
+  "commonOrderNo": "",
+  "products": [
+    {
+      "ORDER No.": "5605578",
+      "ITEM OF SPARE": "DJ0001B",
+      "品名記号": "OBC Central Unit",
+      "注文数": "2"
     }
   ]
 }

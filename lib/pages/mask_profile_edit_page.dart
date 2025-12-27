@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 import '../state/project_state.dart';
 import '../widgets/custom_snackbar.dart';
+// ★ 追加: プロンプトレジストリ
+import '../utils/prompt_definitions.dart';
 
 class MaskProfileEditPage extends ConsumerStatefulWidget {
   const MaskProfileEditPage({super.key});
@@ -23,6 +25,9 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
   Rect? _currentDrawingRect;
   Offset? _startDragPos; 
   final GlobalKey _imageKey = GlobalKey();
+
+  // ★ 追加: 選択されたプロンプトID (デフォルトは標準)
+  String _selectedPromptId = PromptRegistry.availablePrompts.first.id;
 
   Future<void> _scanDocument() async {
     try {
@@ -87,19 +92,16 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
     final containerSize = box.size;
     final imageSize = Size(_decodedImage!.width.toDouble(), _decodedImage!.height.toDouble());
 
-    // ★ 修正ポイント: 実際に画像が表示されている領域を計算
+    // 画像表示エリアの計算
     final FittedSizes fittedSizes = applyBoxFit(BoxFit.contain, imageSize, containerSize);
-    final Size destSize = fittedSizes.destination; // 画面上の画像のサイズ
+    final Size destSize = fittedSizes.destination; 
     
-    // 画像の表示位置（中央寄せされている場合のオフセット）
     final double dx = (containerSize.width - destSize.width) / 2;
     final double dy = (containerSize.height - destSize.height) / 2;
     final Rect imageRect = Rect.fromLTWH(dx, dy, destSize.width, destSize.height);
 
-    // 描画された矩形と画像領域の重なり部分を取得（はみ出し防止）
     final Rect intersection = _currentDrawingRect!.intersect(imageRect);
 
-    // 重なりがなければ無効
     if (intersection.width <= 0 || intersection.height <= 0) {
       setState(() {
         _currentDrawingRect = null;
@@ -108,8 +110,6 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
       return;
     }
 
-    // ★ 修正ポイント: 画像領域基準での相対座標に変換
-    // (描画座標 - 画像開始位置) / 画像表示サイズ
     final relRect = Rect.fromLTRB(
       (intersection.left - dx) / destSize.width,
       (intersection.top - dy) / destSize.height,
@@ -141,7 +141,12 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
         "${r.left},${r.top},${r.width},${r.height}"
       ).toList();
 
-      await db.maskProfilesDao.insertProfile(_nameController.text, rectData);
+      // ★ 修正: promptId を保存
+      await db.maskProfilesDao.insertProfile(
+        _nameController.text, 
+        rectData,
+        promptId: _selectedPromptId,
+      );
       
       if (mounted) {
         showCustomSnackBar(context, 'マスク設定「${_nameController.text}」を保存しました');
@@ -161,19 +166,46 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
           children: [
             Padding(
               padding: const EdgeInsets.all(16.0),
-              child: Row(
+              child: Column(
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _nameController,
-                      decoration: const InputDecoration(labelText: '設定名（例: A社）'),
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _nameController,
+                          decoration: const InputDecoration(labelText: '設定名（例: A社）'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.document_scanner),
+                        label: const Text('スキャン'),
+                        onPressed: _scanDocument,
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.document_scanner),
-                    label: const Text('スキャン'),
-                    onPressed: _scanDocument,
+                  const SizedBox(height: 10),
+                  // ★ 追加: プロンプト選択UI
+                  DropdownButtonFormField<String>(
+                    value: _selectedPromptId,
+                    decoration: const InputDecoration(
+                      labelText: '使用する抽出プロンプト',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    ),
+                    items: PromptRegistry.availablePrompts.map((def) {
+                      return DropdownMenuItem(
+                        value: def.id,
+                        child: Text(def.label, style: const TextStyle(fontSize: 14)),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() {
+                          _selectedPromptId = val;
+                        });
+                      }
+                    },
                   ),
                 ],
               ),
@@ -200,14 +232,14 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
                                 color: Colors.grey[200],
                                 image: DecorationImage(
                                   image: FileImage(_sampleImage!),
-                                  fit: BoxFit.contain, // ★ ここに合わせて座標計算を修正しました
+                                  fit: BoxFit.contain, 
                                 )
                               ),
                               child: CustomPaint(
                                 painter: _MaskEditPainter(
                                   rects: _relativeRects,
                                   currentRect: _currentDrawingRect,
-                                  imageSize: Size(_decodedImage!.width.toDouble(), _decodedImage!.height.toDouble()), // ★ 追加: 画像サイズを渡す
+                                  imageSize: Size(_decodedImage!.width.toDouble(), _decodedImage!.height.toDouble()), 
                                 ),
                               ),
                             ),
@@ -244,15 +276,14 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
 class _MaskEditPainter extends CustomPainter {
   final List<Rect> rects;
   final Rect? currentRect;
-  final Size? imageSize; // ★ 追加
+  final Size? imageSize; 
 
   _MaskEditPainter({required this.rects, this.currentRect, this.imageSize});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.black; // 不透明な黒
+    final paint = Paint()..color = Colors.black; 
 
-    // ★ 修正ポイント: 描画時も画像表示エリアを計算して位置合わせする
     Rect imageRect = Offset.zero & size;
     
     if (imageSize != null) {
@@ -263,9 +294,7 @@ class _MaskEditPainter extends CustomPainter {
       imageRect = Rect.fromLTWH(dx, dy, destSize.width, destSize.height);
     }
 
-    // 保存領域の描画
     for (final r in rects) {
-      // 相対座標 * 画像表示サイズ + オフセット
       canvas.drawRect(
         Rect.fromLTRB(
           imageRect.left + r.left * imageRect.width,
@@ -277,7 +306,6 @@ class _MaskEditPainter extends CustomPainter {
       );
     }
 
-    // ドラッグ中領域の描画（赤枠）
     if (currentRect != null) {
       canvas.drawRect(currentRect!, Paint()..color = Colors.red.withOpacity(0.3));
     }

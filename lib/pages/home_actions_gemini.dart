@@ -25,6 +25,8 @@ import '../widgets/custom_snackbar.dart';
 import 'streaming_progress_dialog.dart';
 import '../utils/keyword_detector.dart';
 import '../database/app_database.dart'; // ★ 追加: DBアクセス用
+// ★ 追加: プロンプト定義
+import '../utils/prompt_definitions.dart';
 
 // --- Utility Functions ---
 
@@ -231,6 +233,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
 ) async {
   
   List<String> imageFilePaths = [];
+  String? promptIdToUse; // ★ 追加
   
   // 1. Google ML Kit Document Scanner を起動
   try {
@@ -256,7 +259,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     return null;
   }
 
-  // 2. マスク処理 (バックグラウンドで実行)
+  // 2. マスク処理 & PromptID取得
   if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
 
   List<String> processedImagePaths = [];
@@ -269,12 +272,15 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       'TMEIC', '東芝三菱電機産業システム',
     ];
 
-    // ★ 追加: DBからカスタムマスク設定を読み込む
+    // ★ 修正: DBからカスタムマスク設定とプロンプトIDを読み込む
     List<Rect> customRelativeRects = [];
     if (selectedCompany != 'マスク処理なし' && selectedCompany != '動的マスク処理') {
       try {
         final profile = await db.maskProfilesDao.getProfileByName(selectedCompany);
         if (profile != null) {
+          // プロンプトIDを取得
+          promptIdToUse = profile.promptId;
+          
           final List<dynamic> list = jsonDecode(profile.rectsJson);
           customRelativeRects = list.map((s) {
             final parts = s.toString().split(',');
@@ -306,12 +312,12 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
            imageObj = applyMaskToImage(imageObj, template: 'dynamic', dynamicMaskRects: rects);
         }
       } else if (customRelativeRects.isNotEmpty) {
-        // ★ 追加: カスタムマスク適用
+        // カスタムマスク適用
         imageObj = applyMaskToImage(imageObj, relativeMaskRects: customRelativeRects);
       }
 
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      // ★ 修正: 保存形式をPNGに変更 (可逆圧縮で画質劣化を防ぐ)
+      // 保存 (PNG)
       final savedPath = '${tempDir.path}/processed_scan_gemini_$i\_$timestamp.png';
       await File(savedPath).writeAsBytes(img.encodePng(imageObj));
       processedImagePaths.add(savedPath);
@@ -332,7 +338,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     return null;
   }
 
-  // 3. プロジェクトフォルダへ保存 (PNGを保存)
+  // 3. プロジェクトフォルダへ保存
   unawaited(_saveScannedProductImages(context, projectFolderPath, processedImagePaths));
 
   if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
@@ -343,8 +349,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     final path = processedImagePaths.first;
     final file = File(path);
     final rawBytes = await file.readAsBytes();
-    
-    // PNGはそのまま読み込める
     firstImageBytes = rawBytes;
 
   } catch (e, s) {
@@ -377,7 +381,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
 
   List<Uint8List> finalImagesToSend = [previewResult.imageBytes];
 
-  // 2枚目以降のロード
   if (processedImagePaths.length > 1) {
     if (context.mounted) _showLoadingDialog(context, '画像を準備中... (2/${processedImagePaths.length})');
     try {
@@ -391,7 +394,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
         final path = processedImagePaths[i];
         final file = File(path);
         final rawBytes = await file.readAsBytes();
-        // PNGバイトデータをそのままリストに追加 (再エンコードなし)
         finalImagesToSend.add(rawBytes);
       }
     } finally {
@@ -406,15 +408,18 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
 
   // --- Gemini送信 ---
   List<Map<String, dynamic>?> allAiRawResults = [];
-  final String companyForGemini = (selectedCompany == 'T社') ? 'TMEIC' : selectedCompany;
+  
+  // ★ プロンプトIDを決定 (デフォルトは standard)
+  final String actualPromptId = promptIdToUse ?? 'standard';
 
   for (int i = 0; i < finalImagesToSend.length; i++) {
       if (!context.mounted) break;
       final imageBytes = finalImagesToSend[i];
 
+      // ★ 修正: promptId を渡す
       final Stream<String> stream = sendImageToGeminiStream(
         imageBytes,
-        company: companyForGemini,
+        promptId: actualPromptId,
       );
 
       final String streamTitle = '製品リスト抽出中 (Gemini) (${i + 1} / ${finalImagesToSend.length})';
@@ -428,7 +433,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       if (rawJsonResponse == null) {
           _logError('OCR_ACTION', 'PRODUCT_LIST_GEMINI_STREAM_FAIL', 'Gemini stream failed or cancelled for image ${i + 1}', null);
           if (context.mounted) _showErrorDialog(context, '抽出エラー', '${i + 1}枚目の画像の抽出に失敗しました。処理を中断します。');
-          return allAiRawResults.isNotEmpty ? await _processRawProductResultsGemini(context, allAiRawResults, selectedCompany) : null;
+          return allAiRawResults.isNotEmpty ? await _processRawProductResultsGemini(context, allAiRawResults, actualPromptId) : null;
       }
 
       try {
@@ -449,19 +454,21 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   }
 
   if (!context.mounted) return null;
-  return _processRawProductResultsGemini(context, allAiRawResults, selectedCompany);
+  // ★ 修正: promptId を渡して後処理
+  return _processRawProductResultsGemini(context, allAiRawResults, actualPromptId);
 }
 
 
 Future<List<List<String>>?> _processRawProductResultsGemini(
   BuildContext context,
   List<Map<String, dynamic>?> allAiRawResults,
-  String selectedCompany,
+  String promptId, 
 ) async {
   List<Map<String, String>> allExtractedProductRows = [];
   const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
 
-  final bool isTCompany = selectedCompany.contains('T社') || selectedCompany.contains('TMEIC');
+  // ★ PromptRegistryから定義を取得
+  final definition = PromptRegistry.getById(promptId);
 
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {
@@ -473,24 +480,37 @@ Future<List<List<String>>?> _processRawProductResultsGemini(
             Map<String, String> row = {};
             String finalOrderNo = '';
 
-            if (isTCompany) {
-              final String note = item['備考(NOTE)']?.toString() ?? '';
-              finalOrderNo = '$commonOrderNo $note'.trim();
-            } else {
-              final String remarks = item['備考(REMARKS)']?.toString() ?? '';
-              finalOrderNo = commonOrderNo;
+            // ★ タイプ別の処理分岐
+            switch (definition.type) {
+              case PromptType.tmeic:
+                final String note = item['備考(NOTE)']?.toString() ?? '';
+                finalOrderNo = '$commonOrderNo $note'.trim();
+                break;
 
-              if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
-                 if (commonOrderNo.endsWith('-') || commonOrderNo.endsWith(' ')) {
-                     finalOrderNo = '$commonOrderNo$remarks'; 
-                 } else {
-                     finalOrderNo = '$commonOrderNo $remarks';
-                 }
-              }
+              case PromptType.fullRow:
+                finalOrderNo = item['ORDER No.']?.toString() ?? item['製番']?.toString() ?? '';
+                break;
+
+              case PromptType.standard:
+              default:
+                final String remarks = item['備考(REMARKS)']?.toString() ?? '';
+                finalOrderNo = commonOrderNo;
+                if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
+                   if (commonOrderNo.endsWith('-') || commonOrderNo.endsWith(' ')) {
+                       finalOrderNo = '$commonOrderNo$remarks'; 
+                   } else {
+                       finalOrderNo = '$commonOrderNo $remarks';
+                   }
+                }
+                break;
             }
 
             for (String field in expectedProductFields) {
-              row[field] = (field == 'ORDER No.') ? finalOrderNo : item[field]?.toString() ?? '';
+              if (field == 'ORDER No.') {
+                row[field] = finalOrderNo;
+              } else {
+                row[field] = item[field]?.toString() ?? '';
+              }
             }
             allExtractedProductRows.add(row);
           }

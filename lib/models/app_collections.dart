@@ -55,4 +55,8 @@ class MaskProfiles extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get profileName => text().unique()(); // 設定名（会社名）
   TextColumn get rectsJson => text()(); // 範囲データ(Rectのリスト)をJSON文字列で保存
+  
+  // ★★★ 追加: 使用するプロンプトID ★★★
+  // nullの場合はデフォルト(standard)を使用
+  TextColumn get promptId => text().nullable()(); 
 }
