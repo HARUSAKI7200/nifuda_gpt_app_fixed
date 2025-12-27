@@ -7,7 +7,7 @@ import 'package:flutter_logs/flutter_logs.dart';
 import 'package:http/http.dart' as http;
 import 'package:openai_dart/openai_dart.dart';
 
-import 'prompt_definitions.dart'; 
+import 'matching_profile.dart'; // ★ 変更
 
 // --- Local Helper Functions ---
 
@@ -225,7 +225,6 @@ Future<Map<String, dynamic>?> sendImageToGPT(
       return null;
     }
 
-    // ★ 修正: 生のレスポンスをログ出力
     if (kDebugMode) {
       debugPrint('================= [GPT Nifuda Raw Response] =================');
       debugPrint(contentString);
@@ -302,7 +301,8 @@ Stream<String> sendImageToGPTStream(
   
   final ChatCompletionModel visionModel = ChatCompletionModel.modelId('gpt-5.2');
   
-  final definition = PromptRegistry.getById(promptId);
+  // ★ PromptDefinition -> MatchingProfile に変更
+  final definition = MatchingProfileRegistry.getById(promptId);
   final String prompt = definition.systemPrompt;
 
   FlutterLogs.logInfo(

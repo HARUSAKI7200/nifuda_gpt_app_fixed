@@ -7,8 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 import '../state/project_state.dart';
 import '../widgets/custom_snackbar.dart';
-// ★ 追加: プロンプトレジストリ
-import '../utils/prompt_definitions.dart';
+// ★ 追加: マッチングプロファイル
+import '../utils/matching_profile.dart';
 
 class MaskProfileEditPage extends ConsumerStatefulWidget {
   const MaskProfileEditPage({super.key});
@@ -21,13 +21,13 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
   final _nameController = TextEditingController();
   File? _sampleImage;
   ui.Image? _decodedImage;
-  List<Rect> _relativeRects = []; // 0.0~1.0 の相対座標で保存
+  List<Rect> _relativeRects = []; 
   Rect? _currentDrawingRect;
   Offset? _startDragPos; 
   final GlobalKey _imageKey = GlobalKey();
 
-  // ★ 追加: 選択されたプロンプトID (デフォルトは標準)
-  String _selectedPromptId = PromptRegistry.availablePrompts.first.id;
+  // ★ 選択されたプロンプトID (デフォルトは標準)
+  String _selectedPromptId = MatchingProfileRegistry.availableProfiles.first.id;
 
   Future<void> _scanDocument() async {
     try {
@@ -141,7 +141,6 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
         "${r.left},${r.top},${r.width},${r.height}"
       ).toList();
 
-      // ★ 修正: promptId を保存
       await db.maskProfilesDao.insertProfile(
         _nameController.text, 
         rectData,
@@ -185,7 +184,7 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  // ★ 追加: プロンプト選択UI
+                  // ★ 修正: マッチングプロファイル選択UI
                   DropdownButtonFormField<String>(
                     value: _selectedPromptId,
                     decoration: const InputDecoration(
@@ -193,7 +192,7 @@ class _MaskProfileEditPageState extends ConsumerState<MaskProfileEditPage> {
                       border: OutlineInputBorder(),
                       contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     ),
-                    items: PromptRegistry.availablePrompts.map((def) {
+                    items: MatchingProfileRegistry.availableProfiles.map((def) {
                       return DropdownMenuItem(
                         value: def.id,
                         child: Text(def.label, style: const TextStyle(fontSize: 14)),

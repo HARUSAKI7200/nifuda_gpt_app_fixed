@@ -25,7 +25,7 @@ import '../widgets/custom_snackbar.dart';
 import 'streaming_progress_dialog.dart';
 import '../utils/keyword_detector.dart';
 import '../database/app_database.dart'; 
-import '../utils/prompt_definitions.dart';
+import '../utils/matching_profile.dart'; // ★ 変更
 
 // --- Utility Functions ---
 
@@ -395,6 +395,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
 
   List<Map<String, dynamic>?> allAiRawResults = [];
   
+  // promptIdを決定
   final String actualPromptId = promptIdToUse ?? 'standard';
 
   for (int i = 0; i < finalImagesToSend.length; i++) {
@@ -444,6 +445,7 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   }
 
   if (!context.mounted) return null;
+  // ★ プロファイルIDを渡す
   return _processRawProductResultsGemini(context, allAiRawResults, actualPromptId);
 }
 
@@ -451,12 +453,13 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
 Future<List<List<String>>?> _processRawProductResultsGemini(
   BuildContext context,
   List<Map<String, dynamic>?> allAiRawResults,
-  String promptId, 
+  String profileId, // promptId -> profileId
 ) async {
   List<Map<String, String>> allExtractedProductRows = [];
   
-  final definition = PromptRegistry.getById(promptId);
-  final List<String> expectedProductFields = definition.displayFields;
+  // ★ プロファイル取得
+  final profile = MatchingProfileRegistry.getById(profileId);
+  final List<String> expectedProductFields = profile.displayFields;
 
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {
@@ -469,13 +472,14 @@ Future<List<List<String>>?> _processRawProductResultsGemini(
             String finalOrderNo = '';
             String finalItemNo = '';
 
-            switch (definition.type) {
-              case PromptType.tmeic:
+            // ★ ProfileType で分岐
+            switch (profile.type) {
+              case ProfileType.tmeic:
                 final String note = item['備考(NOTE)']?.toString() ?? '';
                 finalOrderNo = '$commonOrderNo $note'.trim();
                 break;
 
-              case PromptType.tmeic_ups_2:
+              case ProfileType.tmeic_ups_2:
                 final trimmedCommon = commonOrderNo.trim();
                 final splitIndex = trimmedCommon.indexOf(RegExp(r'\s+'));
                 if (splitIndex != -1) {
@@ -486,11 +490,11 @@ Future<List<List<String>>?> _processRawProductResultsGemini(
                 }
                 break;
 
-              case PromptType.fullRow:
+              case ProfileType.fullRow:
                 finalOrderNo = item['ORDER No.']?.toString() ?? item['製番']?.toString() ?? '';
                 break;
 
-              case PromptType.standard:
+              case ProfileType.standard:
               default:
                 final String remarks = item['備考(REMARKS)']?.toString() ?? '';
                 finalOrderNo = commonOrderNo;
@@ -504,11 +508,12 @@ Future<List<List<String>>?> _processRawProductResultsGemini(
                 break;
             }
 
+            // ★ 全フィールドをセット (プロファイル定義のキー名を優先)
             for (String field in expectedProductFields) {
-              if ((field == 'ORDER No.' || field == '製番') && finalOrderNo.isNotEmpty) {
+              if ((field == profile.productListKeyOrderNo) && finalOrderNo.isNotEmpty) {
                 row[field] = finalOrderNo;
               } 
-              else if ((field == 'ITEM OF SPARE' || field == '項番') && finalItemNo.isNotEmpty) {
+              else if ((field == profile.productListKeyItemNo) && finalItemNo.isNotEmpty) {
                 row[field] = finalItemNo;
               }
               else {

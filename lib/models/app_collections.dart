@@ -1,9 +1,7 @@
 // lib/models/app_collections.dart
 
-// このファイルが 'app_database.dart' の一部であることを宣言
 part of '../database/app_database.dart';
 
-// ★ 1. プロジェクト
 @DataClassName('Project') 
 class Projects extends Table {
   IntColumn get id => integer().autoIncrement()();
@@ -13,7 +11,6 @@ class Projects extends Table {
   TextColumn get projectFolderPath => text()();
 }
 
-// ★ 2. 荷札
 @DataClassName('NifudaRow')
 @TableIndex(name: 'nifuda_project_id_idx', columns: {#projectId})
 class NifudaRows extends Table {
@@ -30,44 +27,46 @@ class NifudaRows extends Table {
   TextColumn get caseNumber => text().named('case_number')(); 
 }
 
-// ★ 3. 製品リスト
 @DataClassName('ProductListRow')
 @TableIndex(name: 'product_list_project_id_idx', columns: {#projectId})
 class ProductListRows extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get projectId => integer().named('project_id')();
   
-  // 照合用・検索用のコア項目はそのまま残す
   TextColumn get orderNo => text().named('order_no')(); 
   TextColumn get itemOfSpare => text().named('item_of_spare')(); 
   TextColumn get productSymbol => text().named('product_symbol')(); 
   TextColumn get orderQuantity => text().named('order_quantity')(); 
   TextColumn get matchedCase => text().nullable()();
 
-  // 以下の固定カラムは互換性のために残すが、今後は contentJson が主役になる
   TextColumn get formSpec => text().named('form_spec')(); 
   TextColumn get productCode => text().named('product_code')(); 
   TextColumn get article => text().named('article')(); 
   TextColumn get note => text().named('note')(); 
 
-  // ★ 新規追加: 全項目をJSON形式で保存するカラム
   TextColumn get contentJson => text().nullable()();
 }
 
-// ★ 4. マスク設定
+// ★ 拡張: マスク設定改め「作業プロファイル」
 @DataClassName('MaskProfile')
 class MaskProfiles extends Table {
   IntColumn get id => integer().autoIncrement()();
-  TextColumn get profileName => text().unique()(); // 設定名（会社名）
-  TextColumn get rectsJson => text()(); // 範囲データ(Rectのリスト)をJSON文字列で保存
-  TextColumn get promptId => text().nullable()(); // 使用するプロンプトID
+  TextColumn get profileName => text().unique()(); // 会社名・生産課名
+  TextColumn get rectsJson => text()(); // 黒塗り座標JSON
+  
+  // 既存の互換性のため残すが、今後は extractionMode を主に使用
+  TextColumn get promptId => text().nullable()(); 
+
+  // ★ 新規カラム
+  TextColumn get productListFieldsJson => text().nullable()(); // 製品リストの項目定義 (List<String>)
+  TextColumn get matchingPairsJson => text().nullable()(); // 照合ペア設定 (Map<String, String>)
+  TextColumn get extractionMode => text().nullable()(); // 抽出モード (standard, tmeic, etc.)
 }
 
-// ★ 5. ユーザー
 @DataClassName('User')
 class Users extends Table {
   IntColumn get id => integer().autoIncrement()();
-  TextColumn get username => text().unique()(); // ユーザー名 (一意)
-  TextColumn get password => text().nullable()(); // 将来用 (現在は使用しないが枠だけ用意)
+  TextColumn get username => text().unique()(); 
+  TextColumn get password => text().nullable()(); 
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }

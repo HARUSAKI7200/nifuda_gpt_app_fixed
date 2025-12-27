@@ -6,7 +6,7 @@ import 'package:flutter_logs/flutter_logs.dart';
 import 'package:drift/drift.dart';
 
 import '../database/app_database.dart';
-import '../utils/prompt_definitions.dart';
+import '../utils/matching_profile.dart'; // ★ 変更
 
 // 進捗ステータス
 const String STATUS_PENDING = '検品前';
@@ -30,7 +30,7 @@ class ProjectState {
   
   final List<MaskProfile> maskProfiles;
 
-  // ★ 追加: 現在の製品リストのヘッダー（動的に変わるため）
+  // 現在の製品リストのヘッダー
   final List<String> currentProductListHeader;
 
   const ProjectState({
@@ -46,7 +46,7 @@ class ProjectState {
     required this.selectedCompany,
     required this.selectedMatchingPattern,
     required this.maskProfiles,
-    required this.currentProductListHeader, // ★ 追加
+    required this.currentProductListHeader,
   });
 
   ProjectState copyWith({
@@ -62,7 +62,7 @@ class ProjectState {
     String? selectedCompany,
     String? selectedMatchingPattern,
     List<MaskProfile>? maskProfiles,
-    List<String>? currentProductListHeader, // ★ 追加
+    List<String>? currentProductListHeader,
   }) {
     return ProjectState(
       currentProjectId: currentProjectId == null ? this.currentProjectId : currentProjectId.value,
@@ -202,26 +202,23 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         row.caseNumber,
       ]));
 
-      // ★ 製品リストデータ構築 (動的対応)
+      // 製品リストデータ構築 (動的対応)
       List<List<String>> productListData = [];
       List<String> header = [];
 
       if (productListDbRows.isNotEmpty) {
         // 1行目を見てヘッダーを決定する
-        // contentJsonがある場合はそれを優先、なければ固定カラムから生成
         final firstRow = productListDbRows.first;
         if (firstRow.contentJson != null && firstRow.contentJson!.isNotEmpty) {
           try {
             final Map<String, dynamic> firstMap = jsonDecode(firstRow.contentJson!);
-            // JSONのキーをヘッダーとする (照合済Caseは別途追加)
             header = firstMap.keys.toList();
-            // 照合用キーがなければ追加しておく（表示の都合）
             if (!header.contains('照合済Case')) header.add('照合済Case');
           } catch (e) {
-            header = List.from(_defaultProductListHeader); // パース失敗時はデフォルト
+            header = List.from(_defaultProductListHeader); 
           }
         } else {
-          header = List.from(_defaultProductListHeader); // 古いデータの場合
+          header = List.from(_defaultProductListHeader);
         }
 
         productListData.add(header);
@@ -252,7 +249,6 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
           }
         }
       } else {
-        // データがない場合はデフォルトヘッダーのみ
         header = List.from(_defaultProductListHeader);
         productListData.add(header);
       }
@@ -266,7 +262,7 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         jsonSavePath: Value(null),
         nifudaData: nifudaData,
         productListKariData: productListData,
-        currentProductListHeader: header, // ★ 現在のヘッダーを保存
+        currentProductListHeader: header, 
       );
       FlutterLogs.logInfo('DB_ACTION', 'LOAD_PROJECT', 'Project $projectId loaded.');
 
@@ -287,7 +283,6 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
           if (nifudaData.isEmpty || (nifudaData.first.isNotEmpty && nifudaData.first[0] != nifudaHeader[0])) {
               nifudaData.insert(0, nifudaHeader);
           }
-          // ヘッダーチェックロジックは動的になったため厳密には不要だが、互換性のため残す
           if (productListData.isEmpty) {
               productListData.insert(0, _defaultProductListHeader);
           }
@@ -347,16 +342,16 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
   }
 
   // ★ 新設: Map形式のデータを追加 (動的スキーマ対応)
-  Future<void> addProductListMapRows(List<Map<String, String>> newRows, List<String> headerKeys, PromptDefinition promptDef) async {
+  Future<void> addProductListMapRows(List<Map<String, String>> newRows, List<String> headerKeys, MatchingProfile profile) async {
     if (state.currentProjectId == null) return;
     if (newRows.isEmpty) return;
 
     final projectId = state.currentProjectId!;
 
     final List<ProductListRowsCompanion> entries = newRows.map((rowMap) {
-      // 照合用キーの値を取得 (PromptDefinitionのマッピング情報を使用)
-      final orderNoVal = rowMap[promptDef.orderNoKey] ?? '';
-      final itemNoVal = rowMap[promptDef.itemNoKey] ?? '';
+      // 照合用キーの値を取得 (MatchingProfileのマッピング情報を使用)
+      final orderNoVal = rowMap[profile.productListKeyOrderNo] ?? '';
+      final itemNoVal = rowMap[profile.productListKeyItemNo] ?? '';
 
       return ProductListRowsCompanion.insert(
         projectId: projectId,
@@ -376,24 +371,16 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
 
     await _db.productListRowsDao.batchInsertProductListRows(entries);
 
-    // 画面表示用データの更新
-    // ヘッダーが現在のものと異なる場合（初回など）、ヘッダーを更新する
     List<String> currentHeader = state.currentProductListHeader;
-    // 「照合済Case」が含まれていない生ヘッダーを用意
     List<String> displayHeader = [...headerKeys, '照合済Case'];
 
-    // もし現在のデータが空（ヘッダーのみ）なら、新しいヘッダーで上書きする
-    // プロジェクト内でヘッダー形式は統一される前提
     if (state.productListKariData.length <= 1) {
       currentHeader = displayHeader;
     } 
     
-    // 表示用データを再構築
     final newDisplayRows = newRows.map((map) {
-      // 現在のヘッダー(currentHeader)の順番に従ってリスト化する
-      // '照合済Case' は除外してループし、最後に追加
       final headerWithoutMatched = currentHeader.where((k) => k != '照合済Case').toList();
-      return [...headerWithoutMatched.map((k) => map[k] ?? ''), '']; // 末尾は照合済Case (新規なので空)
+      return [...headerWithoutMatched.map((k) => map[k] ?? ''), ''];
     }).toList();
 
     final updatedList = List<List<String>>.from(state.productListKariData);

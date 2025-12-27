@@ -7,11 +7,11 @@ import 'package:flutter_logs/flutter_logs.dart';
 import 'package:http/http.dart' as http; 
 import 'package:google_generative_ai/google_generative_ai.dart'; 
 
-import 'prompt_definitions.dart'; 
+import 'matching_profile.dart'; // ★ 変更
 
 const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
 
-// ★ 修正: 最新の Gemini 3 Flash Preview モデルを指定
+// ★ 最新の Gemini 3 Flash Preview モデルを指定
 const modelName = 'gemini-3-flash-preview';
 
 // --- Local Helper Functions ---
@@ -152,7 +152,6 @@ Future<Map<String, dynamic>?> sendImageToGemini(
       return null;
     }
 
-    // ★ 修正: 生のレスポンスをログ出力
     if (kDebugMode) {
       debugPrint('================= [Gemini Nifuda Raw Response] =================');
       debugPrint(contentString);
@@ -205,7 +204,8 @@ Stream<String> sendImageToGeminiStream(
 }) async* {
   final model = _getGeminiClient();
   
-  final definition = PromptRegistry.getById(promptId);
+  // ★ PromptDefinition -> MatchingProfile に変更
+  final definition = MatchingProfileRegistry.getById(promptId);
   final prompt = definition.systemPrompt;
   
   final mime = _guessMimeType(imageBytes);

@@ -13,13 +13,10 @@ import 'package:path/path.dart' as p;
 import 'home_actions_gemini.dart';
 import 'project_load_dialog.dart';
 import '../database/app_database.dart';
-import 'smb_settings_page.dart';
-import 'directory_image_picker_page.dart';
-import 'mask_profile_edit_page.dart';
-import 'mask_profile_list_page.dart';
+import 'admin_settings_page.dart'; // ★ 管理者設定画面へ遷移
 import 'login_page.dart'; 
 import 'package:drift/drift.dart' show Value;
-import '../utils/prompt_definitions.dart';
+import '../utils/matching_profile.dart'; // ★ 追加
 
 class HomePage extends ConsumerWidget {
   HomePage({super.key});
@@ -44,17 +41,13 @@ class HomePage extends ConsumerWidget {
         final isProjectActive = projectState.currentProjectId != null || projectState.projectTitle.isNotEmpty;
         final isLoading = projectState.isLoading;
         
-        final List<String> matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）'];
-        
-        final List<String> fixedMaskOptions = ['マスク処理なし', '動的マスク処理'];
-        final List<String> customMaskOptions = projectState.maskProfiles.map((p) => p.profileName).toList();
-        final List<String> maskOptions = [
-          ...fixedMaskOptions, 
-          ...customMaskOptions, 
-          '-----------------', 
-          '+ 新規追加...',
-          '- 設定の削除...'
-        ];
+        // ★ プロファイルリストの作成
+        // デフォルトの選択肢(プリセット) + DBから読み込んだプロファイル
+        final List<String> profileOptions = [
+          '(未選択)', 
+          ...MatchingProfileRegistry.availableProfiles.map((p) => p.label), // プリセット
+          ...projectState.maskProfiles.map((p) => p.profileName) // DB保存分
+        ].toSet().toList(); // 重複排除
 
         return Scaffold(
           appBar: AppBar(
@@ -72,7 +65,8 @@ class HomePage extends ConsumerWidget {
                IconButton(
                   icon: const Icon(Icons.settings),
                   onPressed: () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const SmbSettingsPage()));
+                    // ★ 管理者設定画面へ遷移
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminSettingsPage()));
                   },
                 ),
                 IconButton(
@@ -103,7 +97,7 @@ class HomePage extends ConsumerWidget {
                         const SizedBox(height: 24),
                         const Divider(thickness: 2),
                         const SizedBox(height: 16),
-                        _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns, dbInstance),
+                        _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, profileOptions, dbInstance),
                       ],
                     ),
                   );
@@ -116,7 +110,7 @@ class HomePage extends ConsumerWidget {
                         Expanded(
                           flex: 4, 
                           child: SingleChildScrollView(
-                            child: _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, maskOptions, matchingPatterns, dbInstance),
+                            child: _buildLeftColumn(context, ref, projectState, notifier, isProjectActive, isLoading, profileOptions, dbInstance),
                           ),
                         ),
                         const SizedBox(width: 24),
@@ -163,8 +157,7 @@ class HomePage extends ConsumerWidget {
     ProjectNotifier notifier, 
     bool isProjectActive, 
     bool isLoading,
-    List<String> maskOptions,
-    List<String> matchingPatterns,
+    List<String> profileOptions,
     AppDatabase db,
   ) {
     final nifudaDataCount = state.nifudaData.length - (state.nifudaData.isNotEmpty ? 1 : 0);
@@ -285,28 +278,13 @@ class HomePage extends ConsumerWidget {
 
         const Divider(height: 24, thickness: 1),
 
+        // ★ 作業プロファイル選択 (最重要)
         _buildDropdownSelector(
-          value: maskOptions.contains(state.selectedCompany) ? state.selectedCompany : 'マスク処理なし',
-          items: maskOptions,
-          prefix: 'マスク処理:',
+          value: profileOptions.contains(state.selectedCompany) ? state.selectedCompany : '(未選択)',
+          items: profileOptions,
+          prefix: '作業プロファイル:',
           onChanged: isLoading ? null : (String? newValue) async {
-            if (newValue == null || newValue == '-----------------') return;
-
-            if (newValue == '+ 新規追加...') {
-              final result = await Navigator.push(
-                context, 
-                MaterialPageRoute(builder: (_) => const MaskProfileEditPage())
-              );
-              if (result == true) {
-                await notifier.loadMaskProfiles();
-              }
-            } else if (newValue == '- 設定の削除...') {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const MaskProfileListPage())
-              );
-              await notifier.loadMaskProfiles();
-            } else {
+            if (newValue != null && newValue != '(未選択)') {
               notifier.updateSelection(company: newValue);
             }
           },
@@ -317,19 +295,26 @@ class HomePage extends ConsumerWidget {
           text: '製品リストを撮影して抽出 (GPT)',
           icon: Icons.scanner,
           color: Colors.pink.shade600,
-          isEnabled: isProjectActive && !isLoading,
+          // プロファイル未選択時は押せないようにする
+          isEnabled: isProjectActive && !isLoading && state.selectedCompany != '(未選択)',
           onPressed: () async {
              if (state.projectFolderPath == null) {
                  _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
                  return;
              }
              
-             // ★ 選択中のプロンプト定義を取得
-             final profile = state.maskProfiles.firstWhere(
-                 (p) => p.profileName == state.selectedCompany,
-                 orElse: () => const MaskProfile(id: 0, profileName: '', rectsJson: '', promptId: 'standard')
-             );
-             final definition = PromptRegistry.getById(profile.promptId);
+             // ★ 選択中のプロファイルを取得 (プリセット or DB)
+             MatchingProfile matchingProfile;
+             final preset = MatchingProfileRegistry.availableProfiles.where((p) => p.label == state.selectedCompany).firstOrNull;
+             if (preset != null) {
+               matchingProfile = preset;
+             } else {
+               final maskProfile = state.maskProfiles.firstWhere(
+                   (p) => p.profileName == state.selectedCompany,
+                   orElse: () => throw Exception('プロファイルが見つかりません')
+               );
+               matchingProfile = MatchingProfileRegistry.fromDbProfile(maskProfile);
+             }
 
              // ★ リスト(values)を取得
              final newRowsList = await captureProcessAndConfirmProductListAction(
@@ -344,9 +329,9 @@ class HomePage extends ConsumerWidget {
                  // ★ Mapに変換
                  List<Map<String, String>> mapRows = newRowsList.map((rowVals) {
                     Map<String, String> map = {};
-                    for(int i=0; i<definition.displayFields.length; i++) {
+                    for(int i=0; i<matchingProfile.displayFields.length; i++) {
                       if (i < rowVals.length) {
-                        map[definition.displayFields[i]] = rowVals[i];
+                        map[matchingProfile.displayFields[i]] = rowVals[i];
                       }
                     }
                     return map;
@@ -355,8 +340,8 @@ class HomePage extends ConsumerWidget {
                  // ★ 新しい保存メソッドを呼ぶ
                  await notifier.addProductListMapRows(
                    mapRows, 
-                   definition.displayFields,
-                   definition
+                   matchingProfile.displayFields,
+                   matchingProfile
                  );
              }
           },
@@ -366,19 +351,25 @@ class HomePage extends ConsumerWidget {
           text: '製品リストを撮影して抽出 (Gemini)',
           icon: Icons.scanner_outlined,
           color: Colors.red.shade700,
-          isEnabled: isProjectActive && !isLoading,
+          isEnabled: isProjectActive && !isLoading && state.selectedCompany != '(未選択)',
           onPressed: () async {
              if (state.projectFolderPath == null) {
                  _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
                  return;
              }
              
-             // ★ 選択中のプロンプト定義を取得
-             final profile = state.maskProfiles.firstWhere(
-                 (p) => p.profileName == state.selectedCompany,
-                 orElse: () => const MaskProfile(id: 0, profileName: '', rectsJson: '', promptId: 'standard')
-             );
-             final definition = PromptRegistry.getById(profile.promptId);
+             // ★ 選択中のプロファイルを取得 (プリセット or DB)
+             MatchingProfile matchingProfile;
+             final preset = MatchingProfileRegistry.availableProfiles.where((p) => p.label == state.selectedCompany).firstOrNull;
+             if (preset != null) {
+               matchingProfile = preset;
+             } else {
+               final maskProfile = state.maskProfiles.firstWhere(
+                   (p) => p.profileName == state.selectedCompany,
+                   orElse: () => throw Exception('プロファイルが見つかりません')
+               );
+               matchingProfile = MatchingProfileRegistry.fromDbProfile(maskProfile);
+             }
 
              // ★ リスト(values)を取得
              final newRowsList = await captureProcessAndConfirmProductListActionGemini(
@@ -393,9 +384,9 @@ class HomePage extends ConsumerWidget {
                  // ★ Mapに変換
                  List<Map<String, String>> mapRows = newRowsList.map((rowVals) {
                     Map<String, String> map = {};
-                    for(int i=0; i<definition.displayFields.length; i++) {
+                    for(int i=0; i<matchingProfile.displayFields.length; i++) {
                       if (i < rowVals.length) {
-                        map[definition.displayFields[i]] = rowVals[i];
+                        map[matchingProfile.displayFields[i]] = rowVals[i];
                       }
                     }
                     return map;
@@ -404,8 +395,8 @@ class HomePage extends ConsumerWidget {
                  // ★ 新しい保存メソッドを呼ぶ
                  await notifier.addProductListMapRows(
                    mapRows, 
-                   definition.displayFields,
-                   definition
+                   matchingProfile.displayFields,
+                   matchingProfile
                  );
              }
           },
@@ -424,31 +415,37 @@ class HomePage extends ConsumerWidget {
         ),
         
         const Divider(height: 24, thickness: 1),
-
-        _buildDropdownSelector(
-          value: state.selectedMatchingPattern,
-          items: matchingPatterns,
-          prefix: '照合パターン:',
-          onChanged: isLoading ? null : (String? newValue) => notifier.updateSelection(matchingPattern: newValue),
-          color: Colors.green,
-        ),
         
         _buildActionButton(
           text: '照合を開始する (${state.currentCaseNumber})',
           icon: Icons.rule,
           color: Colors.purple.shade600,
-          isEnabled: hasNifudaData && hasProductData && isProjectActive && !isLoading,
+          isEnabled: hasNifudaData && hasProductData && isProjectActive && !isLoading && state.selectedCompany != '(未選択)',
           isLarge: true,
           onPressed: () async {
              if (state.projectFolderPath == null) {
                  _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
                  return;
              }
+
+             // ★ プロファイルを渡して照合
+             MatchingProfile matchingProfile;
+             final preset = MatchingProfileRegistry.availableProfiles.where((p) => p.label == state.selectedCompany).firstOrNull;
+             if (preset != null) {
+               matchingProfile = preset;
+             } else {
+               final maskProfile = state.maskProfiles.firstWhere(
+                   (p) => p.profileName == state.selectedCompany,
+                   orElse: () => throw Exception('プロファイルが見つかりません')
+               );
+               matchingProfile = MatchingProfileRegistry.fromDbProfile(maskProfile);
+             }
+
              final newStatus = await startMatchingAndShowResultsAction(
                context,
                state.nifudaData,
                state.productListKariData,
-               state.selectedMatchingPattern,
+               matchingProfile, // ★ Profileを渡す
                state.projectTitle,
                state.projectFolderPath!,
                state.currentCaseNumber,

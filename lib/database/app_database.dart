@@ -1,6 +1,6 @@
 // lib/database/app_database.dart
 import 'dart:io';
-import 'dart:convert'; // JSON変換用
+import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path_provider/path_provider.dart';
@@ -18,9 +18,9 @@ part 'app_database.g.dart';
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
-  // ★ 修正: バージョンを 6 に更新
+  // ★ バージョンを 7 に更新
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration {
@@ -42,9 +42,17 @@ class AppDatabase extends _$AppDatabase {
         if (from < 5) {
           await m.createTable(users);
         }
-        // ★ バージョン6への更新: contentJsonカラム追加
         if (from < 6) {
           await m.addColumn(productListRows, productListRows.contentJson);
+        }
+        // ★ バージョン7: プロファイル機能拡張用カラム追加
+        if (from < 7) {
+          // 製品リストの項目名リスト (JSON)
+          await m.addColumn(maskProfiles, maskProfiles.productListFieldsJson);
+          // 照合ペア設定 (JSON)
+          await m.addColumn(maskProfiles, maskProfiles.matchingPairsJson);
+          // AI抽出モード (enum string)
+          await m.addColumn(maskProfiles, maskProfiles.extractionMode);
         }
       },
     );
@@ -137,12 +145,9 @@ class MaskProfilesDao extends DatabaseAccessor<AppDatabase> with _$MaskProfilesD
     return (select(maskProfiles)..where((t) => t.profileName.equals(name))).getSingleOrNull();
   }
 
-  Future<int> insertProfile(String name, List<String> rectsData, {String? promptId}) {
-    return into(maskProfiles).insert(MaskProfilesCompanion.insert(
-      profileName: name,
-      rectsJson: jsonEncode(rectsData),
-      promptId: Value(promptId), 
-    ));
+  // ★ 更新: 新しいカラムにも対応
+  Future<int> insertOrUpdateProfile(MaskProfilesCompanion companion) {
+    return into(maskProfiles).insertOnConflictUpdate(companion);
   }
   
   Future<int> deleteProfile(int id) => (delete(maskProfiles)..where((t) => t.id.equals(id))).go();
@@ -152,22 +157,18 @@ class MaskProfilesDao extends DatabaseAccessor<AppDatabase> with _$MaskProfilesD
 class UsersDao extends DatabaseAccessor<AppDatabase> with _$UsersDaoMixin {
   UsersDao(AppDatabase db) : super(db);
 
-  // ユーザー名で検索
   Future<User?> findUserByName(String username) {
     return (select(users)..where((t) => t.username.equals(username))).getSingleOrNull();
   }
 
-  // IDで検索
   Future<User?> getUserById(int id) {
     return (select(users)..where((t) => t.id.equals(id))).getSingleOrNull();
   }
 
-  // 全ユーザー取得
   Future<List<User>> getAllUsers() {
     return (select(users)..orderBy([(t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc)])).get();
   }
 
-  // 新規登録
   Future<int> createUser(String username, {String? password}) {
     return into(users).insert(UsersCompanion.insert(
       username: username,
