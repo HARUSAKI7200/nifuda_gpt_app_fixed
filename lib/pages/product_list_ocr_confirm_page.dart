@@ -1,25 +1,15 @@
+// lib/pages/product_list_ocr_confirm_page.dart
 import 'package:flutter/material.dart';
 
 class ProductListOcrConfirmPage extends StatefulWidget {
   final List<Map<String, String>> extractedProductRows;
-
-static const List<String> productFields = [
-    'ORDER No.',
-    'ITEM OF SPARE',
-    '品名記号',
-    '形格',
-    '製品コード番号',
-    '注文数',
-    '記事', // ★ gpt_service.dart の TMEIC プロンプト例に合わせる場合
-    // '記事(REMARKS)', // ★ gpt_service.dart の TMEIC 以外プロンプトに合わせる場合
-    '備考(NOTE)',    // ★ TMEIC 用
-    // '備考(REMARKS)', // ★ TMEIC 以外用 (TMEIC 以外も対応する場合)
-    // '備考' // <- これは削除 または 上記のどちらかに統一
-  ];
+  // ★ 追加: 表示するカラムのリストを受け取る
+  final List<String> displayFields;
 
   const ProductListOcrConfirmPage({
     super.key,
     required this.extractedProductRows,
+    required this.displayFields,
   });
 
   @override
@@ -32,11 +22,11 @@ class _ProductListOcrConfirmPageState extends State<ProductListOcrConfirmPage> {
   @override
   void initState() {
     super.initState();
-    // ここで extractedProductRows を ProductListOcrConfirmPage.productFields に基づいて整形し直す
+    // 受け取ったデータとフィールド定義に基づいてデータを整形
     _currentProductRows = widget.extractedProductRows.map((rowMap) {
       Map<String, String> structuredRow = {};
-      for (String fieldName in ProductListOcrConfirmPage.productFields) {
-        // 全ての期待されるフィールドに対して、値が存在するか確認し、なければ空文字列を割り当てる
+      for (String fieldName in widget.displayFields) {
+        // フィールドに対応する値があれば取得、なければ空文字
         structuredRow[fieldName] = rowMap[fieldName]?.trim() ?? '';
       }
       return structuredRow;
@@ -44,8 +34,9 @@ class _ProductListOcrConfirmPageState extends State<ProductListOcrConfirmPage> {
   }
 
   void _onConfirm() {
+    // 確定時は「リストのリスト」形式にして返す
     final List<List<String>> confirmedDataAsListOfList = _currentProductRows.map((rowMap) {
-      return ProductListOcrConfirmPage.productFields.map((fieldName) {
+      return widget.displayFields.map((fieldName) {
         return rowMap[fieldName]?.trim() ?? '';
       }).toList();
     }).toList();
@@ -56,35 +47,19 @@ class _ProductListOcrConfirmPageState extends State<ProductListOcrConfirmPage> {
     Navigator.pop(context, null); // nullを返して全破棄
   }
 
-  void _removeRow(int rowIndex) {
-    setState(() {
-      if (rowIndex >= 0 && rowIndex < _currentProductRows.length) {
-        _currentProductRows.removeAt(rowIndex);
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    // ★ 変更点：手動での下部パディング計算を削除
-    // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    // final double buttonBottomPosition = 15.0 + 60.0 + 10.0 + MediaQuery.of(context).padding.bottom;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('製品リストOCR結果確認'),
       ),
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-      // ★ 変更点：body全体をSafeAreaでラップ
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
       body: SafeArea(
-        child: Column( // Stackの代わりにColumnを使用
+        child: Column(
           children: [
             // スクロール可能なテーブル部分
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 0), // 下パディングを削除
+                padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 0),
                 child: _currentProductRows.isEmpty
                     ? const Center(child: Text('表示する製品データがありません。'))
                     : SingleChildScrollView(
@@ -92,16 +67,16 @@ class _ProductListOcrConfirmPageState extends State<ProductListOcrConfirmPage> {
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: DataTable(
-                            columns: ProductListOcrConfirmPage.productFields
+                            // ★ widget.displayFields を使って動的にカラム生成
+                            columns: widget.displayFields
                                 .map((field) => DataColumn(label: Text(field, style: const TextStyle(fontWeight: FontWeight.bold))))
                                 .toList(),
                             rows: _currentProductRows.asMap().entries.map((entry) {
-                               final rowIndex = entry.key;
                                final rowData = entry.value;
                                return DataRow(
                                  cells: [
-                                   // 各フィールドに対して、rowDataから値を取得し、なければ空文字列を割り当てる
-                                   ...ProductListOcrConfirmPage.productFields.map((field) {
+                                   // 各フィールドの値をセルに設定
+                                   ...widget.displayFields.map((field) {
                                      return DataCell(Text(rowData[field] ?? ''));
                                    }),
                                  ]
@@ -126,11 +101,11 @@ class _ProductListOcrConfirmPageState extends State<ProductListOcrConfirmPage> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red[600],
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12), // 垂直パディングのみ
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 16), // ボタン間のスペース
+                  const SizedBox(width: 16),
                   Expanded(
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.check_circle_outline_rounded),
@@ -139,7 +114,7 @@ class _ProductListOcrConfirmPageState extends State<ProductListOcrConfirmPage> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green[700],
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12), // 垂直パディングのみ
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
                   ),

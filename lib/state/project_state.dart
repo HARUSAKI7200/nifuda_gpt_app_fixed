@@ -1,10 +1,12 @@
 // lib/state/project_state.dart
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_logs/flutter_logs.dart';
 import 'package:drift/drift.dart';
 
 import '../database/app_database.dart';
+import '../utils/prompt_definitions.dart';
 
 // 進捗ステータス
 const String STATUS_PENDING = '検品前';
@@ -28,6 +30,9 @@ class ProjectState {
   
   final List<MaskProfile> maskProfiles;
 
+  // ★ 追加: 現在の製品リストのヘッダー（動的に変わるため）
+  final List<String> currentProductListHeader;
+
   const ProjectState({
     this.currentProjectId,
     required this.projectTitle,
@@ -41,6 +46,7 @@ class ProjectState {
     required this.selectedCompany,
     required this.selectedMatchingPattern,
     required this.maskProfiles,
+    required this.currentProductListHeader, // ★ 追加
   });
 
   ProjectState copyWith({
@@ -56,6 +62,7 @@ class ProjectState {
     String? selectedCompany,
     String? selectedMatchingPattern,
     List<MaskProfile>? maskProfiles,
+    List<String>? currentProductListHeader, // ★ 追加
   }) {
     return ProjectState(
       currentProjectId: currentProjectId == null ? this.currentProjectId : currentProjectId.value,
@@ -70,12 +77,16 @@ class ProjectState {
       selectedCompany: selectedCompany ?? this.selectedCompany,
       selectedMatchingPattern: selectedMatchingPattern ?? this.selectedMatchingPattern,
       maskProfiles: maskProfiles ?? this.maskProfiles,
+      currentProductListHeader: currentProductListHeader ?? this.currentProductListHeader,
     );
   }
 }
 
 class ProjectNotifier extends StateNotifier<ProjectState> {
   final AppDatabase _db;
+
+  // デフォルトヘッダー（互換性のため）
+  static const List<String> _defaultProductListHeader = ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考', '照合済Case'];
 
   ProjectNotifier(this._db)
       : super(const ProjectState(
@@ -88,9 +99,10 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
           nifudaData: [], 
           productListKariData: [], 
           isLoading: false,
-          selectedCompany: 'マスク処理なし', // ★ 変更: 初期値を変更
+          selectedCompany: 'マスク処理なし',
           selectedMatchingPattern: 'T社（製番・項目番号）',
           maskProfiles: [],
+          currentProductListHeader: _defaultProductListHeader,
         )) {
     loadMaskProfiles();
   }
@@ -135,7 +147,6 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
   // ====== DB連携ロジック ======
 
   List<String> get nifudaHeader => const ['製番', '項目番号', '品名', '形式', '個数', '図書番号', '摘要', '手配コード', 'Case No.'];
-  List<String> get productListHeader => const ['ORDER No.', 'ITEM OF SPARE', '品名記号', '形格', '製品コード番号', '注文数', '記事', '備考', '照合済Case'];
 
   Future<void> createProject({
     required String projectCode,
@@ -159,7 +170,8 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         currentCaseNumber: '#1',
         jsonSavePath: Value(null),
         nifudaData: [nifudaHeader],
-        productListKariData: [productListHeader],
+        productListKariData: [_defaultProductListHeader],
+        currentProductListHeader: _defaultProductListHeader,
       );
       FlutterLogs.logInfo('DB_ACTION', 'CREATE_PROJECT', 'Project ${newProject.id} created/updated.');
 
@@ -190,12 +202,60 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         row.caseNumber,
       ]));
 
-      final productListData = [productListHeader];
-      productListData.addAll(productListDbRows.map((row) => [
-        row.orderNo, row.itemOfSpare, row.productSymbol, row.formSpec,
-        row.productCode, row.orderQuantity, row.article, row.note,
-        row.matchedCase ?? '',
-      ]));
+      // ★ 製品リストデータ構築 (動的対応)
+      List<List<String>> productListData = [];
+      List<String> header = [];
+
+      if (productListDbRows.isNotEmpty) {
+        // 1行目を見てヘッダーを決定する
+        // contentJsonがある場合はそれを優先、なければ固定カラムから生成
+        final firstRow = productListDbRows.first;
+        if (firstRow.contentJson != null && firstRow.contentJson!.isNotEmpty) {
+          try {
+            final Map<String, dynamic> firstMap = jsonDecode(firstRow.contentJson!);
+            // JSONのキーをヘッダーとする (照合済Caseは別途追加)
+            header = firstMap.keys.toList();
+            // 照合用キーがなければ追加しておく（表示の都合）
+            if (!header.contains('照合済Case')) header.add('照合済Case');
+          } catch (e) {
+            header = List.from(_defaultProductListHeader); // パース失敗時はデフォルト
+          }
+        } else {
+          header = List.from(_defaultProductListHeader); // 古いデータの場合
+        }
+
+        productListData.add(header);
+
+        // 全行をヘッダーに合わせてリスト化
+        for (var row in productListDbRows) {
+          if (row.contentJson != null && row.contentJson!.isNotEmpty) {
+            try {
+              final Map<String, dynamic> map = jsonDecode(row.contentJson!);
+              List<String> rowValues = [];
+              for (var key in header) {
+                if (key == '照合済Case') {
+                  rowValues.add(row.matchedCase ?? '');
+                } else {
+                  rowValues.add(map[key]?.toString() ?? '');
+                }
+              }
+              productListData.add(rowValues);
+            } catch (e) {
+              // パースエラー時はスキップ
+            }
+          } else {
+            // 古い固定カラムデータの場合
+            productListData.add([
+              row.orderNo, row.itemOfSpare, row.productSymbol, row.formSpec,
+              row.productCode, row.orderQuantity, row.article, row.note, row.matchedCase ?? ''
+            ]);
+          }
+        }
+      } else {
+        // データがない場合はデフォルトヘッダーのみ
+        header = List.from(_defaultProductListHeader);
+        productListData.add(header);
+      }
 
       state = state.copyWith(
         currentProjectId: Value(projectId),
@@ -206,6 +266,7 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
         jsonSavePath: Value(null),
         nifudaData: nifudaData,
         productListKariData: productListData,
+        currentProductListHeader: header, // ★ 現在のヘッダーを保存
       );
       FlutterLogs.logInfo('DB_ACTION', 'LOAD_PROJECT', 'Project $projectId loaded.');
 
@@ -226,8 +287,9 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
           if (nifudaData.isEmpty || (nifudaData.first.isNotEmpty && nifudaData.first[0] != nifudaHeader[0])) {
               nifudaData.insert(0, nifudaHeader);
           }
-          if (productListData.isEmpty || (productListData.first.isNotEmpty && productListData.first[0] != productListHeader[0])) {
-              productListData.insert(0, productListHeader);
+          // ヘッダーチェックロジックは動的になったため厳密には不要だが、互換性のため残す
+          if (productListData.isEmpty) {
+              productListData.insert(0, _defaultProductListHeader);
           }
 
           state = state.copyWith(
@@ -238,6 +300,7 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
               inspectionStatus: STATUS_IN_PROGRESS,
               currentProjectId: Value(null),
               currentCaseNumber: jsonData['currentCaseNumber'] ?? '#1',
+              currentProductListHeader: productListData.isNotEmpty ? productListData[0] : _defaultProductListHeader,
           );
           FlutterLogs.logInfo('STATE_ACTION', 'LOAD_JSON', 'Project state loaded from JSON.');
       } catch (e, s) {
@@ -283,6 +346,72 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     FlutterLogs.logInfo('DB_ACTION', 'ADD_NIFUDA', '${entries.length} nifuda rows added for Case $currentCaseNumber.');
   }
 
+  // ★ 新設: Map形式のデータを追加 (動的スキーマ対応)
+  Future<void> addProductListMapRows(List<Map<String, String>> newRows, List<String> headerKeys, PromptDefinition promptDef) async {
+    if (state.currentProjectId == null) return;
+    if (newRows.isEmpty) return;
+
+    final projectId = state.currentProjectId!;
+
+    final List<ProductListRowsCompanion> entries = newRows.map((rowMap) {
+      // 照合用キーの値を取得 (PromptDefinitionのマッピング情報を使用)
+      final orderNoVal = rowMap[promptDef.orderNoKey] ?? '';
+      final itemNoVal = rowMap[promptDef.itemNoKey] ?? '';
+
+      return ProductListRowsCompanion.insert(
+        projectId: projectId,
+        // 必須・照合用カラム
+        orderNo: orderNoVal,
+        itemOfSpare: itemNoVal,
+        productSymbol: '', // 互換用ダミー
+        orderQuantity: '', // 互換用ダミー
+        // 自由データはJSONにして保存
+        contentJson: Value(jsonEncode(rowMap)),
+        
+        // 以下の固定カラムは使わないので空文字
+        formSpec: '', productCode: '', article: '', note: '',
+        matchedCase: Value(null),
+      );
+    }).toList();
+
+    await _db.productListRowsDao.batchInsertProductListRows(entries);
+
+    // 画面表示用データの更新
+    // ヘッダーが現在のものと異なる場合（初回など）、ヘッダーを更新する
+    List<String> currentHeader = state.currentProductListHeader;
+    // 「照合済Case」が含まれていない生ヘッダーを用意
+    List<String> displayHeader = [...headerKeys, '照合済Case'];
+
+    // もし現在のデータが空（ヘッダーのみ）なら、新しいヘッダーで上書きする
+    // プロジェクト内でヘッダー形式は統一される前提
+    if (state.productListKariData.length <= 1) {
+      currentHeader = displayHeader;
+    } 
+    
+    // 表示用データを再構築
+    final newDisplayRows = newRows.map((map) {
+      // 現在のヘッダー(currentHeader)の順番に従ってリスト化する
+      // '照合済Case' は除外してループし、最後に追加
+      final headerWithoutMatched = currentHeader.where((k) => k != '照合済Case').toList();
+      return [...headerWithoutMatched.map((k) => map[k] ?? ''), '']; // 末尾は照合済Case (新規なので空)
+    }).toList();
+
+    final updatedList = List<List<String>>.from(state.productListKariData);
+    if (updatedList.length <= 1 && state.productListKariData.length <= 1) {
+       updatedList.clear();
+       updatedList.add(currentHeader);
+    }
+    updatedList.addAll(newDisplayRows);
+
+    state = state.copyWith(
+      productListKariData: updatedList,
+      currentProductListHeader: currentHeader,
+      inspectionStatus: STATUS_IN_PROGRESS,
+    );
+    FlutterLogs.logInfo('DB_ACTION', 'ADD_PRODUCT_LIST_MAP', '${entries.length} product list rows added (Dynamic).');
+  }
+
+  // 旧メソッド (互換性のため残す)
   Future<void> addProductListRows(List<List<String>> newRows) async {
     if (state.currentProjectId == null) return;
     if (newRows.isEmpty) return;
@@ -308,13 +437,13 @@ class ProjectNotifier extends StateNotifier<ProjectState> {
     await _db.productListRowsDao.batchInsertProductListRows(entries);
 
     final newRowsWithMatchedCase = newRows.map((row) => [...row, '']).toList();
-    final currentData = state.productListKariData.isEmpty ? [productListHeader] : state.productListKariData;
+    final currentData = state.productListKariData.isEmpty ? [_defaultProductListHeader] : state.productListKariData;
     final updatedList = List<List<String>>.from(currentData)..addAll(newRowsWithMatchedCase);
     state = state.copyWith(
       productListKariData: updatedList,
       inspectionStatus: STATUS_IN_PROGRESS,
     );
-    FlutterLogs.logInfo('DB_ACTION', 'ADD_PRODUCT_LIST', '${entries.length} product list rows added.');
+    FlutterLogs.logInfo('DB_ACTION', 'ADD_PRODUCT_LIST', '${entries.length} product list rows added (Legacy).');
   }
 
   Future<void> updateProjectStatus(String status) async {

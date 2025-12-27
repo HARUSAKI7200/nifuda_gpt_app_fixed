@@ -27,8 +27,6 @@ class NifudaRows extends Table {
   TextColumn get documentNumber => text().named('document_number')(); 
   TextColumn get remarks => text().named('remarks')(); 
   TextColumn get arrangementCode => text().named('arrangement_code')();
-  
-  // ★★★ 修正: ここに caseNumber を追加 ★★★
   TextColumn get caseNumber => text().named('case_number')(); 
 }
 
@@ -38,15 +36,22 @@ class NifudaRows extends Table {
 class ProductListRows extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get projectId => integer().named('project_id')();
+  
+  // 照合用・検索用のコア項目はそのまま残す
   TextColumn get orderNo => text().named('order_no')(); 
   TextColumn get itemOfSpare => text().named('item_of_spare')(); 
   TextColumn get productSymbol => text().named('product_symbol')(); 
+  TextColumn get orderQuantity => text().named('order_quantity')(); 
+  TextColumn get matchedCase => text().nullable()();
+
+  // 以下の固定カラムは互換性のために残すが、今後は contentJson が主役になる
   TextColumn get formSpec => text().named('form_spec')(); 
   TextColumn get productCode => text().named('product_code')(); 
-  TextColumn get orderQuantity => text().named('order_quantity')(); 
   TextColumn get article => text().named('article')(); 
   TextColumn get note => text().named('note')(); 
-  TextColumn get matchedCase => text().nullable()();
+
+  // ★ 新規追加: 全項目をJSON形式で保存するカラム
+  TextColumn get contentJson => text().nullable()();
 }
 
 // ★ 4. マスク設定
@@ -55,8 +60,14 @@ class MaskProfiles extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get profileName => text().unique()(); // 設定名（会社名）
   TextColumn get rectsJson => text()(); // 範囲データ(Rectのリスト)をJSON文字列で保存
-  
-  // ★★★ 追加: 使用するプロンプトID ★★★
-  // nullの場合はデフォルト(standard)を使用
-  TextColumn get promptId => text().nullable()(); 
+  TextColumn get promptId => text().nullable()(); // 使用するプロンプトID
+}
+
+// ★ 5. ユーザー
+@DataClassName('User')
+class Users extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get username => text().unique()(); // ユーザー名 (一意)
+  TextColumn get password => text().nullable()(); // 将来用 (現在は使用しないが枠だけ用意)
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 }

@@ -1,13 +1,4 @@
 // lib/utils/gpt_service.dart
-//
-// 修正方針：
-// - ★★★ 修正: GPTモデルを「gpt-5.2」に変更 ★★★
-// - 荷札抽出時のフォールバックロジックを削除。
-// - gpt-5.2 が "temperature: 0.0" に非対応なため、temperatureの指定自体を削除 (維持)
-// - SDKのChatCompletionResponseFormatエラーをResponseFormat(type: ResponseFormatType.jsonObject)に修正。
-// - ストリーミング応答のNull安全性を強化。
-// - 欠落していた `package:flutter/foundation.dart` のインポートを追加。
-// - ★ プロンプトレジストリを使用し、引数を company から promptId に変更。
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -16,11 +7,10 @@ import 'package:flutter_logs/flutter_logs.dart';
 import 'package:http/http.dart' as http;
 import 'package:openai_dart/openai_dart.dart';
 
-import 'prompt_definitions.dart'; // ★追加
+import 'prompt_definitions.dart'; 
 
-// --- Local Helper Functions (Duplicated for consistency) ---
+// --- Local Helper Functions ---
 
-// Uint8ListからMIMEタイプを推定する (重複)
 String _guessMimeType(Uint8List imageBytes) {
   String mime = 'image/jpeg';
   if (imageBytes.lengthInBytes >= 12) {
@@ -39,7 +29,6 @@ String _guessMimeType(Uint8List imageBytes) {
   return mime;
 }
 
-// コードフェンス除去（```json ... ``` → 素のJSON） (重複)
 String _stripCodeFences(String s) {
   final fence = RegExp(r'^```(?:json)?\s*([\s\S]*?)\s*```$', multiLine: true);
   final m = fence.firstMatch(s.trim());
@@ -49,7 +38,6 @@ String _stripCodeFences(String s) {
   return s;
 }
 
-// 荷札（Nifuda）抽出プロンプト (重複)
 String _buildNifudaPrompt() {
   return '''
 あなたは、かすれたり不鮮明な荷札の画像を完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
@@ -97,17 +85,14 @@ String _buildNifudaPrompt() {
 }
 
 
-/// OpenAI APIキーを --dart-define から取得
 const openAIApiKey = String.fromEnvironment('OPENAI_API_KEY');
 
-/// OpenAI クライアント（singleton）
 final OpenAIClient _openAIClient = OpenAIClient(apiKey: openAIApiKey);
 
-/// Chat Completions (multimodal) への送信（private集約）
 Future<CreateChatCompletionResponse> _openAICreateVisionChat({
   required ChatCompletionModel model,
   required String prompt,
-  required String dataUrl, // data:<mime>;base64,.... の形式
+  required String dataUrl, 
 }) {
   return _openAIClient.createChatCompletion(
     request: CreateChatCompletionRequest(
@@ -129,17 +114,15 @@ Future<CreateChatCompletionResponse> _openAICreateVisionChat({
           ]),
         ),
       ],
-      // ★ 修正: temperature: 0.0 を削除 (gpt-5.2 対応)
       responseFormat: ResponseFormat.jsonObject(),
     ),
   );
 }
 
-/// Chat Completions (multimodal) へのストリーミング送信（private集約）
 Stream<CreateChatCompletionStreamResponse> _openAICreateVisionChatStream({
   required ChatCompletionModel model,
   required String prompt,
-  required String dataUrl, // data:<mime>;base64,.... の形式
+  required String dataUrl, 
 }) {
   return _openAIClient.createChatCompletionStream(
     request: CreateChatCompletionRequest(
@@ -161,23 +144,19 @@ Stream<CreateChatCompletionStreamResponse> _openAICreateVisionChatStream({
           ]),
         ),
       ],
-      // ★ 修正: temperature: 0.0 を削除 (gpt-5.2 対応)
       responseFormat: ResponseFormat.jsonObject(),
     ),
   );
 }
 
 
-/// 荷札抽出用のメイン関数 (非ストリーミング)
 Future<Map<String, dynamic>?> sendImageToGPT(
   Uint8List imageBytes, {
   required bool isProductList,
-  // ★ company 引数を削除し、後方互換のために残す場合は無視するか、promptId を使用するように呼び出し元を変更
   String? promptId, 
-  String company = '', // Deprecated: use promptId instead
+  String company = '', 
   http.Client? client, 
 }) async {
-  // APIキーの検証
   if (openAIApiKey.isEmpty) {
     FlutterLogs.logThis(
       tag: 'GPT_SERVICE',
@@ -188,7 +167,6 @@ Future<Map<String, dynamic>?> sendImageToGPT(
     throw Exception('OpenAI APIキーが設定されていません。');
   }
 
-  // 製品リストの場合はストリーミング専用関数へ委譲 (ここでは非ストリーミング関数として実装を維持)
   if (isProductList) {
     if (kDebugMode) print('Warning: Product List extraction should use sendImageToGPTStream.');
   }
@@ -197,11 +175,8 @@ Future<Map<String, dynamic>?> sendImageToGPT(
   final String base64Image = base64Encode(imageBytes);
   final String dataUrl = 'data:$mime;base64,$base64Image';
 
-  // ★★★ 修正: モデルを gpt-5.2 に変更 ★★★
   ChatCompletionModel primaryModel = ChatCompletionModel.modelId('gpt-5.2');
   
-  // プロンプト
-  // 荷札の場合は固定、製品リストの場合は isProductList フラグで判断（この関数は主に荷札用）
   final String prompt = _buildNifudaPrompt();
 
   FlutterLogs.logInfo(
@@ -213,7 +188,6 @@ Future<Map<String, dynamic>?> sendImageToGPT(
   try {
     CreateChatCompletionResponse response;
 
-    // -------- gpt-5.2 で送信 --------
     try {
       response = await _openAICreateVisionChat(
         model: primaryModel,
@@ -251,13 +225,16 @@ Future<Map<String, dynamic>?> sendImageToGPT(
       return null;
     }
 
+    // ★ 修正: 生のレスポンスをログ出力
+    if (kDebugMode) {
+      debugPrint('================= [GPT Nifuda Raw Response] =================');
+      debugPrint(contentString);
+      debugPrint('=============================================================');
+    }
+
     contentString = _stripCodeFences(contentString).trim();
 
     try {
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('GPT Parsed Content String: $contentString');
-      }
       final decoded = jsonDecode(contentString);
       if (decoded is Map<String, dynamic>) {
         FlutterLogs.logInfo(
@@ -309,12 +286,9 @@ Future<Map<String, dynamic>?> sendImageToGPT(
   }
 }
 
-/// 製品リスト抽出用のストリーミング関数
 Stream<String> sendImageToGPTStream(
   Uint8List imageBytes, {
-  // ★ 引数変更: company を promptId に置き換え (デフォルトはstandard)
   String promptId = 'standard',
-  // companyは廃止だがシグネチャ互換のため残し、無視する
   String company = '', 
 }) async* {
   if (openAIApiKey.isEmpty) {
@@ -326,10 +300,8 @@ Stream<String> sendImageToGPTStream(
   final String base64Image = base64Encode(imageBytes);
   final String dataUrl = 'data:$mime;base64,$base64Image';
   
-  // ★★★ 修正: モデルを gpt-5.2 に変更 ★★★
   final ChatCompletionModel visionModel = ChatCompletionModel.modelId('gpt-5.2');
   
-  // ★ 修正: PromptRegistry からプロンプトを取得
   final definition = PromptRegistry.getById(promptId);
   final String prompt = definition.systemPrompt;
 

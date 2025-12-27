@@ -12,15 +12,15 @@ part 'app_database.g.dart';
 // --- データベースクラス ---
 
 @DriftDatabase(
-  tables: [Projects, NifudaRows, ProductListRows, MaskProfiles],
-  daos: [ProjectsDao, NifudaRowsDao, ProductListRowsDao, MaskProfilesDao],
+  tables: [Projects, NifudaRows, ProductListRows, MaskProfiles, Users],
+  daos: [ProjectsDao, NifudaRowsDao, ProductListRowsDao, MaskProfilesDao, UsersDao],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
-  // ★ 修正: バージョンを4に更新
+  // ★ 修正: バージョンを 6 に更新
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration {
@@ -36,9 +36,15 @@ class AppDatabase extends _$AppDatabase {
         if (from < 3) {
           await m.createTable(maskProfiles);
         }
-        // ★ 修正: バージョン4への更新 (promptId追加)
         if (from < 4) {
           await m.addColumn(maskProfiles, maskProfiles.promptId);
+        }
+        if (from < 5) {
+          await m.createTable(users);
+        }
+        // ★ バージョン6への更新: contentJsonカラム追加
+        if (from < 6) {
+          await m.addColumn(productListRows, productListRows.contentJson);
         }
       },
     );
@@ -131,14 +137,41 @@ class MaskProfilesDao extends DatabaseAccessor<AppDatabase> with _$MaskProfilesD
     return (select(maskProfiles)..where((t) => t.profileName.equals(name))).getSingleOrNull();
   }
 
-  // ★ 修正: promptId を引数に追加
   Future<int> insertProfile(String name, List<String> rectsData, {String? promptId}) {
     return into(maskProfiles).insert(MaskProfilesCompanion.insert(
       profileName: name,
       rectsJson: jsonEncode(rectsData),
-      promptId: Value(promptId), // NULL可
+      promptId: Value(promptId), 
     ));
   }
   
   Future<int> deleteProfile(int id) => (delete(maskProfiles)..where((t) => t.id.equals(id))).go();
+}
+
+@DriftAccessor(tables: [Users])
+class UsersDao extends DatabaseAccessor<AppDatabase> with _$UsersDaoMixin {
+  UsersDao(AppDatabase db) : super(db);
+
+  // ユーザー名で検索
+  Future<User?> findUserByName(String username) {
+    return (select(users)..where((t) => t.username.equals(username))).getSingleOrNull();
+  }
+
+  // IDで検索
+  Future<User?> getUserById(int id) {
+    return (select(users)..where((t) => t.id.equals(id))).getSingleOrNull();
+  }
+
+  // 全ユーザー取得
+  Future<List<User>> getAllUsers() {
+    return (select(users)..orderBy([(t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc)])).get();
+  }
+
+  // 新規登録
+  Future<int> createUser(String username, {String? password}) {
+    return into(users).insert(UsersCompanion.insert(
+      username: username,
+      password: Value(password),
+    ));
+  }
 }

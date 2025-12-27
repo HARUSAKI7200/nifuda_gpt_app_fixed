@@ -916,6 +916,18 @@ class $ProductListRowsTable extends ProductListRows
   late final GeneratedColumn<String> productSymbol = GeneratedColumn<String>(
       'product_symbol', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _orderQuantityMeta =
+      const VerificationMeta('orderQuantity');
+  @override
+  late final GeneratedColumn<String> orderQuantity = GeneratedColumn<String>(
+      'order_quantity', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _matchedCaseMeta =
+      const VerificationMeta('matchedCase');
+  @override
+  late final GeneratedColumn<String> matchedCase = GeneratedColumn<String>(
+      'matched_case', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _formSpecMeta =
       const VerificationMeta('formSpec');
   @override
@@ -928,12 +940,6 @@ class $ProductListRowsTable extends ProductListRows
   late final GeneratedColumn<String> productCode = GeneratedColumn<String>(
       'product_code', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _orderQuantityMeta =
-      const VerificationMeta('orderQuantity');
-  @override
-  late final GeneratedColumn<String> orderQuantity = GeneratedColumn<String>(
-      'order_quantity', aliasedName, false,
-      type: DriftSqlType.string, requiredDuringInsert: true);
   static const VerificationMeta _articleMeta =
       const VerificationMeta('article');
   @override
@@ -945,11 +951,11 @@ class $ProductListRowsTable extends ProductListRows
   late final GeneratedColumn<String> note = GeneratedColumn<String>(
       'note', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _matchedCaseMeta =
-      const VerificationMeta('matchedCase');
+  static const VerificationMeta _contentJsonMeta =
+      const VerificationMeta('contentJson');
   @override
-  late final GeneratedColumn<String> matchedCase = GeneratedColumn<String>(
-      'matched_case', aliasedName, true,
+  late final GeneratedColumn<String> contentJson = GeneratedColumn<String>(
+      'content_json', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
@@ -958,12 +964,13 @@ class $ProductListRowsTable extends ProductListRows
         orderNo,
         itemOfSpare,
         productSymbol,
+        orderQuantity,
+        matchedCase,
         formSpec,
         productCode,
-        orderQuantity,
         article,
         note,
-        matchedCase
+        contentJson
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1006,6 +1013,20 @@ class $ProductListRowsTable extends ProductListRows
     } else if (isInserting) {
       context.missing(_productSymbolMeta);
     }
+    if (data.containsKey('order_quantity')) {
+      context.handle(
+          _orderQuantityMeta,
+          orderQuantity.isAcceptableOrUnknown(
+              data['order_quantity']!, _orderQuantityMeta));
+    } else if (isInserting) {
+      context.missing(_orderQuantityMeta);
+    }
+    if (data.containsKey('matched_case')) {
+      context.handle(
+          _matchedCaseMeta,
+          matchedCase.isAcceptableOrUnknown(
+              data['matched_case']!, _matchedCaseMeta));
+    }
     if (data.containsKey('form_spec')) {
       context.handle(_formSpecMeta,
           formSpec.isAcceptableOrUnknown(data['form_spec']!, _formSpecMeta));
@@ -1020,14 +1041,6 @@ class $ProductListRowsTable extends ProductListRows
     } else if (isInserting) {
       context.missing(_productCodeMeta);
     }
-    if (data.containsKey('order_quantity')) {
-      context.handle(
-          _orderQuantityMeta,
-          orderQuantity.isAcceptableOrUnknown(
-              data['order_quantity']!, _orderQuantityMeta));
-    } else if (isInserting) {
-      context.missing(_orderQuantityMeta);
-    }
     if (data.containsKey('article')) {
       context.handle(_articleMeta,
           article.isAcceptableOrUnknown(data['article']!, _articleMeta));
@@ -1040,11 +1053,11 @@ class $ProductListRowsTable extends ProductListRows
     } else if (isInserting) {
       context.missing(_noteMeta);
     }
-    if (data.containsKey('matched_case')) {
+    if (data.containsKey('content_json')) {
       context.handle(
-          _matchedCaseMeta,
-          matchedCase.isAcceptableOrUnknown(
-              data['matched_case']!, _matchedCaseMeta));
+          _contentJsonMeta,
+          contentJson.isAcceptableOrUnknown(
+              data['content_json']!, _contentJsonMeta));
     }
     return context;
   }
@@ -1065,18 +1078,20 @@ class $ProductListRowsTable extends ProductListRows
           .read(DriftSqlType.string, data['${effectivePrefix}item_of_spare'])!,
       productSymbol: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}product_symbol'])!,
+      orderQuantity: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}order_quantity'])!,
+      matchedCase: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}matched_case']),
       formSpec: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}form_spec'])!,
       productCode: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}product_code'])!,
-      orderQuantity: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}order_quantity'])!,
       article: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}article'])!,
       note: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}note'])!,
-      matchedCase: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}matched_case']),
+      contentJson: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}content_json']),
     );
   }
 
@@ -1092,24 +1107,26 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
   final String orderNo;
   final String itemOfSpare;
   final String productSymbol;
+  final String orderQuantity;
+  final String? matchedCase;
   final String formSpec;
   final String productCode;
-  final String orderQuantity;
   final String article;
   final String note;
-  final String? matchedCase;
+  final String? contentJson;
   const ProductListRow(
       {required this.id,
       required this.projectId,
       required this.orderNo,
       required this.itemOfSpare,
       required this.productSymbol,
+      required this.orderQuantity,
+      this.matchedCase,
       required this.formSpec,
       required this.productCode,
-      required this.orderQuantity,
       required this.article,
       required this.note,
-      this.matchedCase});
+      this.contentJson});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1118,13 +1135,16 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
     map['order_no'] = Variable<String>(orderNo);
     map['item_of_spare'] = Variable<String>(itemOfSpare);
     map['product_symbol'] = Variable<String>(productSymbol);
-    map['form_spec'] = Variable<String>(formSpec);
-    map['product_code'] = Variable<String>(productCode);
     map['order_quantity'] = Variable<String>(orderQuantity);
-    map['article'] = Variable<String>(article);
-    map['note'] = Variable<String>(note);
     if (!nullToAbsent || matchedCase != null) {
       map['matched_case'] = Variable<String>(matchedCase);
+    }
+    map['form_spec'] = Variable<String>(formSpec);
+    map['product_code'] = Variable<String>(productCode);
+    map['article'] = Variable<String>(article);
+    map['note'] = Variable<String>(note);
+    if (!nullToAbsent || contentJson != null) {
+      map['content_json'] = Variable<String>(contentJson);
     }
     return map;
   }
@@ -1136,14 +1156,17 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
       orderNo: Value(orderNo),
       itemOfSpare: Value(itemOfSpare),
       productSymbol: Value(productSymbol),
-      formSpec: Value(formSpec),
-      productCode: Value(productCode),
       orderQuantity: Value(orderQuantity),
-      article: Value(article),
-      note: Value(note),
       matchedCase: matchedCase == null && nullToAbsent
           ? const Value.absent()
           : Value(matchedCase),
+      formSpec: Value(formSpec),
+      productCode: Value(productCode),
+      article: Value(article),
+      note: Value(note),
+      contentJson: contentJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(contentJson),
     );
   }
 
@@ -1156,12 +1179,13 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
       orderNo: serializer.fromJson<String>(json['orderNo']),
       itemOfSpare: serializer.fromJson<String>(json['itemOfSpare']),
       productSymbol: serializer.fromJson<String>(json['productSymbol']),
+      orderQuantity: serializer.fromJson<String>(json['orderQuantity']),
+      matchedCase: serializer.fromJson<String?>(json['matchedCase']),
       formSpec: serializer.fromJson<String>(json['formSpec']),
       productCode: serializer.fromJson<String>(json['productCode']),
-      orderQuantity: serializer.fromJson<String>(json['orderQuantity']),
       article: serializer.fromJson<String>(json['article']),
       note: serializer.fromJson<String>(json['note']),
-      matchedCase: serializer.fromJson<String?>(json['matchedCase']),
+      contentJson: serializer.fromJson<String?>(json['contentJson']),
     );
   }
   @override
@@ -1173,12 +1197,13 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
       'orderNo': serializer.toJson<String>(orderNo),
       'itemOfSpare': serializer.toJson<String>(itemOfSpare),
       'productSymbol': serializer.toJson<String>(productSymbol),
+      'orderQuantity': serializer.toJson<String>(orderQuantity),
+      'matchedCase': serializer.toJson<String?>(matchedCase),
       'formSpec': serializer.toJson<String>(formSpec),
       'productCode': serializer.toJson<String>(productCode),
-      'orderQuantity': serializer.toJson<String>(orderQuantity),
       'article': serializer.toJson<String>(article),
       'note': serializer.toJson<String>(note),
-      'matchedCase': serializer.toJson<String?>(matchedCase),
+      'contentJson': serializer.toJson<String?>(contentJson),
     };
   }
 
@@ -1188,24 +1213,26 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
           String? orderNo,
           String? itemOfSpare,
           String? productSymbol,
+          String? orderQuantity,
+          Value<String?> matchedCase = const Value.absent(),
           String? formSpec,
           String? productCode,
-          String? orderQuantity,
           String? article,
           String? note,
-          Value<String?> matchedCase = const Value.absent()}) =>
+          Value<String?> contentJson = const Value.absent()}) =>
       ProductListRow(
         id: id ?? this.id,
         projectId: projectId ?? this.projectId,
         orderNo: orderNo ?? this.orderNo,
         itemOfSpare: itemOfSpare ?? this.itemOfSpare,
         productSymbol: productSymbol ?? this.productSymbol,
+        orderQuantity: orderQuantity ?? this.orderQuantity,
+        matchedCase: matchedCase.present ? matchedCase.value : this.matchedCase,
         formSpec: formSpec ?? this.formSpec,
         productCode: productCode ?? this.productCode,
-        orderQuantity: orderQuantity ?? this.orderQuantity,
         article: article ?? this.article,
         note: note ?? this.note,
-        matchedCase: matchedCase.present ? matchedCase.value : this.matchedCase,
+        contentJson: contentJson.present ? contentJson.value : this.contentJson,
       );
   ProductListRow copyWithCompanion(ProductListRowsCompanion data) {
     return ProductListRow(
@@ -1217,16 +1244,18 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
       productSymbol: data.productSymbol.present
           ? data.productSymbol.value
           : this.productSymbol,
-      formSpec: data.formSpec.present ? data.formSpec.value : this.formSpec,
-      productCode:
-          data.productCode.present ? data.productCode.value : this.productCode,
       orderQuantity: data.orderQuantity.present
           ? data.orderQuantity.value
           : this.orderQuantity,
-      article: data.article.present ? data.article.value : this.article,
-      note: data.note.present ? data.note.value : this.note,
       matchedCase:
           data.matchedCase.present ? data.matchedCase.value : this.matchedCase,
+      formSpec: data.formSpec.present ? data.formSpec.value : this.formSpec,
+      productCode:
+          data.productCode.present ? data.productCode.value : this.productCode,
+      article: data.article.present ? data.article.value : this.article,
+      note: data.note.present ? data.note.value : this.note,
+      contentJson:
+          data.contentJson.present ? data.contentJson.value : this.contentJson,
     );
   }
 
@@ -1238,12 +1267,13 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
           ..write('orderNo: $orderNo, ')
           ..write('itemOfSpare: $itemOfSpare, ')
           ..write('productSymbol: $productSymbol, ')
+          ..write('orderQuantity: $orderQuantity, ')
+          ..write('matchedCase: $matchedCase, ')
           ..write('formSpec: $formSpec, ')
           ..write('productCode: $productCode, ')
-          ..write('orderQuantity: $orderQuantity, ')
           ..write('article: $article, ')
           ..write('note: $note, ')
-          ..write('matchedCase: $matchedCase')
+          ..write('contentJson: $contentJson')
           ..write(')'))
         .toString();
   }
@@ -1255,12 +1285,13 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
       orderNo,
       itemOfSpare,
       productSymbol,
+      orderQuantity,
+      matchedCase,
       formSpec,
       productCode,
-      orderQuantity,
       article,
       note,
-      matchedCase);
+      contentJson);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1270,12 +1301,13 @@ class ProductListRow extends DataClass implements Insertable<ProductListRow> {
           other.orderNo == this.orderNo &&
           other.itemOfSpare == this.itemOfSpare &&
           other.productSymbol == this.productSymbol &&
+          other.orderQuantity == this.orderQuantity &&
+          other.matchedCase == this.matchedCase &&
           other.formSpec == this.formSpec &&
           other.productCode == this.productCode &&
-          other.orderQuantity == this.orderQuantity &&
           other.article == this.article &&
           other.note == this.note &&
-          other.matchedCase == this.matchedCase);
+          other.contentJson == this.contentJson);
 }
 
 class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
@@ -1284,24 +1316,26 @@ class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
   final Value<String> orderNo;
   final Value<String> itemOfSpare;
   final Value<String> productSymbol;
+  final Value<String> orderQuantity;
+  final Value<String?> matchedCase;
   final Value<String> formSpec;
   final Value<String> productCode;
-  final Value<String> orderQuantity;
   final Value<String> article;
   final Value<String> note;
-  final Value<String?> matchedCase;
+  final Value<String?> contentJson;
   const ProductListRowsCompanion({
     this.id = const Value.absent(),
     this.projectId = const Value.absent(),
     this.orderNo = const Value.absent(),
     this.itemOfSpare = const Value.absent(),
     this.productSymbol = const Value.absent(),
+    this.orderQuantity = const Value.absent(),
+    this.matchedCase = const Value.absent(),
     this.formSpec = const Value.absent(),
     this.productCode = const Value.absent(),
-    this.orderQuantity = const Value.absent(),
     this.article = const Value.absent(),
     this.note = const Value.absent(),
-    this.matchedCase = const Value.absent(),
+    this.contentJson = const Value.absent(),
   });
   ProductListRowsCompanion.insert({
     this.id = const Value.absent(),
@@ -1309,19 +1343,20 @@ class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
     required String orderNo,
     required String itemOfSpare,
     required String productSymbol,
+    required String orderQuantity,
+    this.matchedCase = const Value.absent(),
     required String formSpec,
     required String productCode,
-    required String orderQuantity,
     required String article,
     required String note,
-    this.matchedCase = const Value.absent(),
+    this.contentJson = const Value.absent(),
   })  : projectId = Value(projectId),
         orderNo = Value(orderNo),
         itemOfSpare = Value(itemOfSpare),
         productSymbol = Value(productSymbol),
+        orderQuantity = Value(orderQuantity),
         formSpec = Value(formSpec),
         productCode = Value(productCode),
-        orderQuantity = Value(orderQuantity),
         article = Value(article),
         note = Value(note);
   static Insertable<ProductListRow> custom({
@@ -1330,12 +1365,13 @@ class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
     Expression<String>? orderNo,
     Expression<String>? itemOfSpare,
     Expression<String>? productSymbol,
+    Expression<String>? orderQuantity,
+    Expression<String>? matchedCase,
     Expression<String>? formSpec,
     Expression<String>? productCode,
-    Expression<String>? orderQuantity,
     Expression<String>? article,
     Expression<String>? note,
-    Expression<String>? matchedCase,
+    Expression<String>? contentJson,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -1343,12 +1379,13 @@ class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
       if (orderNo != null) 'order_no': orderNo,
       if (itemOfSpare != null) 'item_of_spare': itemOfSpare,
       if (productSymbol != null) 'product_symbol': productSymbol,
+      if (orderQuantity != null) 'order_quantity': orderQuantity,
+      if (matchedCase != null) 'matched_case': matchedCase,
       if (formSpec != null) 'form_spec': formSpec,
       if (productCode != null) 'product_code': productCode,
-      if (orderQuantity != null) 'order_quantity': orderQuantity,
       if (article != null) 'article': article,
       if (note != null) 'note': note,
-      if (matchedCase != null) 'matched_case': matchedCase,
+      if (contentJson != null) 'content_json': contentJson,
     });
   }
 
@@ -1358,24 +1395,26 @@ class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
       Value<String>? orderNo,
       Value<String>? itemOfSpare,
       Value<String>? productSymbol,
+      Value<String>? orderQuantity,
+      Value<String?>? matchedCase,
       Value<String>? formSpec,
       Value<String>? productCode,
-      Value<String>? orderQuantity,
       Value<String>? article,
       Value<String>? note,
-      Value<String?>? matchedCase}) {
+      Value<String?>? contentJson}) {
     return ProductListRowsCompanion(
       id: id ?? this.id,
       projectId: projectId ?? this.projectId,
       orderNo: orderNo ?? this.orderNo,
       itemOfSpare: itemOfSpare ?? this.itemOfSpare,
       productSymbol: productSymbol ?? this.productSymbol,
+      orderQuantity: orderQuantity ?? this.orderQuantity,
+      matchedCase: matchedCase ?? this.matchedCase,
       formSpec: formSpec ?? this.formSpec,
       productCode: productCode ?? this.productCode,
-      orderQuantity: orderQuantity ?? this.orderQuantity,
       article: article ?? this.article,
       note: note ?? this.note,
-      matchedCase: matchedCase ?? this.matchedCase,
+      contentJson: contentJson ?? this.contentJson,
     );
   }
 
@@ -1397,14 +1436,17 @@ class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
     if (productSymbol.present) {
       map['product_symbol'] = Variable<String>(productSymbol.value);
     }
+    if (orderQuantity.present) {
+      map['order_quantity'] = Variable<String>(orderQuantity.value);
+    }
+    if (matchedCase.present) {
+      map['matched_case'] = Variable<String>(matchedCase.value);
+    }
     if (formSpec.present) {
       map['form_spec'] = Variable<String>(formSpec.value);
     }
     if (productCode.present) {
       map['product_code'] = Variable<String>(productCode.value);
-    }
-    if (orderQuantity.present) {
-      map['order_quantity'] = Variable<String>(orderQuantity.value);
     }
     if (article.present) {
       map['article'] = Variable<String>(article.value);
@@ -1412,8 +1454,8 @@ class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
     if (note.present) {
       map['note'] = Variable<String>(note.value);
     }
-    if (matchedCase.present) {
-      map['matched_case'] = Variable<String>(matchedCase.value);
+    if (contentJson.present) {
+      map['content_json'] = Variable<String>(contentJson.value);
     }
     return map;
   }
@@ -1426,12 +1468,13 @@ class ProductListRowsCompanion extends UpdateCompanion<ProductListRow> {
           ..write('orderNo: $orderNo, ')
           ..write('itemOfSpare: $itemOfSpare, ')
           ..write('productSymbol: $productSymbol, ')
+          ..write('orderQuantity: $orderQuantity, ')
+          ..write('matchedCase: $matchedCase, ')
           ..write('formSpec: $formSpec, ')
           ..write('productCode: $productCode, ')
-          ..write('orderQuantity: $orderQuantity, ')
           ..write('article: $article, ')
           ..write('note: $note, ')
-          ..write('matchedCase: $matchedCase')
+          ..write('contentJson: $contentJson')
           ..write(')'))
         .toString();
   }
@@ -1704,6 +1747,268 @@ class MaskProfilesCompanion extends UpdateCompanion<MaskProfile> {
   }
 }
 
+class $UsersTable extends Users with TableInfo<$UsersTable, User> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $UsersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+      'id', aliasedName, false,
+      hasAutoIncrement: true,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
+  static const VerificationMeta _usernameMeta =
+      const VerificationMeta('username');
+  @override
+  late final GeneratedColumn<String> username = GeneratedColumn<String>(
+      'username', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: true,
+      defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'));
+  static const VerificationMeta _passwordMeta =
+      const VerificationMeta('password');
+  @override
+  late final GeneratedColumn<String> password = GeneratedColumn<String>(
+      'password', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  @override
+  List<GeneratedColumn> get $columns => [id, username, password, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'users';
+  @override
+  VerificationContext validateIntegrity(Insertable<User> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('username')) {
+      context.handle(_usernameMeta,
+          username.isAcceptableOrUnknown(data['username']!, _usernameMeta));
+    } else if (isInserting) {
+      context.missing(_usernameMeta);
+    }
+    if (data.containsKey('password')) {
+      context.handle(_passwordMeta,
+          password.isAcceptableOrUnknown(data['password']!, _passwordMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  User map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return User(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+      username: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}username'])!,
+      password: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}password']),
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+    );
+  }
+
+  @override
+  $UsersTable createAlias(String alias) {
+    return $UsersTable(attachedDatabase, alias);
+  }
+}
+
+class User extends DataClass implements Insertable<User> {
+  final int id;
+  final String username;
+  final String? password;
+  final DateTime createdAt;
+  const User(
+      {required this.id,
+      required this.username,
+      this.password,
+      required this.createdAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['username'] = Variable<String>(username);
+    if (!nullToAbsent || password != null) {
+      map['password'] = Variable<String>(password);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  UsersCompanion toCompanion(bool nullToAbsent) {
+    return UsersCompanion(
+      id: Value(id),
+      username: Value(username),
+      password: password == null && nullToAbsent
+          ? const Value.absent()
+          : Value(password),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory User.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return User(
+      id: serializer.fromJson<int>(json['id']),
+      username: serializer.fromJson<String>(json['username']),
+      password: serializer.fromJson<String?>(json['password']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'username': serializer.toJson<String>(username),
+      'password': serializer.toJson<String?>(password),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  User copyWith(
+          {int? id,
+          String? username,
+          Value<String?> password = const Value.absent(),
+          DateTime? createdAt}) =>
+      User(
+        id: id ?? this.id,
+        username: username ?? this.username,
+        password: password.present ? password.value : this.password,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  User copyWithCompanion(UsersCompanion data) {
+    return User(
+      id: data.id.present ? data.id.value : this.id,
+      username: data.username.present ? data.username.value : this.username,
+      password: data.password.present ? data.password.value : this.password,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('User(')
+          ..write('id: $id, ')
+          ..write('username: $username, ')
+          ..write('password: $password, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, username, password, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is User &&
+          other.id == this.id &&
+          other.username == this.username &&
+          other.password == this.password &&
+          other.createdAt == this.createdAt);
+}
+
+class UsersCompanion extends UpdateCompanion<User> {
+  final Value<int> id;
+  final Value<String> username;
+  final Value<String?> password;
+  final Value<DateTime> createdAt;
+  const UsersCompanion({
+    this.id = const Value.absent(),
+    this.username = const Value.absent(),
+    this.password = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  });
+  UsersCompanion.insert({
+    this.id = const Value.absent(),
+    required String username,
+    this.password = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  }) : username = Value(username);
+  static Insertable<User> custom({
+    Expression<int>? id,
+    Expression<String>? username,
+    Expression<String>? password,
+    Expression<DateTime>? createdAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (username != null) 'username': username,
+      if (password != null) 'password': password,
+      if (createdAt != null) 'created_at': createdAt,
+    });
+  }
+
+  UsersCompanion copyWith(
+      {Value<int>? id,
+      Value<String>? username,
+      Value<String?>? password,
+      Value<DateTime>? createdAt}) {
+    return UsersCompanion(
+      id: id ?? this.id,
+      username: username ?? this.username,
+      password: password ?? this.password,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (username.present) {
+      map['username'] = Variable<String>(username.value);
+    }
+    if (password.present) {
+      map['password'] = Variable<String>(password.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('UsersCompanion(')
+          ..write('id: $id, ')
+          ..write('username: $username, ')
+          ..write('password: $password, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1712,6 +2017,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ProductListRowsTable productListRows =
       $ProductListRowsTable(this);
   late final $MaskProfilesTable maskProfiles = $MaskProfilesTable(this);
+  late final $UsersTable users = $UsersTable(this);
   late final Index nifudaProjectIdIdx = Index('nifuda_project_id_idx',
       'CREATE INDEX nifuda_project_id_idx ON nifuda_rows (project_id)');
   late final Index productListProjectIdIdx = Index(
@@ -1723,6 +2029,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       ProductListRowsDao(this as AppDatabase);
   late final MaskProfilesDao maskProfilesDao =
       MaskProfilesDao(this as AppDatabase);
+  late final UsersDao usersDao = UsersDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1732,6 +2039,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         nifudaRows,
         productListRows,
         maskProfiles,
+        users,
         nifudaProjectIdIdx,
         productListProjectIdIdx
       ];
@@ -2161,12 +2469,13 @@ typedef $$ProductListRowsTableCreateCompanionBuilder = ProductListRowsCompanion
   required String orderNo,
   required String itemOfSpare,
   required String productSymbol,
+  required String orderQuantity,
+  Value<String?> matchedCase,
   required String formSpec,
   required String productCode,
-  required String orderQuantity,
   required String article,
   required String note,
-  Value<String?> matchedCase,
+  Value<String?> contentJson,
 });
 typedef $$ProductListRowsTableUpdateCompanionBuilder = ProductListRowsCompanion
     Function({
@@ -2175,12 +2484,13 @@ typedef $$ProductListRowsTableUpdateCompanionBuilder = ProductListRowsCompanion
   Value<String> orderNo,
   Value<String> itemOfSpare,
   Value<String> productSymbol,
+  Value<String> orderQuantity,
+  Value<String?> matchedCase,
   Value<String> formSpec,
   Value<String> productCode,
-  Value<String> orderQuantity,
   Value<String> article,
   Value<String> note,
-  Value<String?> matchedCase,
+  Value<String?> contentJson,
 });
 
 class $$ProductListRowsTableFilterComposer
@@ -2207,14 +2517,17 @@ class $$ProductListRowsTableFilterComposer
   ColumnFilters<String> get productSymbol => $composableBuilder(
       column: $table.productSymbol, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<String> get orderQuantity => $composableBuilder(
+      column: $table.orderQuantity, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get matchedCase => $composableBuilder(
+      column: $table.matchedCase, builder: (column) => ColumnFilters(column));
+
   ColumnFilters<String> get formSpec => $composableBuilder(
       column: $table.formSpec, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get productCode => $composableBuilder(
       column: $table.productCode, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<String> get orderQuantity => $composableBuilder(
-      column: $table.orderQuantity, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get article => $composableBuilder(
       column: $table.article, builder: (column) => ColumnFilters(column));
@@ -2222,8 +2535,8 @@ class $$ProductListRowsTableFilterComposer
   ColumnFilters<String> get note => $composableBuilder(
       column: $table.note, builder: (column) => ColumnFilters(column));
 
-  ColumnFilters<String> get matchedCase => $composableBuilder(
-      column: $table.matchedCase, builder: (column) => ColumnFilters(column));
+  ColumnFilters<String> get contentJson => $composableBuilder(
+      column: $table.contentJson, builder: (column) => ColumnFilters(column));
 }
 
 class $$ProductListRowsTableOrderingComposer
@@ -2251,15 +2564,18 @@ class $$ProductListRowsTableOrderingComposer
       column: $table.productSymbol,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get orderQuantity => $composableBuilder(
+      column: $table.orderQuantity,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get matchedCase => $composableBuilder(
+      column: $table.matchedCase, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get formSpec => $composableBuilder(
       column: $table.formSpec, builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<String> get productCode => $composableBuilder(
       column: $table.productCode, builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<String> get orderQuantity => $composableBuilder(
-      column: $table.orderQuantity,
-      builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<String> get article => $composableBuilder(
       column: $table.article, builder: (column) => ColumnOrderings(column));
@@ -2267,8 +2583,8 @@ class $$ProductListRowsTableOrderingComposer
   ColumnOrderings<String> get note => $composableBuilder(
       column: $table.note, builder: (column) => ColumnOrderings(column));
 
-  ColumnOrderings<String> get matchedCase => $composableBuilder(
-      column: $table.matchedCase, builder: (column) => ColumnOrderings(column));
+  ColumnOrderings<String> get contentJson => $composableBuilder(
+      column: $table.contentJson, builder: (column) => ColumnOrderings(column));
 }
 
 class $$ProductListRowsTableAnnotationComposer
@@ -2295,14 +2611,17 @@ class $$ProductListRowsTableAnnotationComposer
   GeneratedColumn<String> get productSymbol => $composableBuilder(
       column: $table.productSymbol, builder: (column) => column);
 
+  GeneratedColumn<String> get orderQuantity => $composableBuilder(
+      column: $table.orderQuantity, builder: (column) => column);
+
+  GeneratedColumn<String> get matchedCase => $composableBuilder(
+      column: $table.matchedCase, builder: (column) => column);
+
   GeneratedColumn<String> get formSpec =>
       $composableBuilder(column: $table.formSpec, builder: (column) => column);
 
   GeneratedColumn<String> get productCode => $composableBuilder(
       column: $table.productCode, builder: (column) => column);
-
-  GeneratedColumn<String> get orderQuantity => $composableBuilder(
-      column: $table.orderQuantity, builder: (column) => column);
 
   GeneratedColumn<String> get article =>
       $composableBuilder(column: $table.article, builder: (column) => column);
@@ -2310,8 +2629,8 @@ class $$ProductListRowsTableAnnotationComposer
   GeneratedColumn<String> get note =>
       $composableBuilder(column: $table.note, builder: (column) => column);
 
-  GeneratedColumn<String> get matchedCase => $composableBuilder(
-      column: $table.matchedCase, builder: (column) => column);
+  GeneratedColumn<String> get contentJson => $composableBuilder(
+      column: $table.contentJson, builder: (column) => column);
 }
 
 class $$ProductListRowsTableTableManager extends RootTableManager<
@@ -2346,12 +2665,13 @@ class $$ProductListRowsTableTableManager extends RootTableManager<
             Value<String> orderNo = const Value.absent(),
             Value<String> itemOfSpare = const Value.absent(),
             Value<String> productSymbol = const Value.absent(),
+            Value<String> orderQuantity = const Value.absent(),
+            Value<String?> matchedCase = const Value.absent(),
             Value<String> formSpec = const Value.absent(),
             Value<String> productCode = const Value.absent(),
-            Value<String> orderQuantity = const Value.absent(),
             Value<String> article = const Value.absent(),
             Value<String> note = const Value.absent(),
-            Value<String?> matchedCase = const Value.absent(),
+            Value<String?> contentJson = const Value.absent(),
           }) =>
               ProductListRowsCompanion(
             id: id,
@@ -2359,12 +2679,13 @@ class $$ProductListRowsTableTableManager extends RootTableManager<
             orderNo: orderNo,
             itemOfSpare: itemOfSpare,
             productSymbol: productSymbol,
+            orderQuantity: orderQuantity,
+            matchedCase: matchedCase,
             formSpec: formSpec,
             productCode: productCode,
-            orderQuantity: orderQuantity,
             article: article,
             note: note,
-            matchedCase: matchedCase,
+            contentJson: contentJson,
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
@@ -2372,12 +2693,13 @@ class $$ProductListRowsTableTableManager extends RootTableManager<
             required String orderNo,
             required String itemOfSpare,
             required String productSymbol,
+            required String orderQuantity,
+            Value<String?> matchedCase = const Value.absent(),
             required String formSpec,
             required String productCode,
-            required String orderQuantity,
             required String article,
             required String note,
-            Value<String?> matchedCase = const Value.absent(),
+            Value<String?> contentJson = const Value.absent(),
           }) =>
               ProductListRowsCompanion.insert(
             id: id,
@@ -2385,12 +2707,13 @@ class $$ProductListRowsTableTableManager extends RootTableManager<
             orderNo: orderNo,
             itemOfSpare: itemOfSpare,
             productSymbol: productSymbol,
+            orderQuantity: orderQuantity,
+            matchedCase: matchedCase,
             formSpec: formSpec,
             productCode: productCode,
-            orderQuantity: orderQuantity,
             article: article,
             note: note,
-            matchedCase: matchedCase,
+            contentJson: contentJson,
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
@@ -2566,6 +2889,149 @@ typedef $$MaskProfilesTableProcessedTableManager = ProcessedTableManager<
     ),
     MaskProfile,
     PrefetchHooks Function()>;
+typedef $$UsersTableCreateCompanionBuilder = UsersCompanion Function({
+  Value<int> id,
+  required String username,
+  Value<String?> password,
+  Value<DateTime> createdAt,
+});
+typedef $$UsersTableUpdateCompanionBuilder = UsersCompanion Function({
+  Value<int> id,
+  Value<String> username,
+  Value<String?> password,
+  Value<DateTime> createdAt,
+});
+
+class $$UsersTableFilterComposer extends Composer<_$AppDatabase, $UsersTable> {
+  $$UsersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get username => $composableBuilder(
+      column: $table.username, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get password => $composableBuilder(
+      column: $table.password, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$UsersTableOrderingComposer
+    extends Composer<_$AppDatabase, $UsersTable> {
+  $$UsersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get username => $composableBuilder(
+      column: $table.username, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get password => $composableBuilder(
+      column: $table.password, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$UsersTableAnnotationComposer
+    extends Composer<_$AppDatabase, $UsersTable> {
+  $$UsersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get username =>
+      $composableBuilder(column: $table.username, builder: (column) => column);
+
+  GeneratedColumn<String> get password =>
+      $composableBuilder(column: $table.password, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$UsersTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $UsersTable,
+    User,
+    $$UsersTableFilterComposer,
+    $$UsersTableOrderingComposer,
+    $$UsersTableAnnotationComposer,
+    $$UsersTableCreateCompanionBuilder,
+    $$UsersTableUpdateCompanionBuilder,
+    (User, BaseReferences<_$AppDatabase, $UsersTable, User>),
+    User,
+    PrefetchHooks Function()> {
+  $$UsersTableTableManager(_$AppDatabase db, $UsersTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$UsersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$UsersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$UsersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            Value<String> username = const Value.absent(),
+            Value<String?> password = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+          }) =>
+              UsersCompanion(
+            id: id,
+            username: username,
+            password: password,
+            createdAt: createdAt,
+          ),
+          createCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            required String username,
+            Value<String?> password = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+          }) =>
+              UsersCompanion.insert(
+            id: id,
+            username: username,
+            password: password,
+            createdAt: createdAt,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$UsersTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $UsersTable,
+    User,
+    $$UsersTableFilterComposer,
+    $$UsersTableOrderingComposer,
+    $$UsersTableAnnotationComposer,
+    $$UsersTableCreateCompanionBuilder,
+    $$UsersTableUpdateCompanionBuilder,
+    (User, BaseReferences<_$AppDatabase, $UsersTable, User>),
+    User,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2578,6 +3044,8 @@ class $AppDatabaseManager {
       $$ProductListRowsTableTableManager(_db, _db.productListRows);
   $$MaskProfilesTableTableManager get maskProfiles =>
       $$MaskProfilesTableTableManager(_db, _db.maskProfiles);
+  $$UsersTableTableManager get users =>
+      $$UsersTableTableManager(_db, _db.users);
 }
 
 mixin _$ProjectsDaoMixin on DatabaseAccessor<AppDatabase> {
@@ -2591,4 +3059,7 @@ mixin _$ProductListRowsDaoMixin on DatabaseAccessor<AppDatabase> {
 }
 mixin _$MaskProfilesDaoMixin on DatabaseAccessor<AppDatabase> {
   $MaskProfilesTable get maskProfiles => attachedDatabase.maskProfiles;
+}
+mixin _$UsersDaoMixin on DatabaseAccessor<AppDatabase> {
+  $UsersTable get users => attachedDatabase.users;
 }

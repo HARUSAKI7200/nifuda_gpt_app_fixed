@@ -24,8 +24,7 @@ import 'product_list_mask_preview_page.dart';
 import '../widgets/custom_snackbar.dart';
 import 'streaming_progress_dialog.dart';
 import '../utils/keyword_detector.dart';
-import '../database/app_database.dart'; // ★ 追加: DBアクセス用
-// ★ 追加: プロンプト定義
+import '../database/app_database.dart'; 
 import '../utils/prompt_definitions.dart';
 
 // --- Utility Functions ---
@@ -96,7 +95,6 @@ String _formatTimestampForFilename(DateTime dateTime) {
       '${dateTime.second.toString().padLeft(2, '0')}';
 }
 
-// 画像保存関数
 Future<void> _saveScannedProductImages(
     BuildContext context,
     String projectFolderPath,
@@ -156,7 +154,6 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
     String projectFolderPath,
     String currentCaseNumber,
 ) async {
-  // 1. 自作カメラで撮影＆裏処理
   final List<Map<String, dynamic>>? processedResults = await Navigator.push(
     context,
     MaterialPageRoute(builder: (_) => CameraCapturePage(
@@ -173,7 +170,6 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
     return null;
   }
 
-  // 2. 結果を順次確認
   List<List<String>> allConfirmedNifudaRows = [];
   int imageIndex = 0;
 
@@ -223,19 +219,17 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaActionGemini(
   }
 }
 
-// ★★★ captureProcessAndConfirmProductListActionGemini (修正: AppDatabaseを受け取る) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
   String projectFolderPath,
-  AppDatabase db, // ★ DBインスタンス
+  AppDatabase db, 
 ) async {
   
   List<String> imageFilePaths = [];
-  String? promptIdToUse; // ★ 追加
+  String? promptIdToUse; 
   
-  // 1. Google ML Kit Document Scanner を起動
   try {
     final options = DocumentScannerOptions(
       documentFormat: DocumentFormat.jpeg,
@@ -259,7 +253,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     return null;
   }
 
-  // 2. マスク処理 & PromptID取得
   if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
 
   List<String> processedImagePaths = [];
@@ -272,13 +265,11 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
       'TMEIC', '東芝三菱電機産業システム',
     ];
 
-    // ★ 修正: DBからカスタムマスク設定とプロンプトIDを読み込む
     List<Rect> customRelativeRects = [];
     if (selectedCompany != 'マスク処理なし' && selectedCompany != '動的マスク処理') {
       try {
         final profile = await db.maskProfilesDao.getProfileByName(selectedCompany);
         if (profile != null) {
-          // プロンプトIDを取得
           promptIdToUse = profile.promptId;
           
           final List<dynamic> list = jsonDecode(profile.rectsJson);
@@ -312,12 +303,10 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
            imageObj = applyMaskToImage(imageObj, template: 'dynamic', dynamicMaskRects: rects);
         }
       } else if (customRelativeRects.isNotEmpty) {
-        // カスタムマスク適用
         imageObj = applyMaskToImage(imageObj, relativeMaskRects: customRelativeRects);
       }
 
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      // 保存 (PNG)
       final savedPath = '${tempDir.path}/processed_scan_gemini_$i\_$timestamp.png';
       await File(savedPath).writeAsBytes(img.encodePng(imageObj));
       processedImagePaths.add(savedPath);
@@ -338,7 +327,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     return null;
   }
 
-  // 3. プロジェクトフォルダへ保存
   unawaited(_saveScannedProductImages(context, projectFolderPath, processedImagePaths));
 
   if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
@@ -364,7 +352,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
 
   if (!context.mounted) return null;
 
-  // 4. プレビュー画面
   final MaskPreviewResult? previewResult = await Navigator.push<MaskPreviewResult>(
     context, MaterialPageRoute(builder: (_) => ProductListMaskPreviewPage(
       previewImageBytes: firstImageBytes,
@@ -406,17 +393,14 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
     return null;
   }
 
-  // --- Gemini送信 ---
   List<Map<String, dynamic>?> allAiRawResults = [];
   
-  // ★ プロンプトIDを決定 (デフォルトは standard)
   final String actualPromptId = promptIdToUse ?? 'standard';
 
   for (int i = 0; i < finalImagesToSend.length; i++) {
       if (!context.mounted) break;
       final imageBytes = finalImagesToSend[i];
 
-      // ★ 修正: promptId を渡す
       final Stream<String> stream = sendImageToGeminiStream(
         imageBytes,
         promptId: actualPromptId,
@@ -434,6 +418,12 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
           _logError('OCR_ACTION', 'PRODUCT_LIST_GEMINI_STREAM_FAIL', 'Gemini stream failed or cancelled for image ${i + 1}', null);
           if (context.mounted) _showErrorDialog(context, '抽出エラー', '${i + 1}枚目の画像の抽出に失敗しました。処理を中断します。');
           return allAiRawResults.isNotEmpty ? await _processRawProductResultsGemini(context, allAiRawResults, actualPromptId) : null;
+      }
+
+      if (kDebugMode) {
+        debugPrint('================= [Gemini Product List Raw Response (${i + 1})] =================');
+        debugPrint(rawJsonResponse);
+        debugPrint('===========================================================================');
       }
 
       try {
@@ -454,7 +444,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListActionGemini(
   }
 
   if (!context.mounted) return null;
-  // ★ 修正: promptId を渡して後処理
   return _processRawProductResultsGemini(context, allAiRawResults, actualPromptId);
 }
 
@@ -465,10 +454,9 @@ Future<List<List<String>>?> _processRawProductResultsGemini(
   String promptId, 
 ) async {
   List<Map<String, String>> allExtractedProductRows = [];
-  const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
-
-  // ★ PromptRegistryから定義を取得
+  
   final definition = PromptRegistry.getById(promptId);
+  final List<String> expectedProductFields = definition.displayFields;
 
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {
@@ -479,12 +467,23 @@ Future<List<List<String>>?> _processRawProductResultsGemini(
           if (item is Map) {
             Map<String, String> row = {};
             String finalOrderNo = '';
+            String finalItemNo = '';
 
-            // ★ タイプ別の処理分岐
             switch (definition.type) {
               case PromptType.tmeic:
                 final String note = item['備考(NOTE)']?.toString() ?? '';
                 finalOrderNo = '$commonOrderNo $note'.trim();
+                break;
+
+              case PromptType.tmeic_ups_2:
+                final trimmedCommon = commonOrderNo.trim();
+                final splitIndex = trimmedCommon.indexOf(RegExp(r'\s+'));
+                if (splitIndex != -1) {
+                  finalOrderNo = trimmedCommon.substring(0, splitIndex);
+                  finalItemNo = trimmedCommon.substring(splitIndex).trim();
+                } else {
+                  finalOrderNo = trimmedCommon;
+                }
                 break;
 
               case PromptType.fullRow:
@@ -506,26 +505,35 @@ Future<List<List<String>>?> _processRawProductResultsGemini(
             }
 
             for (String field in expectedProductFields) {
-              if (field == 'ORDER No.') {
+              if ((field == 'ORDER No.' || field == '製番') && finalOrderNo.isNotEmpty) {
                 row[field] = finalOrderNo;
-              } else {
+              } 
+              else if ((field == 'ITEM OF SPARE' || field == '項番') && finalItemNo.isNotEmpty) {
+                row[field] = finalItemNo;
+              }
+              else {
                 row[field] = item[field]?.toString() ?? '';
               }
             }
             allExtractedProductRows.add(row);
           }
         }
-      } else {
-         FlutterLogs.logWarn('OCR_ACTION', 'INVALID_AI_RESULT_GEMINI', 'Received null or invalid AI result structure.');
       }
   }
 
   if (allExtractedProductRows.isNotEmpty) {
-      FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_GEMINI_CONFIRM', '${allExtractedProductRows.length} rows extracted by Gemini for confirmation.');
-      return Navigator.push<List<List<String>>>(
+      final List<List<String>>? confirmedRows = await Navigator.push<List<List<String>>>(
         context,
-        MaterialPageRoute(builder: (_) => ProductListOcrConfirmPage(extractedProductRows: allExtractedProductRows)),
+        MaterialPageRoute(builder: (_) => ProductListOcrConfirmPage(
+          extractedProductRows: allExtractedProductRows,
+          displayFields: expectedProductFields,
+        )),
       );
+
+      if (confirmedRows != null && confirmedRows.isNotEmpty) {
+        return confirmedRows; 
+      }
+      return null;
   } else {
       _logError('OCR_ACTION', 'PRODUCT_LIST_GEMINI_NO_RESULT', 'No valid product list data extracted by Gemini after processing.', null);
       if (context.mounted) _showErrorDialog(context, 'OCR結果なし', '有効な製品リストデータが抽出されませんでした。');

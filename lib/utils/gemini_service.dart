@@ -1,11 +1,4 @@
 // lib/utils/gemini_service.dart
-//
-// 修正方針：
-// - プロンプト/ユーティリティは、共通化が拒否されたためファイル内で定義を継続
-// - ProductList抽出はストリーミング (generateContentStream) に変更
-// - ★ プロンプトレジストリを使用し、引数を company から promptId に変更。
-// - ★ (Gemini) 荷札用の非ストリーミング関数 `sendImageToGemini` を追加。
-// - ★ (Gemini) モデルを 'gemini-3-flash' に修正。
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -14,15 +7,15 @@ import 'package:flutter_logs/flutter_logs.dart';
 import 'package:http/http.dart' as http; 
 import 'package:google_generative_ai/google_generative_ai.dart'; 
 
-import 'prompt_definitions.dart'; // ★追加
+import 'prompt_definitions.dart'; 
 
 const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
-// ★ 修正: モデルを gemini-3-flash に変更
-const modelName = 'gemini-3-flash';
 
-// --- Local Helper Functions (Duplicated for consistency) ---
+// ★ 修正: 最新の Gemini 3 Flash Preview モデルを指定
+const modelName = 'gemini-3-flash-preview';
 
-// Uint8ListからMIMEタイプを推定する (重複)
+// --- Local Helper Functions ---
+
 String _guessMimeType(Uint8List imageBytes) {
   String mime = 'image/jpeg';
   if (imageBytes.lengthInBytes >= 12) {
@@ -41,7 +34,6 @@ String _guessMimeType(Uint8List imageBytes) {
   return mime;
 }
 
-// コードフェンス除去（```json ... ``` → 素のJSON） (重複)
 String _stripCodeFences(String s) {
   final fence = RegExp(r'^```(?:json)?\s*([\s\S]*?)\s*```$', multiLine: true);
   final m = fence.firstMatch(s.trim());
@@ -51,7 +43,6 @@ String _stripCodeFences(String s) {
   return s;
 }
 
-// 荷札（Nifuda）抽出プロンプト (重複)
 String _buildNifudaPrompt() {
   return '''
 あなたは、かすれたり不鮮明な荷札の画像を完璧に文字起こしする、データ入力の超専門家です。あなたの使命は、一文字のミスもなく、全ての文字を正確にJSON形式で出力することです。以下の思考プロセスとルールを厳守してください。
@@ -101,7 +92,6 @@ String _buildNifudaPrompt() {
 
 // --- Main Functions ---
 
-/// Gemini APIクライアントを返す
 GenerativeModel _getGeminiClient() {
   if (geminiApiKey.isEmpty) {
     FlutterLogs.logThis(
@@ -118,15 +108,13 @@ GenerativeModel _getGeminiClient() {
   );
 }
 
-/// 荷札抽出用のメイン関数 (非ストリーミング)
 Future<Map<String, dynamic>?> sendImageToGemini( 
   Uint8List imageBytes, {
   required bool isProductList,
-  String? promptId, // promptId対応
-  String company = '', // Deprecated
+  String? promptId, 
+  String company = '', 
   http.Client? client, 
 }) async {
-  // isProductList は home_actions_gemini.dart から常に false で呼ばれる想定
   final model = _getGeminiClient();
   final prompt = _buildNifudaPrompt();
   
@@ -162,6 +150,13 @@ Future<Map<String, dynamic>?> sendImageToGemini(
         level: LogLevel.WARNING,
       );
       return null;
+    }
+
+    // ★ 修正: 生のレスポンスをログ出力
+    if (kDebugMode) {
+      debugPrint('================= [Gemini Nifuda Raw Response] =================');
+      debugPrint(contentString);
+      debugPrint('===============================================================');
     }
 
     contentString = _stripCodeFences(contentString).trim();
@@ -203,16 +198,13 @@ Future<Map<String, dynamic>?> sendImageToGemini(
   }
 }
 
-/// 製品リスト抽出用のストリーミング関数 (ストリーミング)
 Stream<String> sendImageToGeminiStream(
   Uint8List imageBytes, {
-  // ★ 引数変更
   String promptId = 'standard',
-  String company = '', // 廃止予定
+  String company = '', 
 }) async* {
   final model = _getGeminiClient();
   
-  // ★ 修正: PromptRegistry からプロンプトを取得
   final definition = PromptRegistry.getById(promptId);
   final prompt = definition.systemPrompt;
   
@@ -249,7 +241,6 @@ Stream<String> sendImageToGeminiStream(
       }
     }
   } on GenerativeAIException catch (e, s) {
-    // ストリームの外部でキャッチされるように、エラーを再スロー
     FlutterLogs.logThis(
       tag: 'GEMINI_SERVICE',
       subTag: 'STREAM_API_REQUEST_FAILED',

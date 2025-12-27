@@ -9,8 +9,9 @@ import '../utils/excel_export.dart';
 import '../widgets/custom_snackbar.dart';
 import 'home_actions.dart';
 import '../state/project_state.dart';
+import '../state/user_state.dart'; // ★ 追加
 import '../database/app_database.dart';
-import 'package:drift/drift.dart' show Value; // DB更新のため
+import 'package:drift/drift.dart' show Value;
 
 class MatchingResultPage extends ConsumerWidget {
   final Map<String, dynamic> matchingResults;
@@ -20,14 +21,13 @@ class MatchingResultPage extends ConsumerWidget {
   final List<List<String>> productListKariData;
   final String currentCaseNumber;
 
-  // 表示するフィールドの対応表 (T社パターン)
   static const Map<String, String> _displayFieldsMap = {
     '製番': 'ORDER No.',
     '項目番号': 'ITEM OF SPARE',
-    '品名': '品名記号', // (比較ロジック側で '記事' も考慮)
+    '品名': '品名記号',
     '形式': '形格',
     '個数': '注文数',
-    '図書番号': '製品コード番号', // (比較ロジック側で '手配コード' も考慮)
+    '図書番号': '製品コード番号', 
     '手配コード': '製品コード番号',
     '記事': '記事', 
   };
@@ -155,9 +155,6 @@ class MatchingResultPage extends ConsumerWidget {
     }
   }
 
-  // ★★★ UI変更: 「Excel風」テーブルを生成 ★★★
-
-  // 1. カラム (ヘッダー行) を生成
   List<DataColumn> _buildColumns() {
     List<DataColumn> columns = [];
     columns.add(const DataColumn(
@@ -175,7 +172,6 @@ class MatchingResultPage extends ConsumerWidget {
     return columns;
   }
 
-  // 2. 行 (荷札/リストのペア) を生成
   List<DataRow> _buildDataRows() {
     final List<DataRow> dataRows = [];
     
@@ -206,7 +202,6 @@ class MatchingResultPage extends ConsumerWidget {
         rowColor = Colors.yellow.shade100;
       }
 
-      // --- 荷札の行 ---
       final List<DataCell> nifudaCells = [];
       nifudaCells.add(DataCell(Text('荷札', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.indigo.shade700))));
       nifudaCells.add(DataCell(Text(status, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isError ? Colors.red.shade700 : (isMatched ? Colors.green.shade700 : Colors.orange.shade700)))));
@@ -222,7 +217,6 @@ class MatchingResultPage extends ConsumerWidget {
       }
       dataRows.add(DataRow(cells: nifudaCells, color: MaterialStateProperty.all(rowColor)));
 
-      // --- 製品リストの行 ---
       final List<DataCell> productCells = [];
       productCells.add(DataCell(Text('リスト', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal.shade700))));
       productCells.add(DataCell(Text(row['詳細']?.toString() ?? '', style: const TextStyle(fontSize: 10, color: Colors.black54))));
@@ -261,7 +255,6 @@ class MatchingResultPage extends ConsumerWidget {
     return dataRows;
   }
 
-  // 不一致の場合にセルをハイライトするヘルパー
   Widget _buildValueCell(String text, bool isMismatch, bool isProductRow, Color rowColor) {
     Color textColor = isProductRow ? Colors.teal.shade900 : Colors.indigo.shade900;
     Color highlightColor = Colors.transparent;
@@ -308,9 +301,7 @@ class MatchingResultPage extends ConsumerWidget {
     final List<DataColumn> columns = _buildColumns();
     final List<DataRow> rows = _buildDataRows();
 
-    // ★ 現在の画面幅を取得
     final screenWidth = MediaQuery.of(context).size.width;
-    // ★ 幅が狭いかどうか判定 (400px以下を基準とする)
     final isSmallScreen = screenWidth < 400;
 
     return Scaffold(
@@ -323,7 +314,6 @@ class MatchingResultPage extends ConsumerWidget {
             ),
         ],
       ),
-      // ★★★ 修正: SafeAreaでOSのUI（ノッチやホームバー）との重なりを回避 ★★★
       body: SafeArea(
         child: Column(
           children: [
@@ -353,12 +343,10 @@ class MatchingResultPage extends ConsumerWidget {
                     ),
             ),
             
-            // ★★★ 修正: 下部ボタンを画面幅に応じてレスポンシブ化 ★★★
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 children: [
-                  // 1. 次のCaseへ
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue.shade700, 
@@ -375,25 +363,23 @@ class MatchingResultPage extends ConsumerWidget {
                   ),
                   const SizedBox(height: 10),
 
-                  // 2. 保存系ボタン
-                  // ★ 修正: 画面幅に応じて Row(横並び) か Column(縦並び) か切り替える
                   isSmallScreen
-                  ? Column( // スマホ（極小画面）用: 縦並び
+                  ? Column(
                       children: [
                         _buildSaveButton(
                           context, ref, notifier, projectState, 
                           '共有フォルダ(SMB)\nへ保存', Icons.cloud_upload_outlined, Colors.green.shade700, 
-                          true // isSMB
+                          true 
                         ),
                         const SizedBox(height: 10),
                         _buildSaveButton(
                           context, ref, notifier, projectState, 
                           'アプリ(LINE/Gmail)\nで共有', Icons.share, Colors.indigo.shade700, 
-                          false // isAppShare
+                          false 
                         ),
                       ],
                     )
-                  : Row( // タブレット/通常スマホ用: 横並び
+                  : Row( 
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
                         Expanded(
@@ -422,21 +408,23 @@ class MatchingResultPage extends ConsumerWidget {
     );
   }
 
-  // ★ 追加: ボタン生成ロジックの共通化 (コード重複削減)
   Widget _buildSaveButton(
     BuildContext context, WidgetRef ref, ProjectNotifier notifier, ProjectState projectState,
     String label, IconData icon, Color bgColor, bool isSMB
   ) {
+    // ★ ユーザー名を取得
+    final userName = ref.read(userProvider).currentUser?.username;
+
     return ElevatedButton.icon(
       style: ElevatedButton.styleFrom(
         backgroundColor: bgColor,
         foregroundColor: Colors.white, 
         padding: const EdgeInsets.symmetric(vertical: 12),
-        minimumSize: const Size(double.infinity, 50), // 縦並びのときも幅いっぱいに
+        minimumSize: const Size(double.infinity, 50),
         textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)
       ),
       icon: Icon(icon, size: 20),
-      label: Text(label, textAlign: TextAlign.center), // 改行に対応するため中央揃え
+      label: Text(label, textAlign: TextAlign.center), 
       onPressed: () async {
         await _updateMatchedProducts(context, ref);
         
@@ -452,6 +440,7 @@ class MatchingResultPage extends ConsumerWidget {
               currentCaseNumber: currentCaseNumber,
               jsonSavePath: projectState.jsonSavePath,
               inspectionStatus: STATUS_COMPLETED,
+              processedBy: userName, // ★ 追加
           );
         } else {
           newStatus = await shareDataViaAppsAction(
@@ -464,6 +453,7 @@ class MatchingResultPage extends ConsumerWidget {
               currentCaseNumber: currentCaseNumber,
               jsonSavePath: projectState.jsonSavePath,
               inspectionStatus: STATUS_COMPLETED,
+              processedBy: userName, // ★ 追加
           );
         }
 
@@ -489,7 +479,6 @@ class MatchingResultPage extends ConsumerWidget {
   }
 }
 
-// 補助的な拡張関数
 extension IterableExtension<E> on Iterable<E> {
   E? firstWhereOrNull(bool Function(E element) test) {
     for (final element in this) {

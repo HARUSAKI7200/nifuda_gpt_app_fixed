@@ -5,6 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_logs/flutter_logs.dart';
 import 'pages/home_page.dart';
+import 'state/user_state.dart';
+import 'state/project_state.dart'; // databaseProvider用
+import 'pages/login_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,7 +17,7 @@ Future<void> main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // flutter_logs 初期化（timeStampFormat を必ず指定）
+  // flutter_logs 初期化
   await FlutterLogs.initLogs(
     enabled: true,
     isDebuggable: true,
@@ -30,7 +33,7 @@ Future<void> main() async {
     directoryStructure: DirectoryStructure.FOR_DATE,
     logFileExtension: LogFileExtension.LOG,
     debugFileOperations: false,
-    timeStampFormat: TimeStampFormat.TIME_FORMAT_READABLE, // ★ 必須
+    timeStampFormat: TimeStampFormat.TIME_FORMAT_READABLE,
   );
 
   // 未捕捉Flutterエラーをファイル出力
@@ -47,11 +50,14 @@ Future<void> main() async {
   runApp(const ProviderScope(child: MyApp()));
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends ConsumerWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // ★ DB初期化とユーザー状態を監視
+    final dbAsync = ref.watch(databaseProvider);
+
     return MaterialApp(
       title: 'シンコー府中輸出課 荷札照合アプリ',
       debugShowCheckedModeBanner: false,
@@ -90,7 +96,6 @@ class MyApp extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
         ),
-        // ★ 修正: CardTheme -> CardThemeData
         cardTheme: CardThemeData(
           elevation: 2,
           shape: RoundedRectangleBorder(
@@ -105,8 +110,20 @@ class MyApp extends StatelessWidget {
           fillColor: Colors.grey[100],
         ),
       ),
-      // ★ 修正: const HomePage() -> HomePage() に変更
-      home: HomePage(),
+      // ★ home を動的に切り替え
+      home: dbAsync.when(
+        data: (db) {
+          // DBが準備できたら、ユーザー認証状態を監視
+          final userState = ref.watch(userProvider);
+          if (userState.currentUser != null) {
+            return HomePage(); // ログイン済み
+          } else {
+            return const LoginPage(); // 未ログイン
+          }
+        },
+        loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+        error: (err, stack) => Scaffold(body: Center(child: Text('Error: $err'))),
+      ),
     );
   }
 }

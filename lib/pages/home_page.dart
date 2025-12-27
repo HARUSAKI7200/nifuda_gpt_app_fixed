@@ -5,6 +5,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:flutter_logs/flutter_logs.dart';
 import 'package:simple_barcode_scanner/simple_barcode_scanner.dart'; 
 import '../state/project_state.dart';
+import '../state/user_state.dart'; 
 import 'home_actions.dart';
 import '../widgets/custom_snackbar.dart';
 import 'dart:io';
@@ -15,8 +16,10 @@ import '../database/app_database.dart';
 import 'smb_settings_page.dart';
 import 'directory_image_picker_page.dart';
 import 'mask_profile_edit_page.dart';
-import 'mask_profile_list_page.dart'; // ★ 追加
+import 'mask_profile_list_page.dart';
+import 'login_page.dart'; 
 import 'package:drift/drift.dart' show Value;
+import '../utils/prompt_definitions.dart';
 
 class HomePage extends ConsumerWidget {
   HomePage({super.key});
@@ -26,6 +29,8 @@ class HomePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dbAsync = ref.watch(databaseProvider);
+    final currentUser = ref.watch(userProvider).currentUser;
+    final userName = currentUser?.username ?? 'ゲスト';
 
     return dbAsync.when(
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator(color: Colors.indigo))),
@@ -41,7 +46,6 @@ class HomePage extends ConsumerWidget {
         
         final List<String> matchingPatterns = ['T社（製番・項目番号）', '汎用（図書番号優先）'];
         
-        // ★ 修正: T社を削除し、削除メニューを追加
         final List<String> fixedMaskOptions = ['マスク処理なし', '動的マスク処理'];
         final List<String> customMaskOptions = projectState.maskProfiles.map((p) => p.profileName).toList();
         final List<String> maskOptions = [
@@ -54,12 +58,34 @@ class HomePage extends ConsumerWidget {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('検品アプリ'),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('検品アプリ', style: TextStyle(fontSize: 18)),
+                Text(
+                  '担当: $userName',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
+                ),
+              ],
+            ),
             actions: [
                IconButton(
                   icon: const Icon(Icons.settings),
                   onPressed: () {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const SmbSettingsPage()));
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.logout),
+                  tooltip: 'ログアウト',
+                  onPressed: () async {
+                    await ref.read(userProvider.notifier).logout();
+                    if (context.mounted) {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => const LoginPage()),
+                        (route) => false,
+                      );
+                    }
                   },
                 ),
             ],
@@ -177,6 +203,7 @@ class HomePage extends ConsumerWidget {
                       state.currentCaseNumber,
                       state.jsonSavePath,
                       notifier.updateJsonSavePath,
+                      processedBy: ref.read(userProvider).currentUser?.username,
                   );
                 },
               ),
@@ -252,17 +279,13 @@ class HomePage extends ConsumerWidget {
           onPressed: () => showAndExportNifudaListAction(
              context,
              state.nifudaData,
-             state.projectTitle,
-             state.projectFolderPath!,
              state.currentCaseNumber,
           ),
         ),
 
         const Divider(height: 24, thickness: 1),
 
-        // 6. マスク処理 (ドロップダウン)
         _buildDropdownSelector(
-          // 選択値がリストにない場合(削除された等)はデフォルトへ
           value: maskOptions.contains(state.selectedCompany) ? state.selectedCompany : 'マスク処理なし',
           items: maskOptions,
           prefix: 'マスク処理:',
@@ -278,12 +301,11 @@ class HomePage extends ConsumerWidget {
                 await notifier.loadMaskProfiles();
               }
             } else if (newValue == '- 設定の削除...') {
-              // ★ 追加: 削除画面へ遷移
               await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const MaskProfileListPage())
               );
-              await notifier.loadMaskProfiles(); // 戻ってきたらリスト更新
+              await notifier.loadMaskProfiles();
             } else {
               notifier.updateSelection(company: newValue);
             }
@@ -301,15 +323,41 @@ class HomePage extends ConsumerWidget {
                  _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
                  return;
              }
-             final newRows = await captureProcessAndConfirmProductListAction(
+             
+             // ★ 選択中のプロンプト定義を取得
+             final profile = state.maskProfiles.firstWhere(
+                 (p) => p.profileName == state.selectedCompany,
+                 orElse: () => const MaskProfile(id: 0, profileName: '', rectsJson: '', promptId: 'standard')
+             );
+             final definition = PromptRegistry.getById(profile.promptId);
+
+             // ★ リスト(values)を取得
+             final newRowsList = await captureProcessAndConfirmProductListAction(
                 context,
                 state.selectedCompany,
                 notifier.setLoading,
                 state.projectFolderPath!,
                 db,
              );
-             if (newRows != null && newRows.isNotEmpty) {
-                 await notifier.addProductListRows(newRows);
+
+             if (newRowsList != null && newRowsList.isNotEmpty) {
+                 // ★ Mapに変換
+                 List<Map<String, String>> mapRows = newRowsList.map((rowVals) {
+                    Map<String, String> map = {};
+                    for(int i=0; i<definition.displayFields.length; i++) {
+                      if (i < rowVals.length) {
+                        map[definition.displayFields[i]] = rowVals[i];
+                      }
+                    }
+                    return map;
+                 }).toList();
+
+                 // ★ 新しい保存メソッドを呼ぶ
+                 await notifier.addProductListMapRows(
+                   mapRows, 
+                   definition.displayFields,
+                   definition
+                 );
              }
           },
         ),
@@ -324,15 +372,41 @@ class HomePage extends ConsumerWidget {
                  _showErrorDialog(context, 'エラー', 'プロジェクトが選択されていません。');
                  return;
              }
-             final newRows = await captureProcessAndConfirmProductListActionGemini(
+             
+             // ★ 選択中のプロンプト定義を取得
+             final profile = state.maskProfiles.firstWhere(
+                 (p) => p.profileName == state.selectedCompany,
+                 orElse: () => const MaskProfile(id: 0, profileName: '', rectsJson: '', promptId: 'standard')
+             );
+             final definition = PromptRegistry.getById(profile.promptId);
+
+             // ★ リスト(values)を取得
+             final newRowsList = await captureProcessAndConfirmProductListActionGemini(
                 context,
                 state.selectedCompany,
                 notifier.setLoading,
                 state.projectFolderPath!,
                 db,
              );
-             if (newRows != null && newRows.isNotEmpty) {
-                 await notifier.addProductListRows(newRows);
+
+             if (newRowsList != null && newRowsList.isNotEmpty) {
+                 // ★ Mapに変換
+                 List<Map<String, String>> mapRows = newRowsList.map((rowVals) {
+                    Map<String, String> map = {};
+                    for(int i=0; i<definition.displayFields.length; i++) {
+                      if (i < rowVals.length) {
+                        map[definition.displayFields[i]] = rowVals[i];
+                      }
+                    }
+                    return map;
+                 }).toList();
+
+                 // ★ 新しい保存メソッドを呼ぶ
+                 await notifier.addProductListMapRows(
+                   mapRows, 
+                   definition.displayFields,
+                   definition
+                 );
              }
           },
         ),
@@ -351,7 +425,6 @@ class HomePage extends ConsumerWidget {
         
         const Divider(height: 24, thickness: 1),
 
-        // 10. 照合パターン
         _buildDropdownSelector(
           value: state.selectedMatchingPattern,
           items: matchingPatterns,
@@ -438,7 +511,6 @@ class HomePage extends ConsumerWidget {
         child: DropdownButton<String>(
           value: value,
           items: items.map((String item) {
-            // 区切り線や特別メニューのスタイル調整
             final isSpecial = item.startsWith('+') || item.startsWith('-');
             final isDivider = item.startsWith('---');
             

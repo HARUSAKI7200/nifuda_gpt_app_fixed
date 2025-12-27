@@ -37,7 +37,6 @@ import 'streaming_progress_dialog.dart';
 import '../utils/gemini_service.dart';
 import '../state/project_state.dart';
 import '../database/app_database.dart';
-// ★ 追加: プロンプト定義
 import '../utils/prompt_definitions.dart';
 
 // --- Constants ---
@@ -184,7 +183,10 @@ Future<String?> saveProjectAction(
   String currentCaseNumber,
   String? existingJsonSavePath,
   void Function(String?) updateJsonSavePath,
-  { String? customSavePath } 
+  { 
+    String? customSavePath,
+    String? processedBy,
+  } 
 ) async {
   try {
     String fileName = '$projectTitle.json';
@@ -257,6 +259,8 @@ Future<String?> saveProjectAction(
     final projectData = {
       'projectTitle': projectTitle,
       'projectFolderPath': currentProjectFolderPath,
+      'processedBy': processedBy ?? 'Unknown',
+      'updatedAt': DateTime.now().toIso8601String(),
       'nifudaHeader': nifudaData.isNotEmpty ? nifudaData[0] : [],
       'productListHeader': productListKariData.isNotEmpty ? productListKariData[0] : [],
       'cases': casesMap, 
@@ -277,7 +281,7 @@ Future<String?> saveProjectAction(
         final baseSavesDir = p.join(p.dirname(currentProjectFolderPath), 'SAVES');
         final relativePath = p.relative(saveFilePath, from: baseSavesDir);
         showCustomSnackBar(context, 'プロジェクトを SAVES/$relativePath にて $actionType しました。\n(全ケース統合保存)', durationSeconds: 3);
-        FlutterLogs.logInfo('PROJECT_ACTION', 'SAVE_SUCCESS', 'Project $projectTitle $actionType to $saveFilePath (Structured)');
+        FlutterLogs.logInfo('PROJECT_ACTION', 'SAVE_SUCCESS', 'Project $projectTitle $actionType to $saveFilePath (Structured) by $processedBy');
       }
     }
 
@@ -409,7 +413,7 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
         isProductListOcr: false,
         projectFolderPath: projectFolderPath,
         caseNumber: currentCaseNumber,
-        aiService: sendImageToGPT, // GPT用関数を渡す
+        aiService: sendImageToGPT, 
     )),
   );
 
@@ -470,8 +474,6 @@ Future<List<List<String>>?> captureProcessAndConfirmNifudaAction(
 void showAndExportNifudaListAction(
   BuildContext context,
   List<List<String>> nifudaData,
-  String projectTitle,
-  String projectFolderPath,
   String currentCaseNumber,
 ) {
   const int caseNoColumnIndex = 8;
@@ -500,24 +502,20 @@ void showAndExportNifudaListAction(
       title: '荷札リスト (Case $currentCaseNumber)',
       data: filteredData,
       headers: filteredData.first,
-      projectFolderPath: projectFolderPath,
-      subfolder: '荷札リスト/$currentCaseNumber',
     ),
   );
 }
 
-// ★★★ captureProcessAndConfirmProductListAction (修正: AppDatabaseを受け取る) ★★★
 Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   BuildContext context,
   String selectedCompany,
   void Function(bool) setLoading,
   String projectFolderPath,
-  AppDatabase db, // ★ DBインスタンス
+  AppDatabase db, 
 ) async {
   List<String> imageFilePaths = [];
-  String? promptIdToUse; // ★ 追加
+  String? promptIdToUse; 
 
-  // 1. Google ML Kit Document Scanner を起動
   try {
     final options = DocumentScannerOptions(
       documentFormat: DocumentFormat.jpeg,
@@ -541,13 +539,11 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     return null;
   }
 
-  // 2. マスク処理 & PromptID取得 (バックグラウンドで実行)
   if (context.mounted) _showLoadingDialog(context, '画像を処理中...');
 
   List<String> processedImagePaths = [];
   
   try {
-    // 一時ディレクトリ
     final tempDir = await getTemporaryDirectory();
     final redactionKeywords = [
       '東芝', '東芝エネルギーシステムズ', '東芝インフラシステムズ', '東芝エレベータ',
@@ -556,13 +552,11 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       'TMEIC', '東芝三菱電機産業システム',
     ];
 
-    // ★ 修正: DBからカスタムマスク設定とプロンプトIDを読み込む
     List<Rect> customRelativeRects = [];
     if (selectedCompany != 'マスク処理なし' && selectedCompany != '動的マスク処理') {
       try {
         final profile = await db.maskProfilesDao.getProfileByName(selectedCompany);
         if (profile != null) {
-          // プロンプトIDを取得
           promptIdToUse = profile.promptId;
           
           final List<dynamic> list = jsonDecode(profile.rectsJson);
@@ -585,23 +579,20 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
       final rawBytes = await originalFile.readAsBytes();
       
       img.Image? imageObj = img.decodeImage(rawBytes);
-      if (imageObj == null) continue; // スキップ
+      if (imageObj == null) continue; 
 
       String internalTemplateName = 'none';
       if (selectedCompany == '動的マスク処理') internalTemplateName = 'dynamic';
 
       if (internalTemplateName == 'dynamic') {
-        // 動的マスク
         final rects = await KeywordDetector.detectKeywords(originalPath, redactionKeywords);
         if (rects.isNotEmpty) {
            imageObj = applyMaskToImage(imageObj, template: 'dynamic', dynamicMaskRects: rects);
         }
       } else if (customRelativeRects.isNotEmpty) {
-        // カスタムマスク適用
         imageObj = applyMaskToImage(imageObj, relativeMaskRects: customRelativeRects);
       }
 
-      // 保存 (PNG)
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final savedPath = '${tempDir.path}/processed_scan_$i\_$timestamp.png';
       await File(savedPath).writeAsBytes(img.encodePng(imageObj));
@@ -623,11 +614,8 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     return null;
   }
 
-  // 3. プロジェクトフォルダへの保存
   unawaited(_saveScannedProductImages(context, projectFolderPath, processedImagePaths));
 
-  // 4. プレビュー
-  
   if (context.mounted) _showLoadingDialog(context, 'プレビューを準備中...');
 
   Uint8List firstImageBytes;
@@ -691,17 +679,14 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
     return null;
   }
 
-  // 5. GPT送信 & OCR解析
   List<Map<String, dynamic>?> allAiRawResults = [];
   
-  // ★ プロンプトIDを決定 (デフォルトは standard)
   final String actualPromptId = promptIdToUse ?? 'standard';
 
   for (int i = 0; i < finalImagesToSend.length; i++) {
       if (!context.mounted) break;
       final imageBytes = finalImagesToSend[i];
 
-      // ★ 修正: promptId を渡す
       final Stream<String> stream = sendImageToGPTStream(
         imageBytes,
         promptId: actualPromptId,
@@ -719,6 +704,13 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
           _logError('OCR_ACTION', 'PRODUCT_LIST_GPT_STREAM_FAIL', 'Stream failed or cancelled for image ${i + 1}', null);
           if (context.mounted) _showErrorDialog(context, '抽出エラー', '${i + 1}枚目の画像の抽出に失敗しました。処理を中断します。');
           return allAiRawResults.isNotEmpty ? await _processRawProductResults(context, allAiRawResults, actualPromptId) : null;
+      }
+
+      // 修正: 生のレスポンスをログ出力
+      if (kDebugMode) {
+        debugPrint('================= [GPT Product List Raw Response (${i + 1})] =================');
+        debugPrint(rawJsonResponse);
+        debugPrint('========================================================================');
       }
 
       try {
@@ -739,7 +731,6 @@ Future<List<List<String>>?> captureProcessAndConfirmProductListAction(
   }
 
   if (!context.mounted) return null;
-  // ★ 修正: promptId を渡して後処理
   return _processRawProductResults(context, allAiRawResults, actualPromptId);
 }
 
@@ -749,39 +740,44 @@ Future<List<List<String>>?> _processRawProductResults(
   String promptId, 
 ) async {
   List<Map<String, String>> allExtractedProductRows = [];
-  const List<String> expectedProductFields = ProductListOcrConfirmPage.productFields;
-
-  // ★ PromptRegistryから定義を取得
+  
   final definition = PromptRegistry.getById(promptId);
+  final List<String> expectedProductFields = definition.displayFields;
 
   for(final result in allAiRawResults){
      if (result != null && result.containsKey('products') && result['products'] is List) {
         final List<dynamic> productListRaw = result['products'];
-        // commonOrderNoは取得するが、fullRowタイプの場合は使わないこともある
         String commonOrderNo = result['commonOrderNo']?.toString() ?? '';
 
         for (final item in productListRaw) {
           if (item is Map) {
             Map<String, String> row = {};
             String finalOrderNo = '';
+            String finalItemNo = '';
 
-            // ★ タイプ別の処理分岐
             switch (definition.type) {
               case PromptType.tmeic:
-                // TMEIC: commonNo + Note
                 final String note = item['備考(NOTE)']?.toString() ?? '';
                 finalOrderNo = '$commonOrderNo $note'.trim();
                 break;
+              
+              case PromptType.tmeic_ups_2:
+                final trimmedCommon = commonOrderNo.trim();
+                final splitIndex = trimmedCommon.indexOf(RegExp(r'\s+'));
+                if (splitIndex != -1) {
+                  finalOrderNo = trimmedCommon.substring(0, splitIndex);
+                  finalItemNo = trimmedCommon.substring(splitIndex).trim();
+                } else {
+                  finalOrderNo = trimmedCommon;
+                }
+                break;
 
               case PromptType.fullRow:
-                // 行完結型: 行内のデータをそのまま使う
-                // プロンプト側で "ORDER No." に入れているはずだが、念のため揺らぎ対応
                 finalOrderNo = item['ORDER No.']?.toString() ?? item['製番']?.toString() ?? '';
                 break;
 
               case PromptType.standard:
               default:
-                // 標準: commonNo + Remarks
                 final String remarks = item['備考(REMARKS)']?.toString() ?? '';
                 finalOrderNo = commonOrderNo;
                 if (commonOrderNo.isNotEmpty && remarks.isNotEmpty) {
@@ -794,13 +790,14 @@ Future<List<List<String>>?> _processRawProductResults(
                 break;
             }
 
-            // 各フィールドのマッピング
             for (String field in expectedProductFields) {
-              if (field == 'ORDER No.') {
+              if ((field == 'ORDER No.' || field == '製番') && finalOrderNo.isNotEmpty) {
                 row[field] = finalOrderNo;
-              } else {
-                // プロンプトが出力したJSONキーと、アプリのフィールド名のマッチング
-                // プロンプト側でアプリのフィールド名に合わせて出力するように指示しているため、基本はそのまま取得
+              } 
+              else if ((field == 'ITEM OF SPARE' || field == '項番') && finalItemNo.isNotEmpty) {
+                row[field] = finalItemNo;
+              }
+              else {
                 row[field] = item[field]?.toString() ?? '';
               }
             }
@@ -814,8 +811,13 @@ Future<List<List<String>>?> _processRawProductResults(
 
   if (allExtractedProductRows.isNotEmpty) {
       FlutterLogs.logInfo('OCR_ACTION', 'PRODUCT_LIST_CONFIRM', '${allExtractedProductRows.length} rows extracted for confirmation.');
+      
       return Navigator.push<List<List<String>>>(
-        context, MaterialPageRoute(builder: (_) => ProductListOcrConfirmPage(extractedProductRows: allExtractedProductRows)),
+        context, 
+        MaterialPageRoute(builder: (_) => ProductListOcrConfirmPage(
+          extractedProductRows: allExtractedProductRows,
+          displayFields: expectedProductFields,
+        )),
       );
   } else {
       _logError('OCR_ACTION', 'PRODUCT_LIST_NO_RESULT', 'No valid product list data extracted after processing all images.', null);
@@ -921,6 +923,7 @@ Future<String?> exportDataToStorageAction({
   required String currentCaseNumber,
   required String? jsonSavePath,
   required String inspectionStatus,
+  String? processedBy, 
 }) async {
   if (!context.mounted) return null;
   _showLoadingDialog(context, '共有フォルダ(SMB)へ保存中です...');
@@ -946,6 +949,7 @@ Future<String?> exportDataToStorageAction({
       currentCaseNumber,
       jsonSavePath,
       (_) {},
+      processedBy: processedBy, 
     );
     if (finalJsonPath == null) {
        throw Exception('JSONデータファイルの最終保存に失敗しました。');
@@ -1050,6 +1054,7 @@ Future<String?> shareDataViaAppsAction({
   required String currentCaseNumber,
   required String? jsonSavePath,
   required String inspectionStatus,
+  String? processedBy, 
 }) async {
   if (!context.mounted) return null;
   _showLoadingDialog(context, '共有ファイルを作成中です...');
@@ -1069,6 +1074,7 @@ Future<String?> shareDataViaAppsAction({
       jsonSavePath,
       (_) {}, 
       customSavePath: tempJsonPath,
+      processedBy: processedBy, 
     );
     if (finalJsonPath == null) {
        throw Exception('一時JSONデータファイルの作成に失敗しました。');
@@ -1196,8 +1202,6 @@ void showAndExportProductListAction(
       title: '製品リスト (全体)', 
       data: productListData, 
       headers: productListData.first, 
-      projectFolderPath: projectFolderPath,
-      subfolder: '製品リスト', 
     ),
   );
 }
